@@ -15,6 +15,8 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import crypto from 'node:crypto';
+// Unlike real Node, Deno doesn't expose Buffer as a global — needs an explicit import.
+import { Buffer } from 'node:buffer';
 
 const EDUSET_BASE_URL = 'https://api.cbsh.edu-set.com';
 
@@ -40,15 +42,77 @@ function decryptToken(payload: string, secret: string): string {
   return decrypted.toString('utf8');
 }
 
-interface SelfStudyStudent {
+interface EdusetRoom {
+  id: number;
+  hasSeats: boolean;
+}
+interface EdusetSeatOccupation {
+  seatId: number;
+  period: number;
+  studentId: number;
+  state?: string;
+}
+interface EdusetStudent {
+  id: number;
   grade: number;
   classNo: number;
   number: number;
 }
 
 /** Mirrors parseStudentId()'s encoding elsewhere in the codebase: grade*1000 + classNo*100 + number */
-function toStudentId(s: SelfStudyStudent): string {
+function toStudentId(s: { grade: number; classNo: number; number: number }): string {
   return String(s.grade * 1000 + s.classNo * 100 + s.number).padStart(4, '0');
+}
+
+async function edusetGet<T>(path: string, token: string): Promise<T> {
+  const res = await fetch(`${EDUSET_BASE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}`, 'x-jwt': token },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * /selfstudy/search (a single call covering every room) 500s outright for
+ * this admin-registered token's permission level — confirmed by testing
+ * directly against the live API, not assumed. The web app's /study page
+ * already hit this exact wall and works around it by falling back to each
+ * room's occupations endpoint instead, which this account *can* read; ported
+ * the same approach here rather than depending on the broken endpoint.
+ */
+async function getAppliedStudentIds(edusetToken: string, dateStr: string): Promise<Set<string>> {
+  const rooms = await edusetGet<EdusetRoom[]>('/rooms', edusetToken);
+  const applied = new Set<string>();
+  const studentCache = new Map<number, EdusetStudent>();
+
+  for (const room of rooms) {
+    let occupations: EdusetSeatOccupation[];
+    try {
+      occupations = await edusetGet<EdusetSeatOccupation[]>(`/rooms/${room.id}/seats/occupations?date=${dateStr}`, edusetToken);
+    } catch {
+      continue; // this room's occupations aren't readable with this account either — skip, don't fail the whole run
+    }
+
+    const uniqueStudentIds = [...new Set(occupations.map((o) => o.studentId))];
+    await Promise.all(
+      uniqueStudentIds
+        .filter((id) => !studentCache.has(id))
+        .map(async (id) => {
+          try {
+            studentCache.set(id, await edusetGet<EdusetStudent>(`/students/${id}`, edusetToken));
+          } catch {
+            // couldn't resolve this student's grade/class/number — leave them unresolved
+          }
+        })
+    );
+
+    for (const o of occupations) {
+      const student = studentCache.get(o.studentId);
+      if (student) applied.add(toStudentId(student));
+    }
+  }
+
+  return applied;
 }
 
 // --- FCM via raw REST + a service-account JWT, instead of firebase-admin
@@ -123,16 +187,12 @@ Deno.serve(async () => {
   }
 
   const dateStr = localDateStrKST();
-  const searchRes = await fetch(`${EDUSET_BASE_URL}/selfstudy/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${edusetToken}`, 'x-jwt': edusetToken },
-    body: JSON.stringify({ date: dateStr }),
-  });
-  if (!searchRes.ok) {
-    return Response.json({ message: `자습신청 조회 실패 (HTTP ${searchRes.status})` }, { status: 502 });
+  let appliedIds: Set<string>;
+  try {
+    appliedIds = await getAppliedStudentIds(edusetToken, dateStr);
+  } catch (err) {
+    return Response.json({ message: '자습신청 조회 실패: ' + (err as Error).message }, { status: 502 });
   }
-  const entries: Array<{ student: SelfStudyStudent }> = await searchRes.json();
-  const appliedIds = new Set(entries.map((e) => toStudentId(e.student)));
 
   // profiles(id) <- device_tokens.user_id FK lets PostgREST embed this automatically.
   const { data: profiles, error: profilesError } = await admin
