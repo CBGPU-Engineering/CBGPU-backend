@@ -13,7 +13,7 @@
 //   FIREBASE_SERVICE_ACCOUNT_JSON — the Firebase service account key, as JSON text
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are provided automatically by Supabase.
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import crypto from 'node:crypto';
 
 const EDUSET_BASE_URL = 'https://api.cbsh.edu-set.com';

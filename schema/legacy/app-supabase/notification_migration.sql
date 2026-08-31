@@ -18,8 +18,13 @@ create table if not exists device_tokens (
 alter table device_tokens enable row level security;
 
 -- 본인 토큰만 등록/삭제 가능. 발송(cron)은 서비스 롤로 하므로 RLS를 안 탄다.
+-- (select auth.uid())로 감싸는 건 Supabase RLS 성능 권장 패턴 — 행마다가 아니라
+-- 쿼리당 한 번만 평가되게 한다. to authenticated로 무권한 anon 요청은 애초에 배제.
 create policy "device_tokens_own" on device_tokens
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 create index if not exists device_tokens_user_id_idx on device_tokens (user_id);
 
