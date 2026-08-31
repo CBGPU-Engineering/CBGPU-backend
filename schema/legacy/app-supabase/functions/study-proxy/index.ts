@@ -108,11 +108,21 @@ Deno.serve(async (req) => {
 
   const body = req.method === 'GET' ? undefined : await req.text();
 
-  const upstream = await fetch(targetUrl, {
-    method: req.method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-jwt': token },
-    body,
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-jwt': token },
+      body,
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
+    return Response.json(
+      { message: timedOut ? '학생관리시스템 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.' : '학생관리시스템 연결에 실패했습니다.' },
+      { status: timedOut ? 504 : 502, headers: corsHeaders },
+    );
+  }
 
   const responseBody = await upstream.text();
   return new Response(responseBody, {
