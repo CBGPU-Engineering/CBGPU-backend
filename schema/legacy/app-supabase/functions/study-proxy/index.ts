@@ -60,6 +60,14 @@ async function requireApprovedUser(req: Request): Promise<boolean> {
 let cachedToken: { value: string | null; fetchedAt: number } | null = null;
 const TOKEN_CACHE_TTL_MS = 60_000;
 
+function getResponseContentType(headers: Headers): string {
+  // Duplicate upstream Content-Type headers are comma-joined by Fetch. Passing
+  // that joined value to Response produces "Invalid media type" in Deno, so
+  // forward only the first complete media type.
+  const value = headers.get('content-type');
+  return value?.split(',')[0].trim() || 'application/json';
+}
+
 async function getSharedToken(): Promise<string | null> {
   if (cachedToken && Date.now() - cachedToken.fetchedAt < TOKEN_CACHE_TTL_MS) return cachedToken.value;
 
@@ -109,6 +117,6 @@ Deno.serve(async (req) => {
   const responseBody = await upstream.text();
   return new Response(responseBody, {
     status: upstream.status,
-    headers: { ...corsHeaders, 'Content-Type': upstream.headers.get('content-type') ?? 'application/json', 'Cache-Control': 'no-store' },
+    headers: { ...corsHeaders, 'Content-Type': getResponseContentType(upstream.headers), 'Cache-Control': 'no-store' },
   });
 });
