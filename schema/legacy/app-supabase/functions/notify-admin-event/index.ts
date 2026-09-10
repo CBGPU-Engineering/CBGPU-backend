@@ -1,6 +1,6 @@
 // Called by AFTER INSERT triggers on profiles (new signup) and reservations
 // (new GPU request) — see ../../notify_triggers_migration.sql. Notifies
-// every admin (profiles.is_admin = true). Android-only, same FCM setup as
+// every admin (profiles.is_admin = true). Android + iOS, same FCM setup as
 // the rest of the app.
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import { corsHeaders, handleOptions } from '../_shared/cors.ts';
@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
   const adminIds = (admins ?? []).map((a: { id: string }) => a.id);
   if (adminIds.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no admins opted in' }, { headers: corsHeaders });
 
-  const { data: tokenRows } = await admin.from('device_tokens').select('token').in('user_id', adminIds).eq('platform', 'android');
+  const { data: tokenRows } = await admin.from('device_tokens').select('token').in('user_id', adminIds).in('platform', ['android', 'ios']);
   const deviceTokens = (tokenRows ?? []).map((t: { token: string }) => t.token);
   if (deviceTokens.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no device tokens' }, { headers: corsHeaders });
 

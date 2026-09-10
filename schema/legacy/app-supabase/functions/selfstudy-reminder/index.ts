@@ -215,7 +215,7 @@ Deno.serve(async () => {
     if (!profile.student_id || appliedIds.has(profile.student_id)) continue;
 
     const tokens = ((profile.device_tokens ?? []) as { token: string; platform: string }[])
-      .filter((t) => t.platform === 'android')
+      .filter((t) => t.platform === 'android' || t.platform === 'ios')
       .map((t) => t.token);
 
     for (const deviceToken of tokens) {

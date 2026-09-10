@@ -2,7 +2,7 @@
 // transitions to 'done' (see ../../notify_triggers_migration.sql). The
 // mirror image of notify-job-manager: that one tells the manager a job came
 // in, this one tells the original requester it's ready to collect.
-// Android-only, matching the FCM setup used everywhere else in this app.
+// Android + iOS, matching the FCM setup used everywhere else in this app.
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import { corsHeaders, handleOptions } from '../_shared/cors.ts';
 import { getFcmAccessToken, sendFcmPush } from '../_shared/fcm.ts';
@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
     return Response.json({ ok: true, notified: 0, reason: 'requester opted out' }, { headers: corsHeaders });
   }
 
-  const { data: tokenRows } = await admin.from('device_tokens').select('token').eq('user_id', job.user_id).eq('platform', 'android');
+  const { data: tokenRows } = await admin.from('device_tokens').select('token').eq('user_id', job.user_id).in('platform', ['android', 'ios']);
   const deviceTokens = (tokenRows ?? []).map((t: { token: string }) => t.token);
   if (deviceTokens.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no device tokens' }, { headers: corsHeaders });
 

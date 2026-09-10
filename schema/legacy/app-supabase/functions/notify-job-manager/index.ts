@@ -5,7 +5,7 @@
 //   - otherwise, every manager of the target printer (print) or every
 //     laser-cut manager (laser) — same "first to accept gets it" pool the
 //     Admin/Manufacturing screens already assume.
-// Android-only, matching the FCM setup used everywhere else in this app.
+// Android + iOS, matching the FCM setup used everywhere else in this app.
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import { corsHeaders, handleOptions } from '../_shared/cors.ts';
 import { getFcmAccessToken, sendFcmPush } from '../_shared/fcm.ts';
@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
   targetUserIds = (optedInProfiles ?? []).map((p: { id: string }) => p.id);
   if (targetUserIds.length === 0) return Response.json({ ok: true, notified: 0, reason: 'managers opted out' }, { headers: corsHeaders });
 
-  const { data: tokenRows } = await admin.from('device_tokens').select('token').in('user_id', targetUserIds).eq('platform', 'android');
+  const { data: tokenRows } = await admin.from('device_tokens').select('token').in('user_id', targetUserIds).in('platform', ['android', 'ios']);
   const deviceTokens = (tokenRows ?? []).map((t: { token: string }) => t.token);
   if (deviceTokens.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no device tokens' }, { headers: corsHeaders });
 
