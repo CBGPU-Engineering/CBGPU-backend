@@ -32,10 +32,11 @@ Deno.serve(async (req) => {
     return Response.json({ message: 'invalid type' }, { status: 400, headers: corsHeaders });
   }
 
+  const prefColumn = type === 'signup' ? 'notify_admin_signup' : 'notify_admin_gpu_request';
   const admin = createClient(supabaseUrl, serviceRoleKey);
-  const { data: admins } = await admin.from('profiles').select('id').eq('is_admin', true);
+  const { data: admins } = await admin.from('profiles').select('id').eq('is_admin', true).eq(prefColumn, true);
   const adminIds = (admins ?? []).map((a: { id: string }) => a.id);
-  if (adminIds.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no admins' }, { headers: corsHeaders });
+  if (adminIds.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no admins opted in' }, { headers: corsHeaders });
 
   const { data: tokenRows } = await admin.from('device_tokens').select('token').in('user_id', adminIds).eq('platform', 'android');
   const deviceTokens = (tokenRows ?? []).map((t: { token: string }) => t.token);

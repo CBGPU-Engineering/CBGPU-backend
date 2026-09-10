@@ -199,7 +199,8 @@ Deno.serve(async () => {
     .from('profiles')
     .select('id, student_id, device_tokens(token, platform)')
     .not('student_id', 'is', null)
-    .neq('is_approved', false);
+    .neq('is_approved', false)
+    .eq('notify_selfstudy_reminder', true);
 
   if (profilesError) {
     return Response.json({ message: '프로필 조회 실패: ' + profilesError.message }, { status: 500 });

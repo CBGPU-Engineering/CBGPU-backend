@@ -3,6 +3,9 @@
 -- notification_migration.sql). Fires a pg_net POST to a notify-* Edge
 -- Function on the relevant table's AFTER INSERT — fire-and-forget, doesn't
 -- block the INSERT itself since pg_net queues the request async.
+-- See also notification_prefs_migration.sql — per-user on/off toggles for
+-- every notification type here, plus the AFTER UPDATE (job completed)
+-- counterpart to the AFTER INSERT triggers below.
 --
 -- Before running: deploy the two functions and set the shared secret
 --   supabase functions deploy notify-job-manager --no-verify-jwt

@@ -43,6 +43,10 @@ Deno.serve(async (req) => {
 
   if (targetUserIds.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no managers to notify' }, { headers: corsHeaders });
 
+  const { data: optedInProfiles } = await admin.from('profiles').select('id').in('id', targetUserIds).eq('notify_job_new', true);
+  targetUserIds = (optedInProfiles ?? []).map((p: { id: string }) => p.id);
+  if (targetUserIds.length === 0) return Response.json({ ok: true, notified: 0, reason: 'managers opted out' }, { headers: corsHeaders });
+
   const { data: tokenRows } = await admin.from('device_tokens').select('token').in('user_id', targetUserIds).eq('platform', 'android');
   const deviceTokens = (tokenRows ?? []).map((t: { token: string }) => t.token);
   if (deviceTokens.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no device tokens' }, { headers: corsHeaders });
