@@ -2,10 +2,10 @@
 import { corsHeaders, handleOptions } from '../_shared/cors.ts';
 
 const GPUS = [
-  { id: 1, url: 'https://bbb1f73aa6bd31.lhr.life' },
-  { id: 2, url: 'https://109a33522c2e35.lhr.life' },
-  { id: 3, url: 'https://ccb4e81a1e065b.lhr.life' },
-  { id: 4, url: 'https://d145edf2d1b8f1.lhr.life' },
+  { id: 1, url: 'https://valley-cst-syntax-serum.trycloudflare.com' },
+  { id: 2, url: 'https://lakes-signatures-utility-entering.trycloudflare.com' },
+  { id: 3, url: 'https://preparation-barbara-ocean-physics.trycloudflare.com' },
+  { id: 4, url: 'https://bite-tabs-dual-integrated.trycloudflare.com' },
 ];
 
 async function ping(url: string): Promise<'online' | 'offline'> {
