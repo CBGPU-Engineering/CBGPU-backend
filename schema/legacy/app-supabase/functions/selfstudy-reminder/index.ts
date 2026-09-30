@@ -1,232 +1,171 @@
-// Supabase Edge Function (Deno) — scheduled by pg_cron (see ../notification_migration.sql)
-// at 04:00 UTC (13:00 KST) daily. Checks whether each approved user has
-// applied for 자습신청 today via the shared admin-registered eduset token
-// (same one used by the web app's /study page — no per-user eduset login),
-// and sends an Android FCM push to anyone who hasn't.
-//
-// Deliberately backend-agnostic of both client apps (Next.js web, Flutter):
-// lives with the database, not with either frontend, since only the schema
-// (profiles/eduset_settings/device_tokens) is a real shared dependency.
-//
-// Required secrets (supabase secrets set ...):
-//   EDUSET_TOKEN_SECRET        — same value as the Next.js app's .env.local
-//   FIREBASE_SERVICE_ACCOUNT_JSON — the Firebase service account key, as JSON text
-// SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are provided automatically by Supabase.
-
+// One cron invocation every 15 minutes; all user-facing times are KST.
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import crypto from 'node:crypto';
-// Unlike real Node, Deno doesn't expose Buffer as a global — needs an explicit import.
 import { Buffer } from 'node:buffer';
+import { getFcmAccessToken } from '../_shared/fcm.ts';
 
-const EDUSET_BASE_URL = 'https://api.cbsh.edu-set.com';
+const API = 'https://api.cbsh.edu-set.com';
+type Device = { token: string; platform: string };
+type Profile = {
+  id: string; student_id: string | null; selfstudy_reminder_time: string;
+  selfstudy_reminder_repeat_minutes: number; selfstudy_reminder_repeat_count: number;
+  device_tokens: Device[];
+};
+type Attempt = { user_id: string; attempt: number; claimed_at: string };
+type Policy = { timetable: { presets: Record<string, unknown[]>; assign: Record<string, string>; exception: Record<string, string> } };
+type Student = { id: number; grade: number; classNo: number; number: number };
+type Occupation = { studentId: number; period: number; state?: string };
+type SearchEntry = { period: number; status: string; student: Student };
 
-function localDateStrKST(): string {
-  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+function kstNow() {
+  const shifted = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return { date: shifted.toISOString().slice(0, 10), minute: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(), day: shifted.getUTCDay() };
 }
-
-// Same AES-256-GCM scheme as src/lib/edusetTokenCrypto.ts in the Next.js app —
-// must stay byte-for-byte identical, both apps decrypt the same stored value.
-function decryptToken(payload: string, secret: string): string {
-  const key = crypto.createHash('sha256').update(secret).digest();
+function minutes(time: string) { const [h, m] = time.split(':').map(Number); return h * 60 + m; }
+function studentNumber(student: Student) { return String(student.grade * 1000 + student.classNo * 100 + student.number).padStart(4, '0'); }
+function decryptToken(payload: string, secret: string) {
   const raw = Buffer.from(payload, 'base64');
-  const iv = raw.subarray(0, 12);
-  const tag = raw.subarray(12, 28);
-  const encrypted = raw.subarray(28);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(tag);
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-  return decrypted.toString('utf8');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', crypto.createHash('sha256').update(secret).digest(), raw.subarray(0, 12));
+  decipher.setAuthTag(raw.subarray(12, 28));
+  return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
 }
-
-interface EdusetRoom {
-  id: number;
-  hasSeats: boolean;
+async function get<T>(path: string, token: string): Promise<T> {
+  const response = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}`, 'x-jwt': token }, signal: AbortSignal.timeout(12000) });
+  if (!response.ok) throw new Error(`EduSet ${path}: HTTP ${response.status}`);
+  return response.json();
 }
-interface EdusetSeatOccupation {
-  seatId: number;
-  period: number;
-  studentId: number;
-  state?: string;
-}
-interface EdusetStudent {
-  id: number;
-  grade: number;
-  classNo: number;
-  number: number;
-}
-
-/** Mirrors parseStudentId()'s encoding elsewhere in the codebase: grade*1000 + classNo*100 + number */
-function toStudentId(s: { grade: number; classNo: number; number: number }): string {
-  return String(s.grade * 1000 + s.classNo * 100 + s.number).padStart(4, '0');
-}
-
-async function edusetGet<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${EDUSET_BASE_URL}${path}`, {
-    headers: { Authorization: `Bearer ${token}`, 'x-jwt': token },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-/**
- * /selfstudy/search (a single call covering every room) 500s outright for
- * this admin-registered token's permission level — confirmed by testing
- * directly against the live API, not assumed. The web app's /study page
- * already hit this exact wall and works around it by falling back to each
- * room's occupations endpoint instead, which this account *can* read; ported
- * the same approach here rather than depending on the broken endpoint.
- */
-async function getAppliedStudentIds(edusetToken: string, dateStr: string): Promise<Set<string>> {
-  const rooms = await edusetGet<EdusetRoom[]>('/rooms', edusetToken);
-  const applied = new Set<string>();
-  const studentCache = new Map<number, EdusetStudent>();
-
-  for (const room of rooms) {
-    let occupations: EdusetSeatOccupation[];
-    try {
-      occupations = await edusetGet<EdusetSeatOccupation[]>(`/rooms/${room.id}/seats/occupations?date=${dateStr}`, edusetToken);
-    } catch {
-      continue; // this room's occupations aren't readable with this account either — skip, don't fail the whole run
+async function appliedPeriods(token: string, date: string): Promise<Map<string, Set<number>>> {
+  // Search includes pending applications and non-seat rooms when the shared
+  // token can access it. The current token receives HTTP 500, so fall back to
+  // the same per-room occupations used by the study page.
+  try {
+    const response = await fetch(`${API}/selfstudy/search`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'x-jwt': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (response.ok) {
+      const entries = await response.json() as SearchEntry[];
+      const complete = new Map<string, Set<number>>();
+      for (const entry of entries) {
+        if (entry.status === 'REJECTED') continue;
+        const number = studentNumber(entry.student);
+        if (!complete.has(number)) complete.set(number, new Set());
+        complete.get(number)!.add(entry.period);
+      }
+      return complete;
     }
-
-    const uniqueStudentIds = [...new Set(occupations.map((o) => o.studentId))];
-    await Promise.all(
-      uniqueStudentIds
-        .filter((id) => !studentCache.has(id))
-        .map(async (id) => {
-          try {
-            studentCache.set(id, await edusetGet<EdusetStudent>(`/students/${id}`, edusetToken));
-          } catch {
-            // couldn't resolve this student's grade/class/number — leave them unresolved
-          }
-        })
-    );
-
-    for (const o of occupations) {
-      const student = studentCache.get(o.studentId);
-      if (student) applied.add(toStudentId(student));
+  } catch {
+    // Per-room fallback below.
+  }
+  const [rooms, students] = await Promise.all([get<{ id: number }[]>('/rooms', token), get<Student[]>('/students', token)]);
+  const numbers = new Map(students.map(student => [student.id, studentNumber(student)]));
+  const applied = new Map<string, Set<number>>();
+  // A failed room makes absence uncertain. Fail the run instead of sending a false reminder.
+  for (let offset = 0; offset < rooms.length; offset += 8) {
+    const occupations = await Promise.all(rooms.slice(offset, offset + 8).map(room =>
+      get<Occupation[]>(`/rooms/${room.id}/seats/occupations?date=${date}`, token)));
+    for (const room of occupations) for (const occupation of room) {
+      if (occupation.state === 'REJECTED') continue;
+      const number = numbers.get(occupation.studentId);
+      if (!number) throw new Error(`Unknown EduSet student ${occupation.studentId}`);
+      if (!applied.has(number)) applied.set(number, new Set());
+      applied.get(number)!.add(occupation.period);
     }
   }
-
   return applied;
 }
-
-// --- FCM via raw REST + a service-account JWT, instead of firebase-admin
-// (which depends on gRPC and isn't a good fit for the Deno edge runtime). ---
-
-let cachedAccessToken: { token: string; expiresAt: number } | null = null;
-
-async function getFcmAccessToken(serviceAccount: { client_email: string; private_key: string }): Promise<string> {
-  if (cachedAccessToken && Date.now() < cachedAccessToken.expiresAt - 60_000) {
-    return cachedAccessToken.token;
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const header = { alg: 'RS256', typ: 'JWT' };
-  const claims = {
-    iss: serviceAccount.client_email,
-    scope: 'https://www.googleapis.com/auth/firebase.messaging',
-    aud: 'https://oauth2.googleapis.com/token',
-    iat: now,
-    exp: now + 3600,
-  };
-  const base64url = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url');
-  const unsigned = `${base64url(header)}.${base64url(claims)}`;
-  const signature = crypto.sign('RSA-SHA256', Buffer.from(unsigned), serviceAccount.private_key).toString('base64url');
-  const jwt = `${unsigned}.${signature}`;
-
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }),
-  });
-  if (!res.ok) throw new Error(`FCM OAuth token exchange failed: HTTP ${res.status}`);
-  const data = await res.json();
-  cachedAccessToken = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
-  return data.access_token;
-}
-
-async function sendFcmPush(projectId: string, accessToken: string, deviceToken: string, title: string, body: string) {
-  const res = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
+async function sendPush(projectId: string, accessToken: string, device: Device, body: string) {
+  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: { token: deviceToken, notification: { title, body } } }),
+    body: JSON.stringify({ message: {
+      token: device.token, notification: { title: '자습신청 알림', body },
+      data: { route: '/study?reminder=1' },
+      ...(device.platform === 'web' ? { webpush: { fcm_options: { link: 'https://cbgpu.vercel.app/study?reminder=1' } } } : {}),
+    } }),
+    signal: AbortSignal.timeout(12000),
   });
-  if (!res.ok) throw new Error(`FCM send failed: HTTP ${res.status} ${await res.text()}`);
+  if (!response.ok) throw new Error(`FCM HTTP ${response.status}: ${await response.text()}`);
 }
 
-Deno.serve(async () => {
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const edusetTokenSecret = Deno.env.get('EDUSET_TOKEN_SECRET');
-  const firebaseServiceAccountRaw = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON');
+Deno.serve(async request => {
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const url = Deno.env.get('SUPABASE_URL');
+  const secret = Deno.env.get('EDUSET_TOKEN_SECRET');
+  const firebaseRaw = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON');
+  if (!serviceRoleKey || !url || !secret || !firebaseRaw) return Response.json({ error: 'Missing server configuration' }, { status: 500 });
+  if (request.headers.get('Authorization') !== `Bearer ${serviceRoleKey}`) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const now = kstNow();
+  if (now.minute < 8 * 60 || now.minute > 15 * 60 + 15) return Response.json({ ok: true, skipped: 'outside hours' });
 
-  if (!edusetTokenSecret) {
-    return Response.json({ message: 'EDUSET_TOKEN_SECRET secret이 설정되어 있지 않습니다.' }, { status: 500 });
+  const admin = createClient(url, serviceRoleKey);
+  const { data: profiles, error: profilesError } = await admin.from('profiles')
+    .select('id, student_id, selfstudy_reminder_time, selfstudy_reminder_repeat_minutes, selfstudy_reminder_repeat_count, device_tokens(token, platform)')
+    .eq('notify_selfstudy_reminder', true).neq('is_approved', false).not('student_id', 'is', null);
+  if (profilesError) return Response.json({ error: profilesError.message }, { status: 500 });
+  const eligible = ((profiles ?? []) as Profile[]).filter(profile =>
+    /^\d{4}$/.test(profile.student_id ?? '') && minutes(profile.selfstudy_reminder_time) <= now.minute &&
+    (profile.device_tokens ?? []).some(device => ['android', 'ios'].includes(device.platform)));
+  if (!eligible.length) return Response.json({ ok: true, due: 0 });
+
+  const ids = eligible.map(profile => profile.id);
+  const [{ data: attempts, error: attemptsError }, { data: acks, error: ackError }] = await Promise.all([
+    admin.from('selfstudy_reminder_attempts').select('user_id, attempt, claimed_at').eq('study_date', now.date).in('user_id', ids),
+    admin.from('selfstudy_reminder_acknowledgements').select('user_id').eq('study_date', now.date).in('user_id', ids),
+  ]);
+  if (attemptsError || ackError) return Response.json({ error: attemptsError?.message ?? ackError?.message }, { status: 500 });
+  const acknowledged = new Set((acks ?? []).map(row => row.user_id));
+  const history = new Map<string, Attempt[]>();
+  for (const attempt of (attempts ?? []) as Attempt[]) {
+    if (!history.has(attempt.user_id)) history.set(attempt.user_id, []);
+    history.get(attempt.user_id)!.push(attempt);
   }
-  if (!firebaseServiceAccountRaw) {
-    return Response.json({ message: 'FIREBASE_SERVICE_ACCOUNT_JSON secret이 설정되어 있지 않습니다.' }, { status: 500 });
-  }
+  const due = eligible.filter(profile => {
+    if (acknowledged.has(profile.id)) return false;
+    const previous = history.get(profile.id) ?? [];
+    if (!previous.length) return true;
+    if (previous.length > profile.selfstudy_reminder_repeat_count) return false;
+    return Date.now() - Math.max(...previous.map(row => Date.parse(row.claimed_at))) >= profile.selfstudy_reminder_repeat_minutes * 60000;
+  });
+  if (!due.length) return Response.json({ ok: true, due: 0 });
 
-  const admin = createClient(supabaseUrl, serviceRoleKey);
-
-  const { data: settings } = await admin.from('eduset_settings').select('access_token_enc').eq('id', 1).maybeSingle();
-  if (!settings?.access_token_enc) {
-    return Response.json({ message: '관리자가 아직 자습신청 토큰을 등록하지 않았습니다.' }, { status: 503 });
-  }
-
-  let edusetToken: string;
   try {
-    edusetToken = decryptToken(settings.access_token_enc, edusetTokenSecret);
-  } catch (err) {
-    return Response.json({ message: '토큰 복호화 실패: ' + (err as Error).message }, { status: 500 });
-  }
-
-  const dateStr = localDateStrKST();
-  let appliedIds: Set<string>;
-  try {
-    appliedIds = await getAppliedStudentIds(edusetToken, dateStr);
-  } catch (err) {
-    return Response.json({ message: '자습신청 조회 실패: ' + (err as Error).message }, { status: 502 });
-  }
-
-  // profiles(id) <- device_tokens.user_id FK lets PostgREST embed this automatically.
-  const { data: profiles, error: profilesError } = await admin
-    .from('profiles')
-    .select('id, student_id, device_tokens(token, platform)')
-    .not('student_id', 'is', null)
-    .neq('is_approved', false)
-    .eq('notify_selfstudy_reminder', true);
-
-  if (profilesError) {
-    return Response.json({ message: '프로필 조회 실패: ' + profilesError.message }, { status: 500 });
-  }
-
-  const serviceAccount = JSON.parse(firebaseServiceAccountRaw);
-  const accessToken = await getFcmAccessToken(serviceAccount);
-
-  let notified = 0;
-  let failed = 0;
-  for (const profile of profiles ?? []) {
-    if (!profile.student_id || appliedIds.has(profile.student_id)) continue;
-
-    const tokens = ((profile.device_tokens ?? []) as { token: string; platform: string }[])
-      .filter((t) => t.platform === 'android' || t.platform === 'ios')
-      .map((t) => t.token);
-
-    for (const deviceToken of tokens) {
-      try {
-        await sendFcmPush(serviceAccount.project_id, accessToken, deviceToken, 'CBGPU', '아직 오늘 자습신청을 안 하셨어요. 지금 신청해주세요!');
-        notified++;
-      } catch {
+    const { data: settings, error: settingsError } = await admin.from('eduset_settings').select('access_token_enc').eq('id', 1).single();
+    if (settingsError || !settings?.access_token_enc) throw new Error('EduSet token unavailable');
+    const token = decryptToken(settings.access_token_enc, secret);
+    const policy = (await get<{ data: Policy }>('/policies/selfstudy', token)).data;
+    const preset = policy.timetable.exception[now.date] ?? policy.timetable.assign[String(now.day)];
+    const count = preset ? (policy.timetable.presets[preset]?.length ?? 0) : 0;
+    if (!count) return Response.json({ ok: true, skipped: 'no self-study periods today' });
+    const applied = await appliedPeriods(token, now.date);
+    const firebase = JSON.parse(firebaseRaw) as { project_id: string; client_email: string; private_key: string };
+    const accessToken = await getFcmAccessToken(firebase);
+    let notified = 0, failed = 0;
+    for (const profile of due) {
+      const mine = applied.get(profile.student_id!) ?? new Set<number>();
+      const missing = Array.from({ length: count }, (_, index) => index + 1).filter(period => !mine.has(period));
+      if (!missing.length) continue;
+      // Recheck acknowledgement after the potentially long upstream lookup.
+      const { data: ack, error: recheckError } = await admin.from('selfstudy_reminder_acknowledgements')
+        .select('user_id').eq('user_id', profile.id).eq('study_date', now.date).maybeSingle();
+      if (recheckError) throw recheckError;
+      if (ack) continue;
+      const attempt = (history.get(profile.id) ?? []).length;
+      const { error: claimError } = await admin.from('selfstudy_reminder_attempts').insert({ user_id: profile.id, study_date: now.date, attempt });
+      if (claimError) { failed++; continue; }
+      const body = `${missing.map(period => `${period}교시`).join(', ')} 자습신청이 확인되지 않았어요.`;
+      const outcomes = await Promise.allSettled((profile.device_tokens ?? []).filter(device => ['android', 'ios'].includes(device.platform))
+        .map(device => sendPush(firebase.project_id, accessToken, device, body)));
+      if (outcomes.some(result => result.status === 'fulfilled')) notified++;
+      else {
+        await admin.from('selfstudy_reminder_attempts').delete().eq('user_id', profile.id).eq('study_date', now.date).eq('attempt', attempt);
         failed++;
       }
     }
+    return Response.json({ ok: true, date: now.date, due: due.length, notified, failed });
+  } catch (error) {
+    return Response.json({ error: (error as Error).message }, { status: 502 });
   }
-
-  return Response.json({ ok: true, date: dateStr, checked: profiles?.length ?? 0, notified, failed });
 });
