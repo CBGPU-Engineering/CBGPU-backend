@@ -6,7 +6,7 @@ create table if not exists public.shared_materials (
   tags text[] not null default '{}',
   file_name text not null check (char_length(file_name) between 1 and 255),
   content_type text not null default 'application/octet-stream',
-  size_bytes bigint not null check (size_bytes between 1 and 209715200),
+  size_bytes bigint not null check (size_bytes between 1 and 1073741824),
   status text not null default 'pending' check (status in ('pending', 'ready')),
   created_at timestamptz not null default now(),
   constraint shared_materials_tags_limit check (cardinality(tags) <= 8)
@@ -38,3 +38,9 @@ create policy "students_finish_own_materials" on public.shared_materials
 drop policy if exists "students_delete_own_materials" on public.shared_materials;
 create policy "students_delete_own_materials" on public.shared_materials
   for delete to authenticated using (uploader_id = (select auth.uid()));
+
+-- 업로드 한도를 200MB에서 1GB로 올린다. 이미 테이블이 만들어진 DB에서는 위 create table이
+-- 다시 실행돼도 제약이 바뀌지 않으므로 제약을 직접 교체한다.
+alter table public.shared_materials drop constraint if exists shared_materials_size_bytes_check;
+alter table public.shared_materials add constraint shared_materials_size_bytes_check
+  check (size_bytes between 1 and 1073741824);
