@@ -25,7 +25,7 @@ function decryptToken(payload: string, secret: string): string {
   return decrypted.toString('utf8');
 }
 
-const ID = '[^/]+';
+const ID = '[A-Za-z0-9_-]+';
 const ALLOWED_ROUTES: { method: string; pattern: RegExp }[] = [
   { method: 'GET', pattern: /^\/rooms$/ },
   { method: 'GET', pattern: new RegExp(`^/rooms/${ID}/composition$`) },
@@ -54,7 +54,7 @@ async function requireApprovedUser(req: Request): Promise<boolean> {
   if (error || !user) return false;
 
   const { data: profile } = await client.from('profiles').select('is_approved').eq('id', user.id).maybeSingle();
-  return profile?.is_approved !== false;
+  return !!profile && profile.is_approved !== false;
 }
 
 let cachedToken: { value: string | null; fetchedAt: number } | null = null;
@@ -107,6 +107,9 @@ Deno.serve(async (req) => {
   }
 
   const body = req.method === 'GET' ? undefined : await req.text();
+  if (body && body.length > 1000) {
+    return Response.json({ message: '요청이 너무 큽니다.' }, { status: 413, headers: corsHeaders });
+  }
 
   let upstream: Response;
   try {
