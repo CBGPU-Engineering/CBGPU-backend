@@ -28,12 +28,12 @@ begin
       and not ind.indisprimary
       and ind.indpred is null
       and (
-        select array_agg(att.attname order by key.ordinality)
+        select array_agg(att.attname::text order by key.ordinality)
         from unnest(ind.indkey) with ordinality as key(attnum, ordinality)
         join pg_attribute att
           on att.attrelid = ind.indrelid
          and att.attnum = key.attnum
-      ) @> array['gpu_id', 'start_time', 'end_time']
+      ) @> array['gpu_id', 'start_time', 'end_time']::text[]
   loop
     if item.constraint_name is not null then
       execute format(
