@@ -11,6 +11,11 @@ drop policy if exists "cpu_projects_owner_insert" on public.cpu_projects;
 create policy "cpu_projects_owner_insert" on public.cpu_projects for insert
   to authenticated with check (
     user_id = (select auth.uid()) and status = 'pending' and deployed_at is null
+    and exists (
+      select 1 from public.profiles p
+      where p.id = (select auth.uid())
+        and p.is_approved is distinct from false
+    )
   );
 
 -- Existing owner-update policy allows any column; do not allow a student to
