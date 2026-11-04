@@ -45,3 +45,9 @@ is not a complete production restore.
 Original code is [Apache-2.0](LICENSE). Docker images and vendored libraries keep
 their upstream licenses. The `latex/` submodule is separately AGPL-3.0.
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Team recruitment
+
+[`careers/`](./careers/) runs the independent CBGPU recruitment site, private
+application reception, notification outbox and Slack / Jira / GitHub onboarding
+guide at `careers.cbgpu.com`. See its README for operations and retention.

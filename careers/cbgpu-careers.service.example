@@ -1,0 +1,22 @@
+[Unit]
+Description=CBGPU Careers recruitment and onboarding
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+WorkingDirectory=/home/cbgpu/CBGPU-Engineering/CBGPU-backend
+ExecStart=/usr/bin/python3 careers/server.py --port 3530
+Environment=CAREERS_STATE_DIR=/home/cbgpu/CBGPU-live/backend/private/careers
+Environment=CAREERS_MAIL_ENV=/home/cbgpu/CBGPU-live/backend/.env
+Environment=CAREERS_ORIGIN=https://careers.cbgpu.com
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/cbgpu/CBGPU-live/backend/private/careers
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+[Install]
+WantedBy=default.target
