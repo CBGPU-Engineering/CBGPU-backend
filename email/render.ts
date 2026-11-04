@@ -1,4 +1,4 @@
-export const SUPPORT_EMAIL = 'just_grassy@cbgpu.com';
+export const SUPPORT_EMAIL = 'info@cbgpu.com';
 export const EMAIL_FROM = `CBGPU <${SUPPORT_EMAIL}>`;
 export function emailSender(): string {
   const runtime = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> }; Deno?: { env: { get(name: string): string | undefined } } };

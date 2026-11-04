@@ -13,7 +13,7 @@ The active checkout is `/home/cbgpu/CBGPU-live`. The frontend binds to loopback 
 
 Deployments are a read-only history. Table/SQL editing uses the restricted `cbgpu_developer` database role. The browser terminal is a real cbgpu shell in a separate per-developer tmux session; disconnect/reconnect preserves the shell. Terminal attachment and administrative changes are audited; terminal commands/output are not recorded by the portal.
 
-Website emails use Resend from `just_grassy@cbgpu.com`. Frontend transactional mail enters an encrypted local queue with idempotent retries. Authentication SMTP remains direct to Resend. Signed provider webhooks track delivery, delay, bounce and complaint events for both paths. Accepted means provider acceptance; delivered means recipient mail-server receipt. Native authentication messages cannot be manually resent from the queue because their original token payload is not retained. Start a fresh reset/sign-in request instead.
+Website emails use Resend from `info@cbgpu.com`. Frontend transactional mail enters an encrypted local queue with idempotent retries. Authentication SMTP remains direct to Resend. Signed provider webhooks track delivery, delay, bounce and complaint events for both paths. Accepted means provider acceptance; delivered means recipient mail-server receipt. Native authentication messages cannot be manually resent from the queue because their original token payload is not retained. Start a fresh reset/sign-in request instead.
 
 ## Backups and monitoring
 
