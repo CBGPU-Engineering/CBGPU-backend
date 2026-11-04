@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security report
+    url: https://github.com/CBGPU-Engineering/CBGPU-backend/security/advisories/new
+    about: Report vulnerabilities privately. See SECURITY.md for the email fallback.
+  - name: Service documentation
+    url: https://docs.cbgpu.com
+    about: Read usage instructions before filing a support issue.

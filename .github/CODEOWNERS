@@ -1,0 +1,13 @@
+# Request reviews for application/source changes, not dependency-only bot PRs.
+*.py @lmwmason
+*.mjs @lmwmason
+*.cjs @lmwmason
+*.js @lmwmason
+*.ts @lmwmason
+*.tsx @lmwmason
+*.dart @lmwmason
+*.go @lmwmason
+*.sql @lmwmason
+*.sh @lmwmason
+/.github/CODEOWNERS @lmwmason
+/SECURITY.md @lmwmason

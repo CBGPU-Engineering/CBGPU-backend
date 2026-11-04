@@ -1,0 +1,5 @@
+CBGPU
+Copyright 2026 CBGPU contributors
+
+Original code in this repository is Apache-2.0 except components with their own
+license notices. The separately maintained CBGPU-latex integration is AGPL-3.0.

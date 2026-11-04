@@ -1,0 +1,5 @@
+[submodule "latex"]
+	path = latex
+	url = https://github.com/CBGPU-Engineering/CBGPU-latex.git
+	branch = main
+	shallow = true

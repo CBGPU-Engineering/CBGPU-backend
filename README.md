@@ -1,47 +1,47 @@
-# CBGPU backend
+# CBGPU Backend
 
-This directory runs CBGPU's Supabase-compatible backend on this computer. It includes PostgreSQL 17, Auth, REST/RPC APIs, Realtime, Storage, Edge Functions, Studio, the connection pooler, email configuration, and the existing scheduled tasks.
+[![CI](https://github.com/CBGPU-Engineering/CBGPU-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/CBGPU-Engineering/CBGPU-backend/actions/workflows/ci.yml)
+[![Supabase](https://img.shields.io/badge/Supabase-Self--hosted-3FCF8E?logo=supabase)](https://supabase.com)
+[![Docker](https://img.shields.io/badge/Docker-Services-2496ED?logo=docker)](https://www.docker.com)
 
-The public API is `https://cbgpu.com/backend`, routed through the Next.js server and the existing Cloudflare Tunnel. Only the Auth, REST, Storage, Realtime, and Functions API paths are exposed. Studio and database access remain local. The frontend, Android app, GPU controller, SSH gateways, and materials service must use the same backend and matching API keys.
+Self-hosted Supabase, database schemas, Edge Functions, email templates, the
+operator console, frontend/server deployment workers and public resource gateways.
+These services share backend private state and are maintained together.
+The optional AGPL LaTeX adapter is a pinned nested submodule at `latex/`.
 
-Email delivery still uses Resend and device push delivery still uses Firebase, as before. Their server credentials are stored in ignored files, never in browser code or Git. Existing user UUIDs and password hashes are preserved. Users must sign in again after the backend switch because the JWT signing keys change. Android v1.0.7 (build 8) uses this backend and adds the official EduSet login bridge.
-
-## Operations
+## Development checks
 
 ```bash
-cd /home/cbgpu/CBGPU-live/backend
-docker compose up -d --wait
-docker compose ps
-python3 scripts/verify-backend.py
-node scripts/verify-realtime.cjs
-python3 scripts/verify-push-credentials.py
-scripts/backup.sh
+git clone --recurse-submodules https://github.com/CBGPU-Engineering/CBGPU-backend.git
+cd CBGPU-backend
+cd developer && npm ci && cd ..
+node scripts/verify-mail-queue.mjs
 ```
 
-Docker services restart automatically unless explicitly stopped. A user systemd timer runs daily backups at 03:30 UTC. Backups contain the database, roles, uploaded files, encryption keys, and runtime configuration. Keep a separate protected off-machine copy for disaster recovery.
+The queue check uses an in-memory database and fake transport. It sends no mail.
+Other integration scripts can require the full platform and local services.
+For running web-facing integrations and existing installation scripts, use
+[CBGPU-platform](https://github.com/CBGPU-Engineering/CBGPU-platform), which places this component at `backend/`.
+Do not copy production secrets or run destructive reset scripts on a live host.
 
-Do not use `docker compose down -v` or `reset.sh` on the production backend. They can remove persistent data.
+## Ownership
 
-## Private state
+- `docker-compose*.yml`, `volumes/`: Supabase services and runtime code/templates.
+- `developer/`: developer/admin/equipment gateways and interactive console.
+- `deploy/`: Git-based builds, Compose diagnostics and project domains.
+- `operations/`, `gpu/`, `materials/`: operational and resource gateway integration.
+- `supabase/migrations/`, `sql/`: current feature schema changes.
+- `schema/legacy/`: historical schema/Edge Function collections extracted from
+  the former web/app/root directories, retained for provenance and review.
 
-`.env`, `functions.env`, `private/`, `backups/`, database data, and uploaded files are excluded from Git. Never commit their contents. The `.env.example` file is only a template; its sample credentials must never be used for a live deployment. Docker configuration is pinned to Supabase self-hosted release `self-hosted/v0.8.3`.
+See [schema notes](schema/README.md), [operations](OPERATIONS.md),
+[installation background](docs/OPERATIONS-LEGACY.md) and
+[console documentation](developer/README.md). New hosts need generated secrets,
+reviewed schema initialization and external integration setup; `.env.example`
+is not a complete production restore.
 
-Studio is available locally on port 54324. The private API gateway listens on `127.0.0.1:54321`. No PostgreSQL port is published to the network.
+## License
 
-## Final cutover
-
-`scripts/host-cutover.sh` is a narrow root helper for the existing root-owned GPU controller. It preserves idle containers, pauses the controller, and waits for the final data synchronization. The assistant enables a reversible write guard on the old backend, refreshes accounts/application data/files with `scripts/final-sync.py`, verifies the results, and runs `scripts/activate-local-backend.py`. The helper then starts the GPU controller against the local backend. If activation fails or times out, the helper restores the previous controller configuration.
-
-The old hosted project is retained for rollback. Its scheduled jobs and application writes must remain disabled after a successful switch to avoid divergent data and duplicate notifications. Do not delete the hosted project until the new deployment has been reviewed in normal use.
-
-## Verification performed
-
-- Existing account validation, authenticated profile access, anonymous access restrictions, and password-reset URL generation.
-- Matching application table, RLS-policy, foreign-key, and storage-bucket structure.
-- All uploaded files copied and checked by SHA-256; ownership metadata preserved.
-- Realtime WebSocket connection and channel join, including through the frontend reverse proxy.
-- Edge Function access and rejection of unauthorized account deletion.
-- SMTP TLS/authentication and Firebase service-account authentication without sending test messages to real users.
-- An isolated database restore with account/table/file metadata and decryptable Vault secrets.
-
-Actual message delivery, physical device behavior, and ongoing production workload should be monitored after cutover. No synthetic notifications or emails were sent to users during these checks.
+Original code is [Apache-2.0](LICENSE). Docker images and vendored libraries keep
+their upstream licenses. The `latex/` submodule is separately AGPL-3.0.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

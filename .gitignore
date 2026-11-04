@@ -19,3 +19,15 @@ releases/
 
 # Historical local configuration copies and scratch files.
 *.old
+
+# Local runtime state and credentials.
+.env
+.env.local
+*.jks
+*.keystore
+key.properties
+__pycache__/
+*.pyc
+.venv/
+/dist/
+/release-artifacts/
