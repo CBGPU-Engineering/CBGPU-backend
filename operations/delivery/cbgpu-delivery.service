@@ -1,0 +1,16 @@
+[Unit]
+Description=CI-gated CBGPU production delivery
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/cbgpu-delivery/agent.py --once
+WorkingDirectory=%h/.local/share/cbgpu-delivery
+TimeoutStartSec=45min
+UMask=0077
+Nice=10
+CPUQuota=300%
+MemoryHigh=12G
+MemoryMax=20G
+NoNewPrivileges=yes
+PrivateTmp=yes

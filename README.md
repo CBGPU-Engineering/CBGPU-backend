@@ -51,3 +51,10 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 [`careers/`](./careers/) runs the independent CBGPU recruitment site, private
 application reception, notification outbox and Slack / Jira / GitHub onboarding
 guide at `careers.cbgpu.com`. See its README for operations and retention.
+
+## Production delivery
+
+[`operations/delivery/`](./operations/delivery/) documents the CI-gated host pull
+agent, immutable releases, health checks, rollback, deployment history and runtime
+backup boundaries. Push application changes to the extracted component repository,
+not the retired monorepo source folders.

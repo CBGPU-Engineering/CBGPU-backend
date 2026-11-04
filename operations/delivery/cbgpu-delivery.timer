@@ -1,0 +1,9 @@
+[Unit]
+Description=Check trusted CBGPU main branches for successful CI every minute
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Persistent=true
+[Install]
+WantedBy=timers.target

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
-backend_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+backend_dir="${CBGPU_RUNTIME_BACKEND:-$script_root}"
 backup_dir="$backend_dir/backups/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$backup_dir"
 docker exec cbgpu-supabase-db pg_dump -U supabase_admin --format=custom postgres > "$backup_dir/database.dump"
@@ -11,7 +12,7 @@ docker exec cbgpu-supabase-storage tar -czf - -C /var/lib/storage . > "$backup_d
 docker exec cbgpu-supabase-db tar -czf - -C /etc/postgresql-custom . > "$backup_dir/database-encryption-keys.tar.gz"
 tar -czf "$backup_dir/materials.tar.gz" --exclude="*.partial" --exclude="*.upload.json" -C /home/cbgpu/cbgpu-materials .
 cp "$backend_dir/.env" "$backend_dir/functions.env" "$backup_dir/"
-node "$backend_dir/scripts/backup-developer.mjs" "$backup_dir"
+CBGPU_RUNTIME_BACKEND="$backend_dir" node "$script_root/scripts/backup-developer.mjs" "$backup_dir"
 sha256sum "$backup_dir/database.dump" "$backup_dir/storage.tar.gz" > "$backup_dir/checksums.sha256"
 printf 'Backend backup saved: %s\n' "$backup_dir"
 node "$backend_dir/operations/backup.mjs" upload

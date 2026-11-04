@@ -73,7 +73,7 @@ class Handler(BaseHTTPRequestHandler):
   path=urlsplit(self.path).path
   if path in ['/roles/mobile','/apply/mobile']:
    return self.send(302,b'',extra={'Location':'/#positions'})
-  if path=='/health':return self.send(200,{'status':'ok'})
+  if path=='/health':return self.send(200,{'status':'ok','commit':os.environ.get('CBGPU_RELEASE_SHA','legacy')})
   if path=='/api/roles':return self.send(200,ROLES)
   if path=='/api/form':return self.send(200,{'token':token()})
   if path=='/robots.txt':return self.send(200,f'User-agent: *\nDisallow: /api/\nDisallow: /apply/\nDisallow: /onboarding\nSitemap: {ORIGIN}/sitemap.xml\n','text/plain; charset=utf-8')
