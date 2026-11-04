@@ -1,7 +1,7 @@
 # CBGPU Careers
 
 Recruitment and team onboarding for CBGPU at **https://careers.cbgpu.com**.
-Six role descriptions, category/search filters, application forms, private SQLite
+Seven role descriptions, category/search filters, application forms, private SQLite
 storage, and a Slack / Jira / GitHub onboarding guide. This recruits school project
 contributors; it does not promise employment, pay, acceptance, or a response deadline.
 
@@ -110,3 +110,17 @@ shared between subdomains. No separate font service is needed.
 The onboarding guide is distributed directly to accepted applicants. It has no
 public navigation buttons, is excluded from the sitemap and includes a noindex
 directive. Direct links remain accessible; this is not an authentication gate.
+
+## Recruitment roles
+
+Android and iOS are independent application tracks; both contribute to the shared
+Flutter/Dart codebase. iOS includes Xcode/device testing, platform integration and
+TestFlight/App Store preparation; Swift experience is preferred, not mandatory.
+Backend owns service APIs, authorization, data models and application logic.
+Platform / infrastructure owns the deployment product, containers, GPU resource
+management, project domains, logs and operations. Contributors may collaborate
+across these roles without collapsing the application tracks.
+
+Old `/roles/mobile` and `/apply/mobile` links return to the role list so applicants
+can choose a platform. Existing `mobile` applications retain their original role;
+notification delivery still supports that historical label.

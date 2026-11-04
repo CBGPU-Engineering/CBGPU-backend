@@ -71,6 +71,8 @@ class Handler(BaseHTTPRequestHandler):
   self.end_headers();self.wfile.write(body)
  def do_GET(self):
   path=urlsplit(self.path).path
+  if path in ['/roles/mobile','/apply/mobile']:
+   return self.send(302,b'',extra={'Location':'/#positions'})
   if path=='/health':return self.send(200,{'status':'ok'})
   if path=='/api/roles':return self.send(200,ROLES)
   if path=='/api/form':return self.send(200,{'token':token()})
@@ -122,7 +124,7 @@ def process_outbox():
   now=int(time.time());c.execute('DELETE FROM applications WHERE created<?',(now-90*86400,));c.execute('DELETE FROM requests WHERE created<?',(now-86400,));c.commit()
   rows=c.execute('SELECT id,role FROM applications WHERE notified=0 ORDER BY created LIMIT 10').fetchall() if key else []
  for row in rows:
-  role=next(r for r in ROLES if r['id']==row['role'])
+  role=next((r for r in ROLES if r['id']==row['role']),{'name':'앱 개발 (이전 모집)' if row['role']=='mobile' else '이전 모집 분야'})
   body={'from':'CBGPU Careers <info@cbgpu.com>','to':['info@cbgpu.com'],'subject':f"[CBGPU 지원 접수] {role['name']} · {row['id']}",'html':f"<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:32px'><img src='https://careers.cbgpu.com/logo.png' width='40' alt='CBGPU'><h1>새로운 동료의 지원서가 도착했어요.</h1><p>{role['name']}</p><p>접수 번호: <b>{row['id']}</b></p><p>개인정보 보호를 위해 지원 내용은 메일에 포함하지 않았어요. 개발자 터미널에서 careers 관리 명령으로 확인해주세요.</p><a href='https://developers.cbgpu.com' style='background:#3182f6;color:white;padding:14px 20px;display:inline-block;border-radius:10px;text-decoration:none'>개발자 페이지 열기</a></div>"}
   req=urllib.request.Request('https://api.resend.com/emails',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json','Idempotency-Key':'careers-'+row['id']},method='POST')
   try:
