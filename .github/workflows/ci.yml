@@ -24,5 +24,5 @@ jobs:
       - run: node --check deploy/server.mjs && node --check developer/server.mjs
       - run: python3 -m compileall -q deploy scripts careers
       - run: python3 -m unittest discover -s careers -p 'test_*.py'
-      - run: node --check careers/public/app.js
+      - run: node --check careers/public/app.js && node --check careers/public/theme.js && node --check careers/public/onboarding.js
       - run: node scripts/check-publication.mjs

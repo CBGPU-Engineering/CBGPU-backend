@@ -76,7 +76,7 @@ class Handler(BaseHTTPRequestHandler):
   if path=='/api/form':return self.send(200,{'token':token()})
   if path=='/robots.txt':return self.send(200,f'User-agent: *\nDisallow: /api/\nDisallow: /apply/\nSitemap: {ORIGIN}/sitemap.xml\n','text/plain; charset=utf-8')
   if path=='/sitemap.xml':return self.send(200,'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+''.join(f'<url><loc>{ORIGIN}{p}</loc></url>' for p in ['/','/onboarding']+['/roles/'+r['id'] for r in ROLES])+'</urlset>','application/xml')
-  assets={'/style.css':('style.css','text/css; charset=utf-8'),'/app.js':('app.js','text/javascript; charset=utf-8'),'/onboarding.js':('onboarding.js','text/javascript; charset=utf-8'),'/logo.png':('logo.png','image/png')}
+  assets={'/style.css':('style.css','text/css; charset=utf-8'),'/theme.js':('theme.js','text/javascript; charset=utf-8'),'/app.js':('app.js','text/javascript; charset=utf-8'),'/onboarding.js':('onboarding.js','text/javascript; charset=utf-8'),'/logo.png':('logo.png','image/png')}
   if path in assets:
    name,kind=assets[path];return self.send(200,(ROOT/'public'/name).read_bytes(),kind)
   if path in ['/','/privacy','/onboarding'] or re.fullmatch(r'/(roles|apply)/('+'|'.join(r['id'] for r in ROLES)+')/?',path):

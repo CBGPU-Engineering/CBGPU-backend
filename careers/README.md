@@ -95,3 +95,14 @@ Edit and Zone → DNS → Edit, limited to the CBGPU account/zone) in
 The route script prefers that credential over an interactive dashboard session.
 Never put the token in source files or chat. An alternative token path can be
 passed through `CBGPU_CLOUDFLARE_ROUTING_TOKEN_FILE`.
+
+## Shared public-site appearance
+
+Recruitment, job details, application forms and the standalone joining guide use
+CBGPU main-site light/dark colors from `src/app/globals.css`, the system font
+stack, grayscale logo, italic wordmark, neutral bordered cards and primary button
+conventions. The header theme toggle follows the main site's `theme` storage key
+and system default. Preferences persist within this origin; localStorage is not
+shared between subdomains. No separate font service is needed.
+
+![Dark appearance](./docs/desktop-dark.png)

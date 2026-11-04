@@ -1,0 +1,7 @@
+/* Same theme key, palettes and system default as the main CBGPU website. */
+'use strict';
+(()=>{const root=document.documentElement,media=matchMedia('(prefers-color-scheme: dark)');let preference='system';try{preference=localStorage.getItem('theme')||'system'}catch{}
+const moon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20.9 13a9 9 0 0 1-9.9-9.9A9 9 0 1 0 20.9 13Z"/></svg>';
+const sun='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42m0-14.14-1.42 1.42M6.35 17.65l-1.42 1.42"/></svg>';
+function apply(){const dark=preference==='dark'||(preference!=='light'&&media.matches);root.classList.toggle('dark',dark);root.style.colorScheme=dark?'dark':'light';document.querySelectorAll('.theme-toggle').forEach(button=>{button.innerHTML=dark?sun:moon;button.setAttribute('aria-label',dark?'라이트 모드로 전환':'다크 모드로 전환');button.setAttribute('aria-pressed',String(dark))})}
+apply();media.addEventListener('change',apply);window.addEventListener('storage',e=>{if(e.key==='theme'){preference=e.newValue||'system';apply()}});document.addEventListener('DOMContentLoaded',()=>{apply();document.querySelectorAll('.theme-toggle').forEach(button=>button.addEventListener('click',()=>{preference=root.classList.contains('dark')?'light':'dark';try{localStorage.setItem('theme',preference)}catch{}apply()}))})})();
