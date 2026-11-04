@@ -42,3 +42,6 @@ h1{font-size:30px;letter-spacing:-.035em;font-weight:650}h2{font-size:14px}.butt
 input,select,textarea,.field select,.sql-editor,.editor-value textarea,.button,.terminal-mobile-keys button{border-radius:var(--radius-control)}
 .nav-item,.subnav-item,.job-button{border-radius:var(--radius-control)}
 .table-scroll,.table-wrap,.table-container{border-radius:var(--radius-surface);overflow:auto}
+
+/* The operator portals use the same Korean/Latin stack as the main website. */
+:root{--font-sans:"Pretendard Variable",Pretendard,"Noto Sans KR","Apple SD Gothic Neo",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-family:var(--font-sans);font-synthesis:weight}
