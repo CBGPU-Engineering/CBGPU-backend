@@ -34,3 +34,11 @@ h1{font-size:30px;letter-spacing:-.035em;font-weight:650}h2{font-size:14px}.butt
 .recovery-kit-heading{display:flex;align-items:center;justify-content:space-between;gap:18px}.developer-account-list{padding:8px 20px 16px}.developer-account-list>p{padding:8px 0;font-size:12px;overflow-wrap:anywhere}.developer-account-list>p+p{border-top:1px solid var(--border)}.account-developers{margin-top:20px}#recovery-kit-message{margin-top:12px}@media(max-width:720px){.recovery-kit-heading{align-items:start;flex-direction:column;gap:12px}.developer-account-list{padding-inline:16px}.recovery-kit-heading>.button{font-size:11px}}
 
 .system-account{font-size:12px;font-weight:600;overflow-wrap:anywhere;margin-bottom:20px;color:var(--ink)}#system-password-back{margin-top:12px}
+
+/* Shared enclosed surfaces and controls across all operator portals. */
+:root{--radius-surface:14px;--radius-control:8px}
+.surface,.health-card,.login-card,.email-summary>div,dialog{border-radius:var(--radius-surface)}
+.surface{overflow:hidden}
+input,select,textarea,.field select,.sql-editor,.editor-value textarea,.button,.terminal-mobile-keys button{border-radius:var(--radius-control)}
+.nav-item,.subnav-item,.job-button{border-radius:var(--radius-control)}
+.table-scroll,.table-wrap,.table-container{border-radius:var(--radius-surface);overflow:auto}
