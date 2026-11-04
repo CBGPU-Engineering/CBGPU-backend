@@ -129,6 +129,24 @@ def switch(units,checks):
   raise
  return before
 
+def cleanup_releases(state):
+ # Keep recent versions, every active unit target and every rollback target.
+ references=json.dumps(state)+''.join(p.read_text() for p in SETTINGS.glob('cbgpu-*.service'))
+ for component in ['web','backend']:
+  folder=ROOT/'releases'/component
+  if not folder.exists():continue
+  releases=sorted([p for p in folder.iterdir() if p.is_dir() and SHA.fullmatch(p.name)],key=lambda p:p.stat().st_mtime,reverse=True)
+  for release in releases[5:]:
+   if release.name in references or time.time()-release.stat().st_mtime<7*86400:continue
+   worktree=release/('web' if component=='web' else 'backend')
+   if worktree.exists():command(['git','--git-dir',str(ROOT/'mirrors'/f'{component}.git'),'worktree','remove','--force',str(worktree)],timeout=180)
+   for name in ['FrontEnd','Daemon']:
+    link=release/name
+    if link.is_symlink():link.unlink()
+   try:release.rmdir()
+   except OSError:pass
+   record('old_release_pruned',component=component,commit=release.name)
+
 def deploy_web(config,sha,repo,log):
  directory=checkout('web',repo,sha);env=runtime_env(config);env.update(NEXT_BUILD_DIR='.next-production',CBGPU_RELEASE_SHA=sha,NEXT_TELEMETRY_DISABLED='1')
  apk=Path(config['legacy_web'])/'public/downloads/cbgpu.apk';target=directory/'public/downloads/cbgpu.apk'
@@ -272,6 +290,8 @@ def poll(config,state,only=None):
    if component=='backend' and busy_backend(config):raise Deferred('Waiting for active user deployment workers to finish.')
    if current.get('failed_sha')==sha:continue # Explicit retry is required after a failed deployment.
    if current.get('attempt_at',0)>time.time()-120:continue
+   cleanup_releases(state)
+   if shutil.disk_usage(ROOT).free<15*1024**3:raise Deferred('Less than 15 GiB free; production remains unchanged.')
    current['attempt_at']=int(time.time());current['status']='building';current['candidate']=sha;save(state)
    event_id=uuid.uuid4().hex;log=ROOT/'logs'/(event_id+'.log');log.parent.mkdir(exist_ok=True);log.touch(mode=0o600)
    portal_log=Path(config['runtime_backend'])/'private'/('deploy-'+event_id+'.log')
@@ -304,6 +324,9 @@ def poll(config,state,only=None):
 def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--once',action='store_true');parser.add_argument('--status',action='store_true');parser.add_argument('--only',choices=['web','backend']);parser.add_argument('--retry',choices=['web','backend']);parser.add_argument('--rollback',choices=['web','backend']);parser.add_argument('--pause',action='store_true');parser.add_argument('--resume',action='store_true');args=parser.parse_args()
  os.umask(0o077);ROOT.mkdir(parents=True,exist_ok=True,mode=0o700)
+ if args.status:
+  state=read(STATE,{'components':{},'paused':False})
+  visible={**state,'components':{k:{x:y for x,y in v.items() if x!='rollback_units'} for k,v in state['components'].items()}};print(json.dumps(visible,indent=2));return
  with (ROOT/'agent.lock').open('a') as lock:
   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   except BlockingIOError:print('Another delivery operation is running.');return

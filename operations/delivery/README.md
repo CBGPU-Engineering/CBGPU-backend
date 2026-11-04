@@ -89,3 +89,8 @@ python3 -m unittest discover -s operations/delivery -p 'test_*.py'
 Tests cover exact-main CI authorization, rejected repositories, failed-health
 rollback, protected schema changes, user-build deferral and divergent history.
 Source licensing follows this backend's Apache-2.0 license.
+
+Generated release caches retain at least the five newest versions per component
+and all active/rollback unit targets. Older unused versions become eligible for
+cleanup after seven days. New builds defer below 15 GiB free disk space. Code
+archives inside encrypted backups are independent of this cache retention.
