@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {DatabaseSync,backup} from 'node:sqlite';
@@ -27,3 +28,16 @@ const deliveryTarget=path.join(folder,'delivery');fs.mkdirSync(deliveryTarget,{m
 for(const name of ['config.json','state.json','events.jsonl']){const file=path.join(delivery,name);if(fs.existsSync(file)){fs.copyFileSync(file,path.join(deliveryTarget,name));fs.chmodSync(path.join(deliveryTarget,name),0o600)}}
 const agent=path.join(process.env.HOME,'.local/lib/cbgpu-delivery/agent.py');if(fs.existsSync(agent))fs.copyFileSync(agent,path.join(deliveryTarget,'agent.py'));
 console.log('Recruitment database and delivery state backed up consistently.');
+
+const releaseState=path.join(delivery,'state.json');
+if(fs.existsSync(releaseState)){
+ const state=JSON.parse(fs.readFileSync(releaseState,'utf8'));
+ for(const [component,entry] of Object.entries(state.components||{})){
+  if(!['web','backend'].includes(component)||!entry.release||!/^[a-f0-9]{40}$/.test(entry.sha||''))continue;
+  const release=path.resolve(entry.release),allowed=path.join(delivery,'releases')+path.sep;
+  if(!release.startsWith(allowed))throw Error('Unexpected release location in backup state');
+  const bytes=execFileSync('git',['-C',release,'archive','--format=tar',entry.sha],{maxBuffer:64*1024*1024});
+  fs.writeFileSync(path.join(deliveryTarget,component+'-source.tar'),bytes,{mode:0o600});
+ }
+}
+console.log('Pinned production source archives included without dependency caches or runtime secrets.');
