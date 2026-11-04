@@ -1,0 +1,21 @@
+# Runtime secrets, database files, uploads, and private exports.
+.env
+.env.old
+functions.env
+*.log
+private/
+backups/
+volumes/db/data/
+volumes/storage/
+volumes/api/envoy/lds.yaml
+volumes/api/envoy/cds.generated.yaml
+
+__pycache__/
+*.pyc
+
+# Developer portal dependencies and immutable frontend releases.
+developer/node_modules/
+releases/
+
+# Historical local configuration copies and scratch files.
+*.old

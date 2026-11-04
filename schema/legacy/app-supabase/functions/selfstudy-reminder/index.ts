@@ -83,7 +83,7 @@ async function sendPush(projectId: string, accessToken: string, device: Device, 
     body: JSON.stringify({ message: {
       token: device.token, notification: { title: '자습신청 알림', body },
       data: { route: '/study?reminder=1' },
-      ...(device.platform === 'web' ? { webpush: { fcm_options: { link: 'https://cbgpu.vercel.app/study?reminder=1' } } } : {}),
+      ...(device.platform === 'web' ? { webpush: { fcm_options: { link: 'https://cbgpu.com/study?reminder=1' } } } : {}),
     } }),
     signal: AbortSignal.timeout(12000),
   });

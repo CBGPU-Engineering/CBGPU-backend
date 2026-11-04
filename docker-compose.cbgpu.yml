@@ -1,0 +1,55 @@
+name: cbgpu-supabase
+services:
+  api-gw:
+    ports: !override
+      - "127.0.0.1:54321:8000"
+  supavisor:
+    ports: !reset []
+  studio:
+    ports:
+      - "127.0.0.1:54324:3000"
+  functions:
+    env_file:
+      - path: ./functions.env
+        required: true
+  email-templates:
+    image: nginx@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
+    container_name: cbgpu-email-templates
+    restart: unless-stopped
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    volumes:
+      - ./volumes/email-templates:/templates:ro
+      - ./email/nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8080/recovery.html"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+  auth:
+    depends_on:
+      email-templates:
+        condition: service_healthy
+    environment:
+      GOTRUE_MFA_TOTP_ENROLL_ENABLED: "true"
+      GOTRUE_MFA_TOTP_VERIFY_ENABLED: "true"
+      GOTRUE_MFA_MAX_ENROLLED_FACTORS: "5"
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://email-templates:8080/confirmation.html
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: "[CBGPU] 이메일 주소 확인"
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://email-templates:8080/recovery.html
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: "[CBGPU] 비밀번호 재설정"
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://email-templates:8080/magic_link.html
+      GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: "[CBGPU] 로그인 링크"
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://email-templates:8080/invite.html
+      GOTRUE_MAILER_SUBJECTS_INVITE: "[CBGPU] 초대 안내"
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://email-templates:8080/email_change.html
+      GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: "[CBGPU] 이메일 변경 확인"
+      GOTRUE_MAILER_TEMPLATES_REAUTHENTICATION: http://email-templates:8080/reauthentication.html
+      GOTRUE_MAILER_SUBJECTS_REAUTHENTICATION: "[CBGPU] 본인 확인 코드"
+      GOTRUE_MAILER_TEMPLATES_PASSWORD_CHANGED_NOTIFICATION: http://email-templates:8080/password_changed_notification.html
+      GOTRUE_MAILER_SUBJECTS_PASSWORD_CHANGED_NOTIFICATION: "[CBGPU] 비밀번호 변경 안내"
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGED_NOTIFICATION: http://email-templates:8080/email_changed_notification.html
+      GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGED_NOTIFICATION: "[CBGPU] 이메일 주소 변경 안내"

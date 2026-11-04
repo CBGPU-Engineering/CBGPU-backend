@@ -1,0 +1,1 @@
+export default {fetch(request){const host=new URL(request.url).hostname;if(host==='front.cbgpu.com')return Response.redirect('https://developer.cbgpu.com/deploy',302);if(host==='server.cbgpu.com')return Response.redirect('https://developer.cbgpu.com/server',302);return new Response('Not found',{status:404})}};
