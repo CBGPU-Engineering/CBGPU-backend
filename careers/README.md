@@ -83,3 +83,15 @@ Public TLS terminates at Cloudflare; the origin is loopback HTTP.
 `scripts/route-careers.py --apply` performs the same additive change when
 the existing Cloudflare routing authentication is valid. It checks for DNS
 conflicts and snapshots the tunnel before making changes.
+
+The joining guide is an independent server-rendered page at `/onboarding`;
+it does not need the role API or application JavaScript to display its content.
+Edit `public/onboarding.html` for this dedicated page and keep the in-app guide
+in `public/app.js` in sync. `onboarding.js` only adds clipboard behavior.
+
+For unattended routing, save a scoped API token (Account → Cloudflare Tunnel →
+Edit and Zone → DNS → Edit, limited to the CBGPU account/zone) in
+`/home/cbgpu/.config/cbgpu/cloudflare-routing-token`, permissions `600`.
+The route script prefers that credential over an interactive dashboard session.
+Never put the token in source files or chat. An alternative token path can be
+passed through `CBGPU_CLOUDFLARE_ROUTING_TOKEN_FILE`.

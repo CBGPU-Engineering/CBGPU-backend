@@ -3,7 +3,24 @@
 import copy,datetime,importlib.util,json,os,sys,urllib.parse
 from pathlib import Path
 source=Path(__file__).with_name('route-workspaces.py');spec=importlib.util.spec_from_file_location('workspace_routes',source);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+def use_api_token_if_available():
+ token_file=Path(os.environ.get('CBGPU_CLOUDFLARE_ROUTING_TOKEN_FILE','/home/cbgpu/.config/cbgpu/cloudflare-routing-token'))
+ if not token_file.exists():return
+ import stat,urllib.request,urllib.error
+ if stat.S_IMODE(token_file.stat().st_mode)&0o077:raise RuntimeError('Routing token must have permissions 600.')
+ token=token_file.read_text().strip()
+ if not token:raise RuntimeError('Routing token is empty.')
+ def api(route,method='GET',body=None):
+  request=urllib.request.Request('https://api.cloudflare.com/client/v4/'+route,method=method,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'},data=json.dumps(body).encode() if body is not None else None)
+  try:
+   with urllib.request.urlopen(request,timeout=30) as response:data=json.load(response)
+  except urllib.error.HTTPError as error:raise RuntimeError('Cloudflare rejected routing access (HTTP '+str(error.code)+'). Check DNS Edit and Cloudflare Tunnel Edit permissions.') from None
+  if not data.get('success'):raise RuntimeError('Cloudflare rejected routing operation; no credential details logged.')
+  return data['result']
+ m.api=api
+
 def main():
+ use_api_token_if_available()
  host='careers.cbgpu.com';service='http://127.0.0.1:3530';endpoint=f'accounts/{m.ACCOUNT}/cfd_tunnel/{m.TUNNEL}/configurations';original=m.api(endpoint);config=copy.deepcopy(original['config']);ingress=config['ingress'];dns=f'zones/{m.ZONE}/dns_records';records=m.api(dns+'?name='+urllib.parse.quote(host))
  if any(r['type']!='CNAME' or r.get('content','').rstrip('.')!=m.TARGET for r in records):raise RuntimeError('Existing Careers DNS conflicts; left unchanged')
  matches=[r for r in ingress if r.get('hostname')==host]
