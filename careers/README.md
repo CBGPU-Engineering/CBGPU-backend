@@ -86,8 +86,8 @@ conflicts and snapshots the tunnel before making changes.
 
 The joining guide is an independent server-rendered page at `/onboarding`;
 it does not need the role API or application JavaScript to display its content.
-Edit `public/onboarding.html` for this dedicated page and keep the in-app guide
-in `public/app.js` in sync. `onboarding.js` only adds clipboard behavior.
+Edit `public/onboarding.html` for this dedicated page.
+`onboarding.js` only adds clipboard behavior.
 
 For unattended routing, save a scoped API token (Account → Cloudflare Tunnel →
 Edit and Zone → DNS → Edit, limited to the CBGPU account/zone) in
@@ -106,3 +106,7 @@ and system default. Preferences persist within this origin; localStorage is not
 shared between subdomains. No separate font service is needed.
 
 ![Dark appearance](./docs/desktop-dark.png)
+
+The onboarding guide is distributed directly to accepted applicants. It has no
+public navigation buttons, is excluded from the sitemap and includes a noindex
+directive. Direct links remain accessible; this is not an authentication gate.
