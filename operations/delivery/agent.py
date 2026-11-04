@@ -274,7 +274,7 @@ def roll_back(config,state,component):
  before=current.get('rollback_units')
  if not before:raise DeliveryError('No previous unit snapshot for '+component)
  checks=[{'url':'http://127.0.0.1:3000/'}] if component=='web' else [{'url':'http://127.0.0.1:3400/health'},{'url':'http://127.0.0.1:3530/health'}]
- switch(before,checks);current['blocked_sha']=current.get('sha');current['sha']=current.get('previous_sha');current['status']='rolled_back';current['rollback_units']=None;save(state);record('manual_rollback',component=component)
+ switch(before,checks);current['blocked_sha']=current.get('sha');current['sha']=current.get('previous_sha');current['release']=current.get('previous_release') or (config['legacy_web'] if component=='web' else config['runtime_backend']);current['status']='rolled_back';current['rollback_units']=None;save(state);record('manual_rollback',component=component)
 
 def poll(config,state,only=None):
  for component,repo in config['repositories'].items():
@@ -282,6 +282,9 @@ def poll(config,state,only=None):
   current=state['components'].setdefault(component,{})
   try:
    sha,ci=candidate(repo)
+   if current.get('poll_incident'):
+    notify(config,component,sha,'배포 연결 복구',uuid.uuid4().hex)
+   current['poll_errors']=0;current['poll_incident']=False
    if current.get('sha')==sha or current.get('blocked_sha')==sha:continue
    if component=='backend' and current.get('sha'):
     paths=changed_paths(repo,current['sha'],sha)
@@ -302,7 +305,7 @@ def poll(config,state,only=None):
     deployment=github('repos/'+repo+'/deployments','POST',{'ref':sha,'environment':'production','auto_merge':False,'required_contexts':[],'production_environment':True,'description':'Host-verified main CI; immutable release and health-gated switch'})['id']
     github(f'repos/{repo}/deployments/{deployment}/statuses','POST',{'state':'in_progress','log_url':ci})
     result=deploy_web(config,sha,repo,log) if component=='web' else deploy_backend(config,sha,repo,current.get('sha'),log)
-    current.update(previous_sha=current.get('sha'),sha=sha,release=result[0],rollback_units=result[1],status='healthy',deployed_at=int(time.time()),failed_sha=None,candidate=None)
+    current.update(previous_sha=current.get('sha'),previous_release=current.get('release'),sha=sha,release=result[0],rollback_units=result[1],status='healthy',deployed_at=int(time.time()),failed_sha=None,candidate=None)
     save(state);job(config,event_id,component,sha,'succeeded');record('deploy_succeeded',component=component,commit=sha,id=event_id);notify(config,component,sha,'배포 성공',event_id)
     if deployment:
      try:github(f'repos/{repo}/deployments/{deployment}/statuses','POST',{'state':'success','environment_url':'https://cbgpu.com' if component=='web' else 'https://developers.cbgpu.com','log_url':ci})
@@ -317,7 +320,12 @@ def poll(config,state,only=None):
      except Exception:pass
   except Deferred as error:
    current['waiting_for']=str(error);save(state)
-  except Exception as error:record('poll_failed',component=component,error=str(error))
+  except Exception as error:
+   current['poll_errors']=current.get('poll_errors',0)+1
+   current['poll_error']=str(error);save(state)
+   record('poll_failed',component=component,error=str(error))
+   if current['poll_errors']>=3 and not current.get('poll_incident'):
+    current['poll_incident']=True;notify(config,component,current.get('sha') or 'unknown','자동 배포 연결 오류 — 인증·네트워크 확인 필요',uuid.uuid4().hex);save(state)
  flush_notifications(config)
  state['last_poll']=int(time.time());save(state)
 

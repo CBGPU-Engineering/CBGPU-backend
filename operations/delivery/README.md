@@ -94,3 +94,8 @@ Generated release caches retain at least the five newest versions per component
 and all active/rollback unit targets. Older unused versions become eligible for
 cleanup after seven days. New builds defer below 15 GiB free disk space. Code
 archives inside encrypted backups are independent of this cache retention.
+
+Three consecutive GitHub connection/authentication failures queue an operator
+alert; a subsequent verified CI check queues a recovery alert. Monitoring and
+code delivery are independent: an unavailable GitHub API never stops the running
+application. A manually rolled-back commit remains blocked until explicitly retried.
