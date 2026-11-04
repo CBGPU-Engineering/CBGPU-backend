@@ -126,9 +126,10 @@ def process_outbox():
  for row in rows:
   role=next((r for r in ROLES if r['id']==row['role']),{'name':'앱 개발 (이전 모집)' if row['role']=='mobile' else '이전 모집 분야'})
   body={'from':'CBGPU Careers <info@cbgpu.com>','to':['info@cbgpu.com'],'subject':f"[CBGPU 지원 접수] {role['name']} · {row['id']}",'html':f"<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:32px'><img src='https://careers.cbgpu.com/logo.png' width='40' alt='CBGPU'><h1>새로운 동료의 지원서가 도착했어요.</h1><p>{role['name']}</p><p>접수 번호: <b>{row['id']}</b></p><p>개인정보 보호를 위해 지원 내용은 메일에 포함하지 않았어요. 개발자 터미널에서 careers 관리 명령으로 확인해주세요.</p><a href='https://developers.cbgpu.com' style='background:#3182f6;color:white;padding:14px 20px;display:inline-block;border-radius:10px;text-decoration:none'>개발자 페이지 열기</a></div>"}
-  req=urllib.request.Request('https://api.resend.com/emails',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json','Idempotency-Key':'careers-'+row['id']},method='POST')
+  req=urllib.request.Request('https://api.resend.com/emails',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json','User-Agent':'CBGPU-Careers/1.0','Idempotency-Key':'careers-'+row['id']},method='POST')
   try:
-   with urllib.request.urlopen(req,timeout=20) as response:json.load(response)
+   with urllib.request.urlopen(req,timeout=20) as response:accepted=json.load(response)
+   if not accepted.get('id'):raise ValueError('Mail provider acknowledgement missing')
    with connect() as c:c.execute('UPDATE applications SET notified=1 WHERE id=?',(row['id'],))
   except Exception:print('Recruitment notification pending; retrying later.',flush=True);break
 

@@ -249,10 +249,12 @@ def flush_notifications(config):
   item=read(path);subject=f"[CBGPU 운영] {item['component']} {item['status']} · {item['commit'][:12]}"
   body={'from':'CBGPU Operations <info@cbgpu.com>','to':['info@cbgpu.com'],'subject':subject,'html':f"<div style='font-family:Arial,sans-serif;padding:28px;max-width:560px'><h2>CBGPU 배포 상태</h2><p>{item['component']}: <b>{item['status']}</b></p><p>커밋: {item['commit'][:12]}</p><p>상세 로그는 개발자 페이지에서 확인해주세요.</p><a href='https://developers.cbgpu.com' style='background:#004fe8;color:white;padding:12px 18px;border-radius:8px;display:inline-block'>개발자 페이지 열기</a></div>"}
   try:
-   request=urllib.request.Request('https://api.resend.com/emails',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json','Idempotency-Key':'cbgpu-delivery-'+item['id']})
-   with urllib.request.urlopen(request,timeout=15) as response:json.load(response)
-   path.unlink()
-  except Exception:break
+   request=urllib.request.Request('https://api.resend.com/emails',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json','User-Agent':'CBGPU-Operations/1.0','Idempotency-Key':'cbgpu-delivery-'+item['id']})
+   with urllib.request.urlopen(request,timeout=15) as response:accepted=json.load(response)
+   if not accepted.get('id'):raise DeliveryError('Notification provider did not acknowledge the message.')
+   path.unlink();time.sleep(0.6)
+  except Exception:
+   record('notification_deferred',component=item['component'],id=item['id']);break
 
 def recover_transaction():
  journal=read(ROOT/'transaction.json')
