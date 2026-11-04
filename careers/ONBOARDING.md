@@ -19,7 +19,6 @@ invite the correct account.** Create a GitHub account first if needed.
 Hi, I'm [name] and I'm joining CBGPU!
 Role / interests: [frontend / backend / Android / iOS / platform & infrastructure / design / product]
 GitHub ID: [username]
-GitHub profile: https://github.com/[username]
 I'd like to work on: [one sentence]
 ```
 
