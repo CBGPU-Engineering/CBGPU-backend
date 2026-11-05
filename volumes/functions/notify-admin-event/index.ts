@@ -21,13 +21,16 @@ Deno.serve(async (req) => {
 
   let title: string;
   let body: string;
+  let url: string;
   if (type === 'signup') {
     const label = payload.full_name ? `${payload.full_name}(${payload.student_id ?? '학번 미입력'})` : '새 사용자';
     title = '새 회원가입';
     body = `${label}님이 가입했습니다. 승인이 필요합니다.`;
+    url = 'https://admin.cbgpu.com/admin/m?tab=signups&from=app';
   } else if (type === 'gpu_request') {
     title = 'GPU 예약 신청';
     body = `GPU #${payload.gpu_id} 예약 신청이 들어왔습니다.`;
+    url = 'https://admin.cbgpu.com/admin/m?tab=gpu&from=app';
   } else {
     return Response.json({ message: 'invalid type' }, { status: 400, headers: corsHeaders });
   }
@@ -50,7 +53,7 @@ Deno.serve(async (req) => {
   let failed = 0;
   for (const deviceToken of deviceTokens) {
     try {
-      await sendFcmPush(serviceAccount.project_id, accessToken, deviceToken, title, body);
+      await sendFcmPush(serviceAccount.project_id, accessToken, deviceToken, title, body, undefined, { url });
       notified++;
     } catch {
       failed++;
