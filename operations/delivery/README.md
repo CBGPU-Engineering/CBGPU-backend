@@ -99,3 +99,9 @@ Three consecutive GitHub connection/authentication failures queue an operator
 alert; a subsequent verified CI check queues a recovery alert. Monitoring and
 code delivery are independent: an unavailable GitHub API never stops the running
 application. A manually rolled-back commit remains blocked until explicitly retried.
+
+After independently applying and verifying a protected infrastructure migration,
+an operator can acknowledge that exact CI-passed backend main commit with
+`agent.py --approve-backend FULL_SHA --only backend`. This does not execute any
+migration: it records the operator's completed rollout and permits application
+activation for that one commit. Future protected commits still stop for review.

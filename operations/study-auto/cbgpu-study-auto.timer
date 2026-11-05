@@ -1,0 +1,10 @@
+[Unit]
+Description=Check weekday self-study schedules from 07:30 to 15:30 KST
+[Timer]
+OnCalendar=Mon..Fri *-*-* 07:30..59:00 Asia/Seoul
+OnCalendar=Mon..Fri *-*-* 08..14:*:00 Asia/Seoul
+OnCalendar=Mon..Fri *-*-* 15:00..30:00 Asia/Seoul
+AccuracySec=5s
+Persistent=true
+[Install]
+WantedBy=timers.target

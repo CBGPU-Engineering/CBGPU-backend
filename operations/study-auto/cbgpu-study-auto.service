@@ -1,0 +1,11 @@
+[Unit]
+Description=CBGPU opt-in weekday self-study applications
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/cbgpu-study-auto/trigger.py
+TimeoutStartSec=180s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes

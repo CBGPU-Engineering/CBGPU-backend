@@ -156,7 +156,7 @@ def deploy_web(config,sha,repo,log):
   build(['npm','run','build'],directory,env,log)
   atomic(directory/'.delivery-built',sha)
  # Preserve the exact build environment for restart; do not publish it.
- atomic(directory/'.env.production.local','\n'.join(k+'='+v for k,v in env.items() if (k.startswith('NEXT_PUBLIC_') or k in ['SUPABASE_SERVICE_ROLE_KEY','EDUSET_TOKEN_SECRET','RESEND_API_KEY','CBGPU_EMAIL_FROM','CBGPU_TRAFFIC_SECRET']))+'\n')
+ atomic(directory/'.env.production.local','\n'.join(k+'='+v for k,v in env.items() if (k.startswith('NEXT_PUBLIC_') or k in ['SUPABASE_SERVICE_ROLE_KEY','EDUSET_TOKEN_SECRET','RESEND_API_KEY','CBGPU_EMAIL_FROM','CBGPU_TRAFFIC_SECRET','CBGPU_STUDY_AUTOMATION_SECRET']))+'\n')
  args=['/usr/bin/node',str(directory/'node_modules/next/dist/bin/next'),'start',str(directory),'--hostname','127.0.0.1','--port','3002']
  with preview(args,env,'http://127.0.0.1:3002/api/health',sha):
   for host in ['cbgpu.com','app.cbgpu.com','docs.cbgpu.com','arxiv.cbgpu.com']:
@@ -192,10 +192,10 @@ def backup_sqlite(config,sha):
   target=folder/file;target.parent.mkdir(parents=True,exist_ok=True)
   with contextlib.closing(sqlite3.connect('file:'+str(path)+'?mode=ro',uri=True)) as source,contextlib.closing(sqlite3.connect(target)) as destination:source.backup(destination)
 
-def deploy_backend(config,sha,repo,previous,log):
+def deploy_backend(config,sha,repo,previous,log,approved=False):
  paths=changed_paths(repo,previous,sha)
  protected=[p for p in paths if p.startswith(('schema/','volumes/','gpu/','latex/')) or p in ['docker-compose.yml','.gitmodules']]
- if protected:raise Deferred('Infrastructure/schema changes require a separate rollout: '+', '.join(protected[:8]))
+ if protected and not approved:raise Deferred('Infrastructure/schema changes require a separate rollout: '+', '.join(protected[:8]))
  if busy_backend(config):raise Deferred('User deployment is running; waiting without interrupting its workers.')
  directory=checkout('backend',repo,sha);runtime=Path(config['runtime_backend'])
  for name in ['private','.env','functions.env','backups','releases']:
@@ -291,7 +291,7 @@ def poll(config,state,only=None):
    if component=='backend' and current.get('sha'):
     paths=changed_paths(repo,current['sha'],sha)
     protected=[p for p in paths if p.startswith(('schema/','volumes/','gpu/','latex/')) or p in ['docker-compose.yml','.gitmodules']]
-    if protected:raise Deferred('Infrastructure/schema changes require a separate rollout: '+', '.join(protected[:8]))
+    if protected and current.get('approved_infrastructure_sha')!=sha:raise Deferred('Infrastructure/schema changes require a separate rollout: '+', '.join(protected[:8]))
    if component=='backend' and busy_backend(config):raise Deferred('Waiting for active user deployment workers to finish.')
    if current.get('failed_sha')==sha:continue # Explicit retry is required after a failed deployment.
    if current.get('attempt_at',0)>time.time()-120:continue
@@ -306,7 +306,7 @@ def poll(config,state,only=None):
    try:
     deployment=github('repos/'+repo+'/deployments','POST',{'ref':sha,'environment':'production','auto_merge':False,'required_contexts':[],'production_environment':True,'description':'Host-verified main CI; immutable release and health-gated switch'})['id']
     github(f'repos/{repo}/deployments/{deployment}/statuses','POST',{'state':'in_progress','log_url':ci})
-    result=deploy_web(config,sha,repo,log) if component=='web' else deploy_backend(config,sha,repo,current.get('sha'),log)
+    result=deploy_web(config,sha,repo,log) if component=='web' else deploy_backend(config,sha,repo,current.get('sha'),log,approved=current.get('approved_infrastructure_sha')==sha)
     current.update(previous_sha=current.get('sha'),previous_release=current.get('release'),sha=sha,release=result[0],rollback_units=result[1],status='healthy',deployed_at=int(time.time()),failed_sha=None,candidate=None)
     save(state);job(config,event_id,component,sha,'succeeded');record('deploy_succeeded',component=component,commit=sha,id=event_id);notify(config,component,sha,'배포 성공',event_id)
     if deployment:
@@ -332,7 +332,7 @@ def poll(config,state,only=None):
  state['last_poll']=int(time.time());save(state)
 
 def main():
- parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--once',action='store_true');parser.add_argument('--status',action='store_true');parser.add_argument('--only',choices=['web','backend']);parser.add_argument('--retry',choices=['web','backend']);parser.add_argument('--rollback',choices=['web','backend']);parser.add_argument('--pause',action='store_true');parser.add_argument('--resume',action='store_true');args=parser.parse_args()
+ parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--once',action='store_true');parser.add_argument('--status',action='store_true');parser.add_argument('--only',choices=['web','backend']);parser.add_argument('--retry',choices=['web','backend']);parser.add_argument('--rollback',choices=['web','backend']);parser.add_argument('--approve-backend',metavar='SHA',help='Acknowledge a separately completed infrastructure rollout for this exact CI-passed main SHA');parser.add_argument('--pause',action='store_true');parser.add_argument('--resume',action='store_true');args=parser.parse_args()
  os.umask(0o077);ROOT.mkdir(parents=True,exist_ok=True,mode=0o700)
  if args.status:
   state=read(STATE,{'components':{},'paused':False})
@@ -343,6 +343,10 @@ def main():
   config=read(CONFIG);state=read(STATE,{'components':{},'paused':False})
   if args.status:
    visible={**state,'components':{k:{x:y for x,y in v.items() if x!='rollback_units'} for k,v in state['components'].items()}};print(json.dumps(visible,indent=2));return
+  if args.approve_backend:
+   expected,_=candidate(config['repositories']['backend'])
+   if not SHA.fullmatch(args.approve_backend) or args.approve_backend!=expected:raise DeliveryError('Infrastructure acknowledgement must match the current CI-passed main commit.')
+   current=state['components'].setdefault('backend',{});current['approved_infrastructure_sha']=expected;current['attempt_at']=0;save(state);record('manual_infrastructure_acknowledged',commit=expected)
   if args.pause or args.resume:state['paused']=args.pause;save(state);record('paused' if args.pause else 'resumed');return
   if args.rollback:roll_back(config,state,args.rollback);return
   if args.retry:
