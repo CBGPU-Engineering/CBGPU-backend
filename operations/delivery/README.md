@@ -105,3 +105,5 @@ an operator can acknowledge that exact CI-passed backend main commit with
 `agent.py --approve-backend FULL_SHA --only backend`. This does not execute any
 migration: it records the operator's completed rollout and permits application
 activation for that one commit. Future protected commits still stop for review.
+
+Public Next.js static assets from three previous builds are retained during delivery so an already-open admin or user tab can finish loading after a release. Original file lists keep this retention bounded; current assets are never overwritten, and server files or symlinks are never copied.

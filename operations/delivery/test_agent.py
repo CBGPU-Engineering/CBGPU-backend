@@ -32,4 +32,18 @@ class Gate(unittest.TestCase):
  def test_compare_rejects_divergent_main_history(self):
   with patch.object(a,'github',return_value={'status':'diverged','files':[]}):
    with self.assertRaises(a.Deferred):a.changed_paths('repo','a','b')
+class RetainedAssets(unittest.TestCase):
+ def test_keeps_prior_public_chunks_without_overwriting_current_or_copying_server_secrets(self):
+  with tempfile.TemporaryDirectory() as tmp,patch.object(a,'ROOT',Path(tmp)):
+   root=Path(tmp)/'releases/web';old=root/('a'*40)/'web';new=root/('b'*40)/'web'
+   for p in [old,new]:(p/'.next-production/static/chunks').mkdir(parents=True);(p/'.delivery-built').touch()
+   (old/'.next-production/static/chunks/old.js').write_text('old');(old/'.next-production/static/chunks/shared.js').write_text('previous')
+   (new/'.next-production/static/chunks/shared.js').write_text('current');(old/'.next-production/server').mkdir();(old/'.next-production/server/secret').write_text('private')
+   (old/'.next-production/static/chunks/link.js').symlink_to(old/'.next-production/server/secret')
+   self.assertEqual(a.retain_web_assets(new),1)
+   self.assertEqual((new/'.next-production/static/chunks/old.js').read_text(),'old')
+   self.assertEqual((new/'.next-production/static/chunks/shared.js').read_text(),'current')
+   self.assertFalse((new/'.next-production/static/chunks/link.js').exists())
+   self.assertNotIn('chunks/old.js',json.loads((new/'.delivery-own-static.json').read_text()))
+
 if __name__=='__main__':unittest.main()

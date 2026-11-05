@@ -147,6 +147,26 @@ def cleanup_releases(state):
    except OSError:pass
    record('old_release_pruned',component=component,commit=release.name)
 
+def retain_web_assets(directory):
+ # A browser can still have the previous admin page open during delivery.
+ # Keep only public static files from three prior builds, never server code.
+ directory=Path(directory);target=directory/'.next-production/static'
+ own=directory/'.delivery-own-static.json'
+ if not own.exists():atomic(own,json.dumps([str(p.relative_to(target)) for p in target.rglob('*') if p.is_file() and not p.is_symlink()]))
+ releases=ROOT/'releases/web'
+ previous=sorted((p/'web' for p in releases.iterdir() if p.is_dir() and SHA.fullmatch(p.name) and p/'web'!=directory and (p/'web/.delivery-built').exists()),key=lambda p:p.stat().st_mtime,reverse=True)[:3] if releases.exists() else []
+ copied=0
+ for release in previous:
+  source=release/'.next-production/static';index=release/'.delivery-own-static.json'
+  files=read(index) if index.exists() else [str(p.relative_to(source)) for p in source.rglob('*') if p.is_file() and not p.is_symlink()]
+  for name in files:
+   relative=Path(name)
+   if relative.is_absolute() or '..' in relative.parts:continue
+   src=source/relative;dst=target/relative
+   if src.is_symlink() or not src.is_file() or not src.resolve().is_relative_to(source.resolve()) or dst.exists():continue
+   dst.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(src,dst);copied+=1
+ return copied
+
 def deploy_web(config,sha,repo,log):
  directory=checkout('web',repo,sha);env=runtime_env(config);env.update(NEXT_BUILD_DIR='.next-production',CBGPU_RELEASE_SHA=sha,NEXT_TELEMETRY_DISABLED='1')
  apk=Path(config['legacy_web'])/'public/downloads/cbgpu.apk';target=directory/'public/downloads/cbgpu.apk'
@@ -155,6 +175,7 @@ def deploy_web(config,sha,repo,log):
   build(['npm','ci','--no-audit','--no-fund'],directory,env,log)
   build(['npm','run','build'],directory,env,log)
   atomic(directory/'.delivery-built',sha)
+ retain_web_assets(directory)
  # Preserve the exact build environment for restart; do not publish it.
  atomic(directory/'.env.production.local','\n'.join(k+'='+v for k,v in env.items() if (k.startswith('NEXT_PUBLIC_') or k in ['SUPABASE_SERVICE_ROLE_KEY','EDUSET_TOKEN_SECRET','RESEND_API_KEY','CBGPU_EMAIL_FROM','CBGPU_TRAFFIC_SECRET','CBGPU_STUDY_AUTOMATION_SECRET']))+'\n')
  args=['/usr/bin/node',str(directory/'node_modules/next/dist/bin/next'),'start',str(directory),'--hostname','127.0.0.1','--port','3002']
