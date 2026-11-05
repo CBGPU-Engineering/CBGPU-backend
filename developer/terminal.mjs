@@ -10,7 +10,9 @@ const allowedOrigins=new Set(['https://developers.cbgpu.com','http://127.0.0.1:3
 export function browserTerminal({server,session,cwd,audit=()=>{}}) {
  const tickets=new Map(),connections=new Map();
  const folder=process.env.CBGPU_PORTAL_ROOT?path.join(process.env.CBGPU_PORTAL_ROOT,'private/terminals'):path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../private/terminals');fs.mkdirSync(folder,{recursive:true,mode:0o700});
- const socketPath=path.join(folder,'tmux.sock'),configPath=path.join(path.dirname(fileURLToPath(import.meta.url)),'tmux.conf');
+ // Release directories can exceed AF_UNIX's 108-byte socket path limit.
+ // Resolve the persistent private-directory symlink before passing it to tmux.
+ const socketPath=path.join(fs.realpathSync(folder),'tmux.sock'),configPath=path.join(path.dirname(fileURLToPath(import.meta.url)),'tmux.conf');
  const sockets=new WebSocketServer({noServer:true,maxPayload:65536,perMessageDeflate:false});
  const deny=(socket,status=403)=>{socket.end(`HTTP/1.1 ${status} Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)};
  function stop(ws,c,code,reason){try{c.child.kill()}catch{}ws.close(code,reason)}
