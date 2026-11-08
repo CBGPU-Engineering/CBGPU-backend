@@ -16,7 +16,7 @@ class Reception(unittest.TestCase):
  def form(self):return dict(role='frontend',name='Test applicant',email='test@example.com',motivation='A test motivation that is longer than twenty characters.',consent=True,token=s.token())
  def test_onboarding_is_an_independent_rendered_page(self):
   with urllib.request.urlopen(self.base+'/onboarding') as response:page=response.read().decode()
-  self.assertIn('CBGPU Engineering',page);self.assertIn('GitHub ID',page);self.assertIn('join.slack.com/t/cbgpuengineering',page);self.assertIn('cbgpu.atlassian.net',page);self.assertIn('src="/onboarding.js"',page);self.assertNotIn('src="/app.js"',page)
+  self.assertIn('CBGPU Engineering',page);self.assertIn('GitHub ID',page);self.assertIn('join.slack.com/t/cbgpuengineering',page);self.assertNotIn('cbgpu.atlassian.net',page);self.assertIn('Jira 초대받을 이메일',page);self.assertIn('수동으로 초대',page);self.assertIn('src="/onboarding.js"',page);self.assertNotIn('src="/app.js"',page)
  def test_accepts_once_and_keeps_private(self):
   data=self.form();status,result=self.post(data);self.assertEqual(status,201);self.assertEqual(self.post(data),(200,result))
   with s.connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM applications WHERE id=?',(result['reference'],)).fetchone()[0],1)
