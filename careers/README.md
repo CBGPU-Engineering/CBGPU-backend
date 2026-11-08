@@ -59,7 +59,7 @@ retried every minute, with a provider idempotency key; a failed email never disc
 an application. `notified=1` records successful provider acceptance, not inbox delivery.
 
 Slack/Jira links come from the team owner. Invites may expire and do not grant GitHub
-organization access automatically. Onboarding requires joining Slack and posting a GitHub ID and Jira invitation email there so the team can invite each account manually,
+organization access automatically. Onboarding requires joining Slack, signing up for Jira, and posting a GitHub ID and Jira signup email in Slack so the team can invite each account manually,
 followed by the team's explicit organization invitation. Checklist state is not saved.
 
 ## Content and checks
