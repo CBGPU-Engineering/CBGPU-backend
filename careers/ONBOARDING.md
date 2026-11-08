@@ -9,28 +9,30 @@ Open the [CBGPU Engineering invitation](https://join.slack.com/t/cbgpuengineerin
 Sign in or create a Slack account, confirm the workspace, and set a recognizable
 display name. If the invitation expires, contact `info@cbgpu.com` for a new link.
 
-## 2. Post your introduction and GitHub ID
+## 2. Sign up for Jira
 
-Post this introduction in the default conversation channel, or the introduction
-channel your team contact specifies. **Your GitHub ID is required so the team can
-invite the correct account.** Create a GitHub account first if needed.
+Open [CBGPU Jira](https://cbgpu.atlassian.net/?continue=https%3A%2F%2Fcbgpu.atlassian.net%2Fwelcome%2Fsoftware%3FprojectId%3D10000&atlOrigin=eyJpIjoiZTNmMTVjMDAwNjNlNGRiODkwZTNjNmRhNDQ4MTMzMjkiLCJwIjoiamlyYS1zb2Z0d2FyZSJ9)
+and create an Atlassian account or sign in with an existing account. Check the email
+used for that Jira account and include it in your Slack introduction in the next
+step, even if it differs from your Slack email. If the project is not visible yet,
+the team can use that email to invite you. Share any access error message too.
+The link itself does not grant access.
+
+## 3. Post your introduction and account details in Slack
+
+After joining Slack and signing up for Jira, post this introduction in the default conversation channel, or the introduction
+channel your team contact specifies. **Include both your GitHub ID and the email used to sign up for Jira so the team can
+invite the correct accounts.** Create a GitHub account first if needed.
 
 ```text
 Hi, I'm [name] and I'm joining CBGPU!
 Role / interests: [frontend / backend / Android / iOS / platform & infrastructure / design / product]
 GitHub ID: [username]
+Jira signup email: [Atlassian account email]
 I'd like to work on: [one sentence]
 ```
 
 Do not post passwords, authentication codes, tokens, or private credentials.
-
-## 3. Open Jira
-
-Open [CBGPU Jira](https://cbgpu.atlassian.net/?continue=https%3A%2F%2Fcbgpu.atlassian.net%2Fwelcome%2Fsoftware%3FprojectId%3D10000&atlOrigin=eyJpIjoiZTNmMTVjMDAwNjNlNGRiODkwZTNjNmRhNDQ4MTMzMjkiLCJwIjoiamlyYS1zb2Z0d2FyZSJ9)
-and sign in with an Atlassian account. Using the same email as Slack makes it
-easier for the team to find you. If the project is not visible, ask your team
-contact in Slack to invite that email. A project invitation may be required;
-the link itself does not grant access.
 
 ## 4. Accept your GitHub invitation
 
