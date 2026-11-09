@@ -45,3 +45,10 @@ input,select,textarea,.field select,.sql-editor,.editor-value textarea,.button,.
 
 /* The operator portals use the same Korean/Latin stack as the main website. */
 :root{--font-sans:"Pretendard Variable",Pretendard,"Noto Sans KR","Apple SD Gothic Neo",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-family:var(--font-sans);font-synthesis:weight}
+
+/* Sign-in forms match the web app: 30px/600 title, 14px labels, 48px inputs (10px radius), 18px card. */
+.login-card{border-radius:18px}
+.login-card h1{font-size:30px;font-weight:600;line-height:1.25;letter-spacing:-.025em}
+.login-card label{font-size:14px;font-weight:600}
+.login-card input{border-radius:10px;padding:10px 14px;font-size:15px;font-weight:500}
+.login-card .button{min-height:48px;border-radius:10px;font-size:15px}
