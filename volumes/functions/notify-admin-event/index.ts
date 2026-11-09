@@ -1,4 +1,4 @@
-// Called by AFTER INSERT triggers on profiles (new signup) and reservations
+// Called by AFTER INSERT triggers on profiles (new signup) and reservations, and by monitoring scripts (ops_alert)
 // (new GPU request) — see ../../notify_triggers_migration.sql. Notifies
 // every admin (profiles.is_admin = true). Android-only, same FCM setup as
 // the rest of the app.
@@ -31,6 +31,15 @@ Deno.serve(async (req) => {
     title = 'GPU 예약 신청';
     body = `GPU #${payload.gpu_id} 예약 신청이 들어왔습니다.`;
     url = 'https://admin.cbgpu.com/admin/m?tab=gpu&from=app';
+  } else if (type === 'ops_alert') {
+    // Operator alerts (school connection expiring/expired, health probe failing, ...). Sent by our own
+    // monitoring scripts with the internal secret; text is length-limited and the link must be ours.
+    title = String(payload.title ?? '').slice(0, 60);
+    body = String(payload.body ?? '').slice(0, 160);
+    if (!title || !body) return Response.json({ message: 'title and body are required' }, { status: 400, headers: corsHeaders });
+    url = typeof payload.url === 'string' && /^https:\/\/(admin|app)\.cbgpu\.com\//.test(payload.url)
+      ? payload.url
+      : 'https://admin.cbgpu.com/admin/m?from=app';
   } else {
     return Response.json({ message: 'invalid type' }, { status: 400, headers: corsHeaders });
   }
