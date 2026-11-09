@@ -172,7 +172,7 @@
   }
   function renderHealth(health = {}) {
     const grid = $('health-grid'); grid.replaceChildren();
-    for (const [key, title] of [['frontend', 'Frontend'], ['backend', 'Backend API'], ['database', 'Database'], ['controller', 'Controller'], ['materials', 'File sharing']]) {
+    for (const [key, title] of [['frontend', 'Frontend'], ['backend', 'Backend API'], ['database', 'Database'], ['controller', 'Controller'], ['materials', 'File sharing'], ['study','Study lookup']]) {
       const status = normalizeHealth(health[key]); const card = element('article', 'health-card');
       card.append(element('h3', '', title)); const value = element('p', 'health-value');
       const dot = element('span', 'status-dot ' + status.className); dot.setAttribute('aria-hidden', 'true');
