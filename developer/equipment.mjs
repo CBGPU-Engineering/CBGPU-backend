@@ -49,7 +49,7 @@ export function equipmentPortals({root,settings,env,run,audit,frontendPort=3000}
    if(req.headers.origin!=='https://'+host||req.headers['x-csrf-token']!==s.csrf){reply(res,403,{error:'Invalid request verification'});return true}
    reply(res,200,auth.logout(s,res));return true;
   }
-  if(pathname==='/portal/session'&&req.method==='GET'){if(!s){reply(res,401,{error:'Please sign in.'});return true}reply(res,200,{user_id:s.user_id,csrf_token:s.csrf,session:auth.nativeSession(s),equipment_kind:kind});return true}
+  if(pathname==='/portal/session'&&req.method==='GET'){if(!s){reply(res,401,{error:'Please sign in.'});return true}reply(res,200,{user_id:s.user_id,auth_session_id:s.auth_session_id,csrf_token:s.csrf,session:auth.nativeSession(s),equipment_kind:kind});return true}
   if(pathname.startsWith('/portal/')||pathname.startsWith('/api/')&&pathname!=='/api/manufacturing/access'&&pathname!=='/api/timetable'&&!/^\/api\/study\/(?:proxy|auth)(?:\/|$)/.test(pathname)){reply(res,404,{error:'Not found'});return true}
   if(pathname==='/'){
    if(s){res.writeHead(303,{Location:'/manage/manufacturing'});res.end()}else loginPage(req,res,kind);return true;
