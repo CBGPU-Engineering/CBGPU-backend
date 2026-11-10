@@ -6,11 +6,12 @@ from pathlib import Path
 from core import Store,Failure,MAX_UPLOAD,valid_id
 from scheduler import Scheduler
 from corpus import Corpus
+from conversations import Conversations
 
 class AIHTTPServer(ThreadingHTTPServer):
     daemon_threads=True
     def __init__(self,address,store,scheduler,key,corpus=None):
-        super().__init__(address,Handler);self.store=store;self.scheduler=scheduler;self.key=key;self.corpus=corpus;self.requests=defaultdict(deque);self.rate_lock=threading.Lock()
+        super().__init__(address,Handler);self.store=store;self.scheduler=scheduler;self.key=key;self.corpus=corpus;self.conversations=Conversations(store);self.requests=defaultdict(deque);self.rate_lock=threading.Lock()
     def rate(self,owner):
         with self.rate_lock:
             now=time.time();q=self.requests[owner]
@@ -77,6 +78,16 @@ class Handler(BaseHTTPRequestHandler):
                 with value.open('rb') as stream:
                     while chunk:=stream.read(1024*1024):self.wfile.write(chunk)
             return
+        if parts==['chats']:
+            if self.command=='GET':self.reply(200,{'chats':self.server.conversations.list(owner)});return
+            if self.command=='POST':self.reply(201,{'chat':self.server.conversations.create(owner)});return
+        if len(parts) in [2,3] and parts[0]=='chats' and valid_id(parts[1]):
+            chats=self.server.conversations;id=parts[1]
+            if len(parts)==2:
+                if self.command=='GET':self.reply(200,{'chat':chats.get(owner,id)});return
+                if self.command=='POST':self.reply(200,{'chat':chats.rename(owner,id,self.body().get('title'))});return
+                if self.command=='DELETE':chats.delete(owner,id);self.reply(200,{'ok':True});return
+            if parts[2:]==['messages'] and self.command=='POST':self.reply(202,{'chat':chats.send(owner,id,self.body().get('content'))});return
         if parts==['keys']:
             if self.command=='GET':self.reply(200,{'keys':store.keys(owner)});return
             if self.command=='POST':self.reply(201,store.create_key(owner,self.body().get('name')));return
