@@ -213,6 +213,48 @@ def backup_sqlite(config,sha):
   target=folder/file;target.parent.mkdir(parents=True,exist_ok=True)
   with contextlib.closing(sqlite3.connect('file:'+str(path)+'?mode=ro',uri=True)) as source,contextlib.closing(sqlite3.connect(target)) as destination:source.backup(destination)
 
+FUNCTIONS_CONTAINER=os.environ.get('CBGPU_FUNCTIONS_CONTAINER','cbgpu-supabase-edge-functions')
+def functions_healthy(timeout=60):
+ """The edge-functions container must report healthy after a restart."""
+ deadline=time.time()+timeout
+ while time.time()<deadline:
+  try:
+   if command(['docker','inspect','--format','{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}',FUNCTIONS_CONTAINER],timeout=20) in ('healthy','running'):return True
+  except DeliveryError:pass
+  time.sleep(2)
+ return False
+def sync_functions(directory,runtime,paths,sha):
+ """The edge-functions container serves runtime/volumes/functions, which a release checkout never replaces, so
+ 'deployed' function changes used to stay offline. Copy only the files this release changed (never delete),
+ keep the previous copies, restart the container and require it to be healthy; otherwise restore and restart."""
+ changed=[p for p in paths if p.startswith('volumes/functions/') and not any(part in ('','.','..') for part in p.split('/'))]
+ if not changed:return []
+ backup=runtime/'backups'/('functions-'+sha[:12]);applied=[]
+ try:
+  for rel in changed:
+   source=directory/rel;target=runtime/rel
+   if not source.is_file() or source.is_symlink():continue # removals and links are never applied automatically
+   target.parent.mkdir(parents=True,exist_ok=True)
+   existed=target.is_file()
+   if existed:
+    (backup/rel).parent.mkdir(parents=True,exist_ok=True);shutil.copy2(target,backup/rel)
+   temp=target.with_name(target.name+'.new-'+uuid.uuid4().hex);shutil.copy2(source,temp);os.replace(temp,target)
+   applied.append((rel,existed))
+  if not applied:return []
+  command(['docker','restart',FUNCTIONS_CONTAINER],timeout=90)
+  if not functions_healthy():raise DeliveryError('Edge functions did not become healthy after the update.')
+  return [rel for rel,_ in applied]
+ except BaseException:
+  for rel,existed in reversed(applied):
+   target=runtime/rel
+   try:
+    if existed:shutil.copy2(backup/rel,target)
+    else:target.unlink()
+   except OSError:pass
+  if applied:
+   with contextlib.suppress(Exception):command(['docker','restart',FUNCTIONS_CONTAINER],timeout=90)
+  raise
+
 def deploy_backend(config,sha,repo,previous,log,approved=False):
  paths=changed_paths(repo,previous,sha)
  protected=[p for p in paths if p.startswith(('schema/','volumes/','gpu/','latex/')) or p in ['docker-compose.yml','.gitmodules']]
@@ -238,6 +280,8 @@ def deploy_backend(config,sha,repo,previous,log,approved=False):
   with preview(['/usr/bin/python3',str(directory/'careers/server.py'),'--port','13530'],candidate_env,'http://127.0.0.1:13530/health'):pass
  if busy_backend(config):raise Deferred('A user deployment started during validation; rollout deferred.')
  backup_sqlite(config,sha)
+ synced=sync_functions(directory,runtime,paths,sha)
+ if synced:record('functions_synced',component='backend',commit=sha,files=synced)
  units={};checks=[]
  definitions=[('careers','cbgpu-careers.service','/usr/bin/python3 '+str(directory/'careers/server.py')+' --port 3530','http://127.0.0.1:3530/health'),('developer','cbgpu-developer-portal.service','/usr/bin/node '+str(directory/'developer/server.mjs'),'http://127.0.0.1:3400/health'),('deploy','cbgpu-deploy.service','/usr/bin/node '+str(directory/'deploy/server.mjs'),'http://127.0.0.1:3510/health')]
  for prefix,name,execution,url in definitions:

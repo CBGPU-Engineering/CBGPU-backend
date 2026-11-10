@@ -47,3 +47,41 @@ class RetainedAssets(unittest.TestCase):
    self.assertNotIn('chunks/old.js',json.loads((new/'.delivery-own-static.json').read_text()))
 
 if __name__=='__main__':unittest.main()
+
+class FunctionSync(unittest.TestCase):
+ def setup(self,tmp):
+  directory=Path(tmp)/'release';runtime=Path(tmp)/'live'
+  for base,text in ((directory,'new'),(runtime,'old')):
+   (base/'volumes/functions/notify').mkdir(parents=True);(base/'volumes/functions/notify/index.ts').write_text(text)
+   (base/'volumes/functions/_shared').mkdir();(base/'volumes/functions/_shared/fcm.ts').write_text(text)
+  (runtime/'volumes/functions/untouched.ts').write_text('keep');return directory,runtime
+ def test_only_changed_function_files_are_copied_backed_up_and_the_container_restarted_once(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   directory,runtime=self.setup(tmp)
+   with patch.object(a,'command') as cmd,patch.object(a,'functions_healthy',return_value=True):
+    done=a.sync_functions(directory,runtime,['volumes/functions/notify/index.ts','README.md','volumes/other.txt'],'c'*40)
+   self.assertEqual(done,['volumes/functions/notify/index.ts'])
+   self.assertEqual((runtime/'volumes/functions/notify/index.ts').read_text(),'new')
+   self.assertEqual((runtime/'volumes/functions/_shared/fcm.ts').read_text(),'old')
+   self.assertEqual((runtime/'volumes/functions/untouched.ts').read_text(),'keep')
+   self.assertEqual((runtime/'backups'/('functions-'+'c'*12)/'volumes/functions/notify/index.ts').read_text(),'old')
+   cmd.assert_called_once();self.assertEqual(cmd.call_args.args[0][:2],['docker','restart'])
+ def test_nothing_to_do_means_no_restart(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   directory,runtime=self.setup(tmp)
+   with patch.object(a,'command') as cmd:self.assertEqual(a.sync_functions(directory,runtime,['web/page.tsx'],'c'*40),[])
+   cmd.assert_not_called()
+ def test_path_traversal_and_removed_files_are_never_applied(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   directory,runtime=self.setup(tmp);(directory/'outside.txt').write_text('x')
+   with patch.object(a,'command') as cmd:
+    done=a.sync_functions(directory,runtime,['volumes/functions/../../outside.txt','volumes/functions/missing.ts'],'c'*40)
+   self.assertEqual(done,[]);self.assertFalse((runtime/'outside.txt').exists());self.assertFalse((runtime/'volumes/functions/missing.ts').exists());cmd.assert_not_called()
+ def test_unhealthy_container_restores_the_previous_files_and_restarts_again(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   directory,runtime=self.setup(tmp);(directory/'volumes/functions/brand_new.ts').write_text('n')
+   with patch.object(a,'command') as cmd,patch.object(a,'functions_healthy',return_value=False):
+    with self.assertRaises(a.DeliveryError):a.sync_functions(directory,runtime,['volumes/functions/notify/index.ts','volumes/functions/brand_new.ts'],'d'*40)
+   self.assertEqual((runtime/'volumes/functions/notify/index.ts').read_text(),'old')
+   self.assertFalse((runtime/'volumes/functions/brand_new.ts').exists())
+   self.assertEqual(cmd.call_count,2)

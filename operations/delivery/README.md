@@ -107,3 +107,12 @@ migration: it records the operator's completed rollout and permits application
 activation for that one commit. Future protected commits still stop for review.
 
 Public Next.js static assets from three previous builds are retained during delivery so an already-open admin or user tab can finish loading after a release. Original file lists keep this retention bounded; current assets are never overwritten, and server files or symlinks are never copied.
+
+## Edge functions
+
+The edge-functions container serves `<runtime_backend>/volumes/functions`, which a release checkout never replaces.
+When a release changes files under `volumes/functions/` (an approved infrastructure rollout), `deploy_backend` copies
+only those files into the runtime folder (never deleting), keeps the previous copies in
+`<runtime_backend>/backups/functions-<sha>/`, restarts `cbgpu-supabase-edge-functions`
+(`CBGPU_FUNCTIONS_CONTAINER` to override) and requires it to be healthy; otherwise it restores the previous files and
+restarts again. A `functions_synced` event lists the copied files.
