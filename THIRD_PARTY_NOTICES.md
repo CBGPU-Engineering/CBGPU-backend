@@ -28,3 +28,7 @@ CI and source releases also produce a CycloneDX SBOM for the web component using
 `npm sbom --sbom-format cyclonedx --omit=dev`. It covers installed web production
 npm packages only. Docker images, Python, Dart and operating-system packages need
 separate inventories for a complete deployment SBOM.
+
+## Local AI runtime and models
+
+The optional local AI service downloads Qwen2.5-7B-Instruct GGUF (Apache-2.0), multilingual E5-small (MIT), and faster-whisper large-v3 (MIT); exact repositories and revisions are in `ai/models.json`. Model weights and inference virtual environments are not distributed in this repository. llama-cpp-python and faster-whisper are MIT, PyTorch is BSD-style, sentence-transformers and transformers are Apache-2.0, pypdf is BSD-3-Clause, and PyAV is BSD-3-Clause with separately licensed FFmpeg components. See upstream package/model licenses before redistributing a runtime image.

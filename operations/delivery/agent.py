@@ -207,7 +207,7 @@ def busy_backend(config):
 
 def backup_sqlite(config,sha):
  folder=ROOT/'snapshots'/sha;folder.mkdir(parents=True,exist_ok=True)
- for file in ['developer.sqlite','frontend-deployments/deploy.sqlite','careers/applications.sqlite']:
+ for file in ['developer.sqlite','frontend-deployments/deploy.sqlite','careers/applications.sqlite','ai/queue.sqlite']:
   path=Path(config['runtime_backend'])/'private'/file
   if not path.exists():continue
   target=folder/file;target.parent.mkdir(parents=True,exist_ok=True)
@@ -283,7 +283,7 @@ def deploy_backend(config,sha,repo,previous,log,approved=False):
  synced=sync_functions(directory,runtime,paths,sha)
  if synced:record('functions_synced',component='backend',commit=sha,files=synced)
  units={};checks=[]
- definitions=[('careers','cbgpu-careers.service','/usr/bin/python3 '+str(directory/'careers/server.py')+' --port 3530','http://127.0.0.1:3530/health'),('developer','cbgpu-developer-portal.service','/usr/bin/node '+str(directory/'developer/server.mjs'),'http://127.0.0.1:3400/health'),('deploy','cbgpu-deploy.service','/usr/bin/node '+str(directory/'deploy/server.mjs'),'http://127.0.0.1:3510/health')]
+ definitions=[('careers','cbgpu-careers.service','/usr/bin/python3 '+str(directory/'careers/server.py')+' --port 3530','http://127.0.0.1:3530/health'),('developer','cbgpu-developer-portal.service','/usr/bin/node '+str(directory/'developer/server.mjs'),'http://127.0.0.1:3400/health'),('deploy','cbgpu-deploy.service','/usr/bin/node '+str(directory/'deploy/server.mjs'),'http://127.0.0.1:3510/health'),('ai','cbgpu-ai.service','/usr/bin/python3 '+str(directory/'ai/server.py')+' --port 3550','http://127.0.0.1:3550/health')]
  for prefix,name,execution,url in definitions:
   if previous and not any(p.startswith(prefix+'/') for p in paths):continue
   original=(SETTINGS/name).read_text()

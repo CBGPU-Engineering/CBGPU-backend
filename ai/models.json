@@ -1,0 +1,5 @@
+{
+  "chat": {"repo": "Qwen/Qwen2.5-7B-Instruct-GGUF", "revision": "bb5d59e06d9551d752d08b292a50eb208b07ab1f", "files": ["qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf", "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf"], "license": "Apache-2.0", "id": "cbgpu-chat"},
+  "embed": {"repo": "intfloat/multilingual-e5-small", "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3", "files": ["*.json", "*.txt", "*.model", "model.safetensors", "1_Pooling/*"], "license": "MIT", "id": "cbgpu-embeddings"},
+  "transcribe": {"repo": "Systran/faster-whisper-large-v3", "revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478", "files": ["*.json", "*.txt", "model.bin"], "license": "MIT", "id": "cbgpu-whisper"}
+}

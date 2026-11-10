@@ -1,0 +1,9 @@
+# Isolated inference environment; CUDA 12.x and sm_75 are supported by these builds.
+numpy==1.26.4
+av==14.2.0
+faster-whisper==1.2.1
+ctranslate2==4.6.0
+sentence-transformers==5.1.2
+transformers==4.57.1
+huggingface-hub==0.36.0
+pypdf==6.3.0

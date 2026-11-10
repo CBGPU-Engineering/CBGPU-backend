@@ -22,6 +22,8 @@ jobs:
         working-directory: developer
       - run: sudo apt-get update -qq && sudo apt-get install -y tmux
       - run: node --test developer/tests/*.test.mjs
+      - run: python3 -m unittest discover -s ai -p 'test_*.py'
+      - run: python3 -m compileall -q ai
       - run: node scripts/verify-mail-queue.mjs
       - run: node --check deploy/server.mjs && node --check developer/server.mjs
       - run: python3 -m compileall -q deploy scripts careers
