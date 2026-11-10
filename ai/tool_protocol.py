@@ -21,6 +21,9 @@ def prepare(messages,tools,choice):
     required=choice=='required' or isinstance(choice,dict)
     instruction='You are a coding agent with these available function tools. Never claim a tool ran before its result is provided. Return EXACTLY one JSON object. To request a tool: {"type":"tool","name":"FUNCTION_NAME","arguments":{...}}. To answer without a tool: {"type":"final","content":"your answer"}. '+('You MUST request one tool this turn. ' if required else '')+'Tools:\n'+json.dumps(tools,ensure_ascii=False)
     if isinstance(choice,dict):instruction+='\nUse only function: '+choice['function']['name']
+    for message in messages:
+        match=re.search(r'CBGPU_PROJECT_ROOT: ([^\n]+)',message.get('content') or '')
+        if match:instruction='Actual project root: '+match.group(1)+'. Use this real path, never invent /path/to paths.\n'+instruction;break
     output.insert(0,{'role':'system','content':instruction});return output,True
 
 def decode(result,tools,choice):

@@ -12,6 +12,8 @@ class ToolTests(unittest.TestCase):
    with self.assertRaises(ValueError):decode(self.result(value),TOOLS,'required')
  def test_tool_result_roundtrip_is_text_only(self):
   messages=[{'role':'user','content':'Read README'},{'role':'assistant','content':None,'tool_calls':[{'id':'call_fixture','type':'function','function':{'name':'read','arguments':'{}'}}]},{'role':'tool','content':'Synthetic file text','tool_call_id':'call_fixture'}];out,mode=prepare(messages,TOOLS,'auto');self.assertTrue(mode);self.assertTrue(all(isinstance(m['content'],str) and m['role'] in ['system','assistant','user'] for m in out));self.assertIn('Synthetic file text',out[-1]['content']);self.assertEqual(decode(self.result({'type':'final','content':'Done'}),TOOLS,'auto')['choices'][0]['message']['content'],'Done')
+ def test_real_project_root_is_available_before_tool_schema_examples(self):
+  out,_=prepare([{'role':'system','content':'CBGPU_PROJECT_ROOT: /tmp/synthetic-project\nWork here.'},{'role':'user','content':'Read README.md'}],TOOLS,'auto');self.assertTrue(out[0]['content'].startswith('Actual project root: /tmp/synthetic-project'))
  def test_request_limits_model_whitelist_and_pinned_paths(self):
   with tempfile.TemporaryDirectory() as root:
    store=Store(root)
