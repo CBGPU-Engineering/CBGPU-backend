@@ -21,8 +21,11 @@ export function equipmentPortals({root,settings,env,run,audit,frontendPort=3000}
  function reply(res,status,body){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body))}
  function asset(req,res,name){const file=path.join(root,'developer/static',name),type=name.endsWith('.js')?'text/javascript; charset=utf-8':name.endsWith('.css')?'text/css; charset=utf-8':name.endsWith('.png')?'image/png':'text/html; charset=utf-8';res.writeHead(200,{'Content-Type':type});res.end(req.method==='HEAD'?undefined:fs.readFileSync(file))}
  async function json(req){let body='';for await(const part of req){body+=part;if(Buffer.byteLength(body)>4096)throw Object.assign(Error('Request too large'),{status:413})}try{return JSON.parse(body||'{}')}catch{throw Object.assign(Error('Invalid JSON'),{status:400})}}
- function proxy(req,res,host){
-  const upstream=http.request({hostname:'127.0.0.1',port:frontendPort,path:req.url,method:req.method,headers:{...req.headers,host,'x-cbgpu-public-host':host,'x-forwarded-host':host,'x-forwarded-proto':'https'}},response=>{for(const key of ['content-security-policy','x-frame-options','content-type','content-length','content-encoding','transfer-encoding'])res.removeHeader(key);res.writeHead(response.statusCode||502,response.headers);response.pipe(res)});
+ function proxy(req,res,host,gated=true){
+  // The web app trusts this header to know the portal login is in front of it; never forward one sent by a client.
+  const headers={...req.headers,host,'x-cbgpu-public-host':host,'x-forwarded-host':host,'x-forwarded-proto':'https'};
+  delete headers['x-cbgpu-portal-gate'];if(gated)headers['x-cbgpu-portal-gate']='1';
+  const upstream=http.request({hostname:'127.0.0.1',port:frontendPort,path:req.url,method:req.method,headers},response=>{for(const key of ['content-security-policy','x-frame-options','content-type','content-length','content-encoding','transfer-encoding'])res.removeHeader(key);res.writeHead(response.statusCode||502,response.headers);response.pipe(res)});
   upstream.setTimeout(120000,()=>upstream.destroy());upstream.on('error',()=>{if(!res.headersSent)reply(res,502,{error:'Equipment workspace is temporarily unavailable.'});else res.destroy()});req.on('aborted',()=>upstream.destroy());req.pipe(upstream);
  }
  function loginPage(req,res,kind){
@@ -33,6 +36,9 @@ export function equipmentPortals({root,settings,env,run,audit,frontendPort=3000}
  }
  async function handle(req,res,host){
   const kind=kinds[host],legacy=host==='manufacturing.cbgpu.com';if(!kind&&!legacy)return false;
+  // Optional switch (CBGPU_EQUIPMENT_PASSTHROUGH=1): equipment managers sign in through the website like everyone else
+  // (one shared login, roles checked by /api/manufacturing/access) instead of this gateway. Off by default.
+  if(process.env.CBGPU_EQUIPMENT_PASSTHROUGH==='1'){proxy(req,res,host,false);return true}
   const url=new URL(req.url,'https://'+host),pathname=url.pathname;
   const assets={'/static/theme.js':'theme.js','/static/style.css':'style.css','/static/assets/logo.png':'assets/logo.png','/static/equipment-signin.js':'equipment-signin.js'};
   if(assets[pathname]&&['GET','HEAD'].includes(req.method)){asset(req,res,assets[pathname]);return true}
