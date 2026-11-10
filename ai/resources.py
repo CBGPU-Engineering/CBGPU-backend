@@ -45,12 +45,12 @@ def start_task(store,job,gpu,python,runner,image):
     folder=store.root/'jobs'/job['id'];data=json.loads((folder/'input.json').read_text());log=(folder/'log.txt').open('ab',buffering=0)
     if job['kind']=='python':
         workspace=prepare_workspace(store,job,data);name='cbgpu-ai-'+job['id']
-        args=['docker','run','--rm','--name',name,'--label','cbgpu.ai.managed=true','--label','cbgpu.ai.job='+job['id'],'--gpus','device='+gpu['uuid'],'--network','none','--cap-drop','ALL','--security-opt','no-new-privileges','--read-only','--pids-limit','256','--memory','16g','--cpus','4','--shm-size','256m','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--user',f'{os.getuid()}:{os.getgid()}','--mount',f'type=bind,src={workspace},dst=/workspace','--workdir','/workspace','--env','HOME=/tmp','--env','PYTHONDONTWRITEBYTECODE=1','--env','OMP_NUM_THREADS=4',image,'python','-u',data.get('entrypoint','main.py')]
+        args=['docker','run','--rm','--name',name,'--label','cbgpu.ai.managed=true','--label','cbgpu.ai.job='+job['id'],'--gpus','device='+gpu['uuid'],'--network','none','--cap-drop','ALL','--security-opt','no-new-privileges','--read-only','--pids-limit','256','--memory',os.environ.get('CBGPU_AI_PYTHON_MEMORY','32g'),'--cpus',os.environ.get('CBGPU_AI_PYTHON_CPUS','16'),'--shm-size','256m','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--user',f'{os.getuid()}:{os.getgid()}','--mount',f'type=bind,src={workspace},dst=/workspace','--workdir','/workspace','--env','HOME=/tmp','--env','PYTHONDONTWRITEBYTECODE=1','--env','OMP_NUM_THREADS=8',image,'python','-u',data.get('entrypoint','main.py')]
     else:
         args=[str(python),str(runner),job['kind'],str(folder),str(store.root)]
     site=Path(python).parent.parent/'lib/python3.12/site-packages'
     libraries=[str(p) for p in (site/'nvidia').glob('*/lib')]+[str(site/'torch/lib')]
-    env={'PATH':'/usr/bin:/bin','HOME':str(store.root),'LANG':'C.UTF-8','CUDA_VISIBLE_DEVICES':gpu['uuid'],'OMP_NUM_THREADS':'4','OPENBLAS_NUM_THREADS':'4','MKL_NUM_THREADS':'4','TOKENIZERS_PARALLELISM':'false','HF_HUB_OFFLINE':'1','HF_HUB_DISABLE_TELEMETRY':'1','LD_LIBRARY_PATH':':'.join(libraries)}
+    env={'PATH':'/usr/bin:/bin','HOME':str(store.root),'LANG':'C.UTF-8','CUDA_VISIBLE_DEVICES':gpu['uuid'],'OMP_NUM_THREADS':'8','OPENBLAS_NUM_THREADS':'4','MKL_NUM_THREADS':'4','TOKENIZERS_PARALLELISM':'false','HF_HUB_OFFLINE':'1','HF_HUB_DISABLE_TELEMETRY':'1','LD_LIBRARY_PATH':':'.join(libraries)}
     try:process=subprocess.Popen(['prlimit','--fsize=67108864','--',*args],stdout=log,stderr=log,env=env,start_new_session=True)
     except BaseException:log.close();raise
     return process,log

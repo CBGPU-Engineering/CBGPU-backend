@@ -14,3 +14,6 @@ fi
 "$AI_STATE/venv/bin/pip" install --disable-pip-version-check 'torch==2.7.1' --index-url https://download.pytorch.org/whl/cu126
 "$AI_STATE/venv/bin/pip" install --disable-pip-version-check -r "$(dirname "$0")/requirements.txt"
 "$AI_STATE/venv/bin/pip" install --disable-pip-version-check 'llama-cpp-python==0.3.16' --only-binary=llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+
+# GPT-OSS uses a separate newer CUDA build; existing Qwen/Whisper runtimes stay isolated.
+"$AI_STATE/venv/bin/pip" install --disable-pip-version-check --target "$AI_STATE/llama-next" --no-deps 'llama-cpp-python==0.3.36' --only-binary=llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124

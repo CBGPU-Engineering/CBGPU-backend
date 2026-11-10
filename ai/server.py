@@ -4,7 +4,7 @@ from collections import defaultdict,deque
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from core import Store,Failure,MAX_UPLOAD,valid_id
-from scheduler import Scheduler
+from scheduler import ParallelScheduler as Scheduler
 from corpus import Corpus
 from conversations import Conversations
 from catalog import models
@@ -70,6 +70,15 @@ class Handler(BaseHTTPRequestHandler):
         if not valid_id(owner):raise Failure('Authentication required',401)
         if self.command!='GET':self.server.rate(owner)
         if self.command=='POST' and parts!=['uploads']:self.body()
+        if parts==['web','search'] and self.command=='POST':self.reply(200,self.server.conversations.web.search(owner,self.body().get('query')));return
+        if parts==['web','read'] and self.command=='POST':
+            from web_search import fetch_public,Text
+            gate=self.server.conversations.web.gate
+            if not gate.acquire(blocking=False):raise Failure('Web tools are busy. Try again shortly.',429)
+            try:
+                body,url=fetch_public(self.body().get('url',''));parser=Text();parser.feed(body);self.reply(200,{'url':url,'text':' '.join(' '.join(parser.parts).split())[:6000]})
+            finally:gate.release()
+            return
         if parts==['models'] and self.command=='GET':self.reply(200,{'object':'list','data':models(store.root)});return
         if parts==['status'] and self.command=='GET':
             counts={r[0]:r[1] for r in store.execute("SELECT state,count(*) FROM jobs WHERE state IN ('queued','running','paused') GROUP BY state").fetchall()}
@@ -92,7 +101,8 @@ class Handler(BaseHTTPRequestHandler):
                 if self.command=='GET':self.reply(200,{'chat':chats.get(owner,id)});return
                 if self.command=='POST':self.reply(200,{'chat':chats.rename(owner,id,self.body().get('title'))});return
                 if self.command=='DELETE':chats.delete(owner,id);self.reply(200,{'ok':True});return
-            if parts[2:]==['messages'] and self.command=='POST':self.reply(202,{'chat':chats.send(owner,id,self.body().get('content'),self.body().get('model','cbgpu-chat'))});return
+            if parts[2:]==['live'] and self.command=='GET':self.reply(200,chats.live(owner,id));return
+            if parts[2:]==['messages'] and self.command=='POST':self.reply(202,{'chat':chats.send(owner,id,self.body().get('content'),self.body().get('model','cbgpu-chat'),self.body().get('effort','medium'),self.body().get('web_search',False))});return
         if parts==['keys']:
             if self.command=='GET':self.reply(200,{'keys':store.keys(owner)});return
             if self.command=='POST':self.reply(201,store.create_key(owner,self.body().get('name')));return
@@ -113,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts[2:]==['cancel'] and self.command=='POST':store.execute("UPDATE jobs SET state='cancelled',progress='Cancelled by owner',updated=? WHERE id=? AND owner=? AND state IN ('queued','running','paused')",(time.time(),id,owner));self.reply(200,{'ok':True});return
             if parts[2:]==['retry'] and self.command=='POST':
                 if job['state'] not in ['failed','cancelled']:raise Failure('Only failed or cancelled tasks can be retried')
-                if self.server.scheduler.current==id:raise Failure('The task is still stopping. Try again shortly.',409)
+                if (self.server.scheduler.is_running(id) if hasattr(self.server.scheduler,'is_running') else self.server.scheduler.current==id):raise Failure('The task is still stopping. Try again shortly.',409)
                 saved=json.loads((store.root/'jobs'/id/'input.json').read_text())
                 if saved.get('upload_id') and not (job['kind']=='python' and (store.root/'jobs'/id/'workspace/.prepared').exists()):store.get_upload(owner,saved['upload_id'])
                 with store.lock:

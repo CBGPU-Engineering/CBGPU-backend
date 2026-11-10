@@ -38,9 +38,10 @@ class SafeArtifact:
         except Exception:pass
 
 class Store:
-    def __init__(self,state):
+    def __init__(self,state,data_root=None):
         self.root=Path(state).resolve();self.root.mkdir(parents=True,exist_ok=True,mode=0o700);self.root.chmod(0o700)
         for name in ['jobs','uploads','models']: (self.root/name).mkdir(exist_ok=True,mode=0o700)
+        configured=data_root or os.environ.get('CBGPU_AI_DATA_ROOT');self.data_root=Path(configured).resolve() if configured else None
         self.lock=threading.RLock();self.db=sqlite3.connect(self.root/'queue.sqlite',check_same_thread=False,timeout=20);self.db.row_factory=sqlite3.Row
         self.db.executescript('''PRAGMA journal_mode=WAL;
           CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL,gpu INTEGER,attempts INTEGER DEFAULT 0,progress TEXT DEFAULT '',error TEXT,started REAL,finished REAL,runtime REAL NOT NULL DEFAULT 0,crashes INTEGER NOT NULL DEFAULT 0);
@@ -57,8 +58,24 @@ class Store:
     def execute(self,query,args=()):
         with self.lock:
             cur=self.db.execute(query,args);self.db.commit();return cur
+    def bulk_directory(self,name):
+        if self.data_root is None:return self.root/name
+        if os.environ.get('CBGPU_AI_REQUIRE_DATA_MOUNT')=='1' and not os.path.ismount('/srv/cbgpu-data'):raise Failure('추가 데이터 SSD가 연결되지 않았어요. 저장 작업을 잠시 중단합니다.',503)
+        target=self.data_root/name;target.mkdir(parents=True,exist_ok=True,mode=0o700);target.chmod(0o700);return target
+    def remove_upload(self,id):
+        if not valid_id(id):return
+        link=self.root/'uploads'/id
+        if link.is_symlink():
+            target=link.resolve()
+            if self.data_root and target==self.data_root/'uploads'/id:target.unlink(missing_ok=True)
+        link.unlink(missing_ok=True)
+    def remove_job_files(self,id):
+        if not valid_id(id):return
+        folder=self.root/'jobs'/id;workspace=folder/'workspace'
+        if workspace.is_symlink() and self.data_root and workspace.resolve()==self.data_root/'workspaces'/id:shutil.rmtree(self.data_root/'workspaces'/id,ignore_errors=True)
+        shutil.rmtree(folder,ignore_errors=True)
     def upload(self,owner,name,reader):
-        name=Path(name.replace('\\','/')).name[:180] or 'upload';id=str(uuid.uuid4());target=self.root/'uploads'/id
+        name=Path(name.replace('\\','/')).name[:180] or 'upload';id=str(uuid.uuid4());target=self.bulk_directory('uploads')/id
         if self.execute('SELECT count(*) FROM uploads WHERE owner=? AND created>?',(owner,time.time()-86400)).fetchone()[0]>=30: raise Failure('Upload limit reached today',429)
         owned=self.execute('SELECT coalesce(sum(size),0) FROM uploads WHERE owner=?',(owner,)).fetchone()[0]
         size=0
@@ -67,14 +84,15 @@ class Store:
                 target.chmod(0o600)
                 for chunk in reader:
                     size+=len(chunk)
-                    if shutil.disk_usage(self.root).free<20*1024**3:raise Failure('AI storage is running low. Try again after old results are removed.',507)
+                    if shutil.disk_usage(target.parent).free<20*1024**3:raise Failure('AI storage is running low. Try again after old results are removed.',507)
                     if owned+size>2*1024**3:raise Failure('Your AI uploads exceed 2 GB. Delete old tasks first.',413)
                     if size>MAX_UPLOAD: raise Failure('Upload limit is 200 MB',413)
                     f.write(chunk)
             if not size: raise Failure('The file is empty')
+            if self.data_root:(self.root/'uploads'/id).symlink_to(target)
             self.execute('INSERT INTO uploads(id,owner,name,size,created) VALUES(?,?,?,?,?)',(id,owner,name,size,time.time()))
             return {'id':id,'name':name,'size':size}
-        except BaseException: target.unlink(missing_ok=True);raise
+        except BaseException: target.unlink(missing_ok=True);(self.root/'uploads'/id).unlink(missing_ok=True);raise
     def get_upload(self,owner,id):
         if not valid_id(id):raise Failure('Upload not found',404)
         row=self.execute('SELECT * FROM uploads WHERE id=? AND owner=?',(id,owner)).fetchone()
@@ -87,7 +105,9 @@ class Store:
             if not isinstance(messages,list) or not 1<=len(messages)<=32 or any(not isinstance(m,dict) or m.get('role') not in ['system','user','assistant','tool'] or not (isinstance(m.get('content'),str) or m.get('role')=='assistant' and m.get('content') is None and isinstance(m.get('tool_calls'),list)) for m in messages): raise Failure('Use text chat messages')
             if any(m['role']=='tool' and not isinstance(m.get('tool_call_id'),str) for m in messages):raise Failure('Tool results require tool_call_id')
             if sum(len(m.get('content') or '')+len(json.dumps(m.get('tool_calls') or [])) for m in messages)>48000: raise Failure('Text is too long',413)
-            if type(limit)!=int or not 1<=limit<=2048: raise Failure('max_tokens must be 1–2048')
+            if type(limit)!=int or not 1<=limit<=(4096 if data.get('model')=='cbgpu-oss' else 2048): raise Failure('max_tokens exceeds the selected model limit')
+            effort=data.get('effort','medium')
+            if effort not in ['low','medium','high']:raise Failure('Use low, medium or high effort')
             model=data.get('model','cbgpu-chat')
             if model not in TEXT_MODELS:raise Failure('Unknown chat model')
             tools=data.get('tools') or [];choice=data.get('tool_choice','auto')
@@ -96,7 +116,7 @@ class Store:
                 if choice not in ['auto','none','required'] and not (isinstance(choice,dict) and choice.get('type')=='function' and choice.get('function',{}).get('name') in {t['function']['name'] for t in tools}):raise ValueError('Unsupported tool_choice')
                 if any(m.get('tool_calls') and (not isinstance(m['tool_calls'],list) or len(json.dumps(m['tool_calls']))>24000) for m in messages):raise ValueError('Invalid tool history')
             except (ValueError,TypeError,AttributeError) as e:raise Failure(str(e))
-            data={'messages':[{k:m[k] for k in ['role','content','tool_calls','tool_call_id'] if k in m} for m in messages],'max_tokens':limit,'model':model,'tools':tools,'tool_choice':choice}
+            data={'messages':[{k:m[k] for k in ['role','content','tool_calls','tool_call_id'] if k in m} for m in messages],'max_tokens':limit,'model':model,'effort':effort,'tools':tools,'tool_choice':choice}
         elif kind in ['embed','search']:
             if kind=='embed':
                 texts=data.get('input');texts=[texts] if isinstance(texts,str) else texts
@@ -128,7 +148,10 @@ class Store:
             if data.get('upload_id') and self.execute('SELECT job_id FROM uploads WHERE id=?',(data['upload_id'],)).fetchone()['job_id']:raise Failure('This upload already belongs to a task; upload another copy')
             if self.execute("SELECT count(*) FROM jobs WHERE state IN ('queued','running','paused')").fetchone()[0]>=200: raise Failure('Queue is full. Try again later.',429)
             if self.execute("SELECT count(*) FROM jobs WHERE owner=? AND state IN ('queued','running','paused')",(owner,)).fetchone()[0]>=5: raise Failure('Finish or cancel an existing task first (maximum 5 active tasks).',429)
-            id=str(uuid.uuid4());folder=self.root/'jobs'/id;folder.mkdir(mode=0o700);atomic_json(folder/'input.json',data)
+            id=str(uuid.uuid4());folder=self.root/'jobs'/id;folder.mkdir(mode=0o700)
+            if kind=='python' and self.data_root:
+                workspace=self.bulk_directory('workspaces')/id;workspace.mkdir(mode=0o700);(folder/'workspace').symlink_to(workspace,target_is_directory=True)
+            atomic_json(folder/'input.json',data)
             self.execute('INSERT INTO jobs(id,owner,kind,title,state,created,updated) VALUES(?,?,?,?,?,?,?)',(id,owner,kind,str(title or kind)[:160],'queued',time.time(),time.time()))
             if data.get('upload_id'):self.execute('UPDATE uploads SET job_id=? WHERE id=?',(id,data['upload_id']))
         return self.job(owner,id)
@@ -139,6 +162,9 @@ class Store:
         if detail and result['state']=='succeeded' and (folder/'result.json').exists():
             try:result['result']=json.loads((folder/'result.json').read_text())
             except (OSError,ValueError):result['error']='Result is temporarily unavailable'
+        if detail and (folder/'partial.json').exists():
+            try:result['partial']=json.loads((folder/'partial.json').read_text()).get('text','')[:100000]
+            except (OSError,ValueError):pass
         if detail and (folder/'log.txt').exists():
             with (folder/'log.txt').open('rb') as stream:
                 stream.seek(max(0,(folder/'log.txt').stat().st_size-24000));result['logs']=stream.read(24000).decode('utf8',errors='replace')

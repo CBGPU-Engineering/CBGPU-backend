@@ -8,6 +8,9 @@ WorkingDirectory=%h/CBGPU-live/backend
 ExecStart=/usr/bin/python3 %h/.local/lib/cbgpu-ai/server.py --port 3550
 Environment=CBGPU_AI_STATE=%h/.local/share/cbgpu-ai
 Environment=CBGPU_AI_JOB_IMAGE=pytorch/pytorch@sha256:2b59b1b91885677814f78be1f8df48a25d5dc952eb6580eaecfefca510f9afd3
+Environment=CBGPU_AI_DATA_ROOT=/srv/cbgpu-data/ai
+Environment=CBGPU_AI_REQUIRE_DATA_MOUNT=1
+Environment=CBGPU_AI_MAX_WORKERS=4
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20
@@ -15,8 +18,9 @@ KillMode=control-group
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
-MemoryMax=24G
-CPUQuota=600%
+MemoryMax=96G
+CPUQuota=8000%
+CPUWeight=20
 TasksMax=512
 
 [Install]

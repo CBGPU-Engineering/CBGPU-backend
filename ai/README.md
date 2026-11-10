@@ -1,6 +1,6 @@
 # CBGPU local AI
 
-Four services share a private, reservation-first queue: audio transcription and SRT output, semantic search over authorized sources, an OpenAI-shaped inference API, and restartable Python GPU jobs. Native website actions use the same queue for notes, abstracts, shared documents, and deployment logs. No student input is sent to an external AI provider.
+Four services share a private, reservation-first queue: audio transcription and SRT output, semantic search over authorized sources, an OpenAI-shaped inference API, and restartable Python GPU jobs. Native website actions use the same queue for notes, abstracts, shared documents, and deployment logs. No student input is sent to an external AI model provider. Optional web search sends the search question to DuckDuckGo and reads public source pages.
 
 The standard-library control plane binds **127.0.0.1:3550**. Next.js verifies CBGPU identity, approval and live sessions, then forwards a per-owner request with a private internal secret. API keys are hashed and shown once. They can call inference endpoints, not enumerate private browser tasks or run Python containers. GPU workers independently check account access before execution and periodically while running. SQLite state, inputs, outputs and keys are private files outside the checkout.
 
@@ -18,9 +18,9 @@ The scheduler never resets, restarts, stops or mounts a user's Jupyter container
 
 Audio segments are atomically checkpointed. Text inference restarts the request after preemption. Python jobs keep `/workspace`; users must implement checkpoint writes, reloads and preferably SIGTERM handling themselves. Interactive AI jobs can preempt a Python job after a 60-second time slice. Total CPU/GPU execution time is accumulated; time limits do not reset on reservation preemption. Cancelled/deleted work cannot be resurrected during startup.
 
-Python jobs use a pinned PyTorch/CUDA image with one requested GPU UUID, 4 CPUs, 16 GiB RAM, 256 PIDs, a read-only image, an unprivileged user, dropped capabilities, default seccomp, no-new-privileges, no network and a bounded tmpfs. Only that job's workspace is mounted. Host credentials, other users' workspaces and the Docker socket are never mounted. No arbitrary host shell command or user-selected image is accepted. Docker recovery/removal is restricted to the application's own labelled `cbgpu-ai-*` containers.
+Python jobs use a pinned PyTorch/CUDA image with one requested GPU UUID, 16 CPUs, 32 GiB RAM, 256 PIDs, a read-only image, an unprivileged user, dropped capabilities, default seccomp, no-new-privileges, no network and a bounded tmpfs. Only that job's workspace is mounted. Host credentials, other users' workspaces and the Docker socket are never mounted. No arbitrary host shell command or user-selected image is accepted. Docker recovery/removal is restricted to the application's own labelled `cbgpu-ai-*` containers.
 
-Uploads: 200 MiB each, 2 GiB per owner, 30/day. ZIPs: 10,000 entries and 2 GiB expanded, no traversal or symlinks. Workspace size is monitored at runtime, and logs are bounded. Disk free-space guards preserve headroom for the main site. Five active tasks and five keys per account; at most one AI/GPU worker globally. Results expire after 30 days; uploaded originals expire after 14 days unless the work is active. Deleting a task stops it, then removes its input, output, checkpoint and bound upload. Inactive uploads expire separately.
+Uploads: 200 MiB each, 2 GiB per owner, 30/day. ZIPs: 10,000 entries and 2 GiB expanded, no traversal or symlinks. Workspace size is monitored at runtime, and logs are bounded. Disk free-space guards preserve headroom for the main site. Five active tasks and five keys per account; up to four workers with one exclusive GPU lease per worker. Results expire after 30 days; uploaded originals expire after 14 days unless the work is active. Deleting a task stops it, then removes its input, output, checkpoint and bound upload. Inactive uploads expire separately.
 
 ## Search and document boundaries
 
@@ -32,12 +32,12 @@ Document summary accepts text PDFs and selected text formats, up to the first 10
 
 Base URL: `https://cbgpu.com/api/ai/v1`. Send `Authorization: Bearer <key>`.
 
-- `GET /models`: `cbgpu-chat`, `cbgpu-embeddings`, `cbgpu-whisper`.
-- `POST /chat/completions`: text messages, `stream: false`, max 2,048 output tokens.
+- `GET /models`: `cbgpu-chat`, `cbgpu-coder`, `cbgpu-pro`, `cbgpu-oss`, `cbgpu-embeddings`, `cbgpu-whisper`.
+- `POST /chat/completions`: text/tool messages, optional `stream: true`, `reasoning_effort: low|medium|high`; max 2,048 output tokens for Qwen or 4,096 for GPT-OSS. Real inference deltas are forwarded over SSE while the job runs; validated tool calls are sent as complete objects.
 - `POST /embeddings`: one to 64 text inputs; 384-dimensional multilingual E5 embeddings.
 - `POST /audio/transcriptions`: multipart `file`, optional `language`; JSON `text` result.
 
-The gateway waits up to two minutes for synchronous inference. If no GPU becomes available or a reservation preempts it, a 503 may be returned; the owner can inspect the persistent task at `/ai`. This is not a promise of continuous inference capacity. Browser features use asynchronous `/api/ai/jobs` and polling, and the UI offers cancellation, retries, deletion, logs and artifact download. Raw inference logs are visible only to the job's owner.
+The gateway waits up to two minutes for synchronous inference. If no GPU becomes available or a reservation preempts it, a 503 may be returned; the owner can inspect the persistent task at `/ai`. This is not a promise of continuous inference capacity. Browser conversations use private SSE with polling fallback; other features use asynchronous `/api/ai/jobs`, and the UI offers cancellation, retries, deletion, logs and artifact download. Raw inference logs are visible only to the job's owner.
 
 ## Verify and operate
 
@@ -76,3 +76,15 @@ disconnection cancels only its own queued/generating job. Reservations always wi
 MIT-licensed OpenCode engine with this provider, restricted models, no paid fallback,
 private API-key storage, and approval defaults for edits/shell/external directories.
 Install/use instructions are at `/ai/cli`. This is not Anthropic Claude Code.
+
+## Models, effort and private streaming
+
+The four text models are Qwen2.5 7B, Qwen2.5 Coder 7B, Qwen2.5 14B and GPT-OSS 20B (MXFP4). All use an 8,192-token context. GPT-OSS uses its native Harmony format and low/medium/high reasoning; only the final channel is exposed. Qwen high effort runs a draft and review pass before streaming the final answer. Model files and licenses are pinned in `models.json`; GPT-OSS loads a separate llama.cpp runtime.
+
+`partial.json` contains only visible answer text, is atomically replaced, and remains private to the owner. It is never committed as the completed conversation until inference succeeds. Reconnecting receives the current snapshot; failed or cancelled partial answers are marked unfinished and excluded from later context. Preemption restarts generation rather than pretending to continue an old token stream.
+
+Read-only `/v1/web/search` and `/v1/web/read` support the CLI MCP bridge. DNS/IP validation, pinned public-IP TLS connections and redirect checks block private destinations; fetched page instructions are untrusted data.
+
+## Two-volume storage
+
+With `CBGPU_AI_DATA_ROOT=/srv/cbgpu-data/ai` and `CBGPU_AI_REQUIRE_DATA_MOUNT=1`, new uploads and Python workspaces use the mounted Samsung SSD. Existing files and model weights remain on the original NVMe, with no bulk migration. Private queue metadata stays on NVMe. Missing data mounts fail closed; cleanup removes the matching owned bulk files. Both volumes need independent backup and free-space monitoring.

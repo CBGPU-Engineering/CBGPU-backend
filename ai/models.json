@@ -52,5 +52,14 @@
     ],
     "license": "Apache-2.0",
     "id": "cbgpu-pro"
+  },
+  "oss": {
+    "repo": "ggml-org/gpt-oss-20b-GGUF",
+    "revision": "15dcfc7e7c608c6161507211ed43c5b590801b4b",
+    "files": [
+      "gpt-oss-20b-MXFP4.gguf"
+    ],
+    "license": "Apache-2.0",
+    "id": "cbgpu-oss"
   }
 }

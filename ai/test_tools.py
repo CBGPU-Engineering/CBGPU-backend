@@ -22,5 +22,5 @@ class ToolTests(unittest.TestCase):
      value=store.validate(str(uuid.uuid4()),'chat',{'model':id,'messages':[{'role':'user','content':'Fixture'}],'tools':TOOLS});self.assertEqual(value['model'],id);self.assertTrue(str(model_file(root,id)).startswith(root))
     with self.assertRaises(Failure):store.validate(str(uuid.uuid4()),'chat',{'model':'../../host-secret','messages':[{'role':'user','content':'Fixture'}]})
     with self.assertRaises(Failure):store.validate(str(uuid.uuid4()),'chat',{'messages':[{'role':'user','content':'Fixture'}],'tools':TOOLS*25})
-    self.assertEqual(len([m for m in models(root) if 'text' in m.get('capabilities',[])]),3)
+    self.assertEqual(len([m for m in models(root) if 'text' in m.get('capabilities',[])]),4)
    finally:store.db.close()

@@ -4,15 +4,20 @@ from pathlib import Path
 from core import atomic_json
 from catalog import model_file
 from tool_protocol import prepare,decode
+from incremental import complete,PartialWriter
 
 def progress(folder,message):atomic_json(folder/'progress.json',{'message':message})
 
-def chat(state,messages,max_tokens=512,model_id="cbgpu-chat",tools=None,tool_choice="auto"):
+def chat(state,messages,max_tokens=512,model_id="cbgpu-chat",tools=None,tool_choice="auto",effort="medium",emit=None):
+    if model_id=='cbgpu-oss':
+        from harmony import chat as oss_chat
+        return oss_chat(state,messages,max_tokens,model_file(state,model_id),tools,tool_choice,effort,emit)
     messages,tool_mode=prepare(messages,tools or [],tool_choice)
     from llama_cpp import Llama
     model=Llama(model_path=str(model_file(state,model_id)),n_gpu_layers=-1,n_ctx=8192,n_batch=256,n_threads=4,flash_attn=False,verbose=False)
     # Keep the most recent text within the actual tokenizer budget; report truncation to callers.
-    budget=7000-max_tokens;prepared=[];truncated=False
+    review=effort=='high' and not tool_mode
+    budget=7000-max_tokens-(768 if review else 0);prepared=[];truncated=False
     systems=[m for m in messages if m['role']=='system'];turns=[m for m in messages if m['role']!='system']
     if systems:
         tokens=model.tokenize(('\n\n'.join(m['content'] for m in systems)).encode(),add_bos=False);cap=int(budget*.65)
@@ -28,8 +33,16 @@ def chat(state,messages,max_tokens=512,model_id="cbgpu-chat",tools=None,tool_cho
         content=model.detokenize(tokens).decode('utf8',errors='ignore');recent.insert(0,{'role':message['role'],'content':content});budget-=len(tokens)
         if budget<=0:truncated=True;break
     prepared+=recent
-    result=model.create_chat_completion(messages=prepared,max_tokens=max_tokens,temperature=0.2,**({"response_format":{"type":"json_object"}} if tool_mode else {}))
-    result['model']=model_id;result['truncated']=truncated;return decode(result,tools,tool_choice) if tool_mode else result
+    if effort=='medium':prepared.insert(0,{'role':'system','content':'답변의 정확성과 사용자의 제약을 확인하고 명확한 최종 답변을 제시하세요.'})
+    draft=None
+    if review:
+        draft=model.create_chat_completion(messages=prepared,max_tokens=min(768,max_tokens),temperature=0.2)
+        prepared += [{'role':'assistant','content':draft['choices'][0]['message']['content']},{'role':'user','content':'초안의 사실·계산·논리·요청 충족 여부를 검토하고 오류를 바로잡아 최종 답변만 작성하세요. 확인되지 않은 것은 명시하고 검토 과정은 출력하지 마세요.'}]
+    result=complete(model,{'messages':prepared,'max_tokens':max_tokens,'temperature':.2,**({'response_format':{'type':'json_object'}} if tool_mode else {})},emit if not tool_mode else None)
+    result['model']=model_id;result['truncated']=truncated;result['cbgpu_effort']=effort;result['review_passes']=int(review)
+    if draft and draft.get('usage'):
+        for key in ['prompt_tokens','completion_tokens','total_tokens']:result.setdefault('usage',{})[key]=result.get('usage',{}).get(key,0)+draft['usage'].get(key,0)
+    return decode(result,tools,tool_choice) if tool_mode else result
 
 embedding_model=None
 
@@ -82,7 +95,8 @@ def document(folder,state,data):
 
 def main():
     kind,folder,state=sys.argv[1:];folder=Path(folder);state=Path(state);data=json.loads((folder/'input.json').read_text());progress(folder,'Loading the local model')
-    if kind=='chat':result=chat(state,data['messages'],data.get('max_tokens',512),data.get('model','cbgpu-chat'),data.get('tools'),data.get('tool_choice','auto'))
+    if kind=='chat':
+        writer=PartialWriter(folder);result=chat(state,data['messages'],data.get('max_tokens',512),data.get('model','cbgpu-chat'),data.get('tools'),data.get('tool_choice','auto'),data.get('effort','medium'),writer);writer.flush()
     elif kind=='transcribe':result=transcribe(folder,state,data)
     elif kind=='embed':
         output=vectors(state,data['input']);token_count=sum(len(ids) for ids in embedding_model.tokenizer(embedding_texts(data['input']),truncation=True,max_length=512)['input_ids']);result={'object':'list','model':'cbgpu-embeddings','data':[{'object':'embedding','index':i,'embedding':v.tolist()} for i,v in enumerate(output)],'usage':{'prompt_tokens':token_count,'total_tokens':token_count}}
