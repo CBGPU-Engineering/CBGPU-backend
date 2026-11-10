@@ -56,7 +56,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not chunk:raise Failure('Upload was interrupted')
                 remaining-=len(chunk);yield chunk
     def body(self):
-        try:return json.loads(b''.join(self.chunks(3*1024*1024)))
+        if hasattr(self,'_body_value'):return self._body_value
+        try:
+            self._body_value=json.loads(b''.join(self.chunks(3*1024*1024)));return self._body_value
         except (ValueError,UnicodeError):raise Failure('Invalid JSON')
     def dispatch(self):
         parsed=urllib.parse.urlsplit(self.path);parts=[p for p in parsed.path.split('/') if p];store=self.server.store
@@ -66,6 +68,7 @@ class Handler(BaseHTTPRequestHandler):
         if parts==['authenticate-key'] and self.command=='POST':self.reply(200,{'owner':store.key_owner(self.body().get('key',''))});return
         if not valid_id(owner):raise Failure('Authentication required',401)
         if self.command!='GET':self.server.rate(owner)
+        if self.command=='POST' and parts!=['uploads']:self.body()
         if parts==['status'] and self.command=='GET':
             counts={r[0]:r[1] for r in store.execute("SELECT state,count(*) FROM jobs WHERE state IN ('queued','running','paused') GROUP BY state").fetchall()}
             self.reply(200,{'scheduler':self.server.scheduler.health,'queue':counts,'corpus':self.server.corpus.health if self.server.corpus else {},'models':[{'id':'cbgpu-chat','task':'chat'},{'id':'cbgpu-embeddings','task':'embeddings'},{'id':'cbgpu-whisper','task':'transcription'}]});return
@@ -122,6 +125,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
         raise Failure('Not found',404)
     def handle_request(self):
+        if hasattr(self,'_body_value'):del self._body_value
         try:self.dispatch()
         except Failure as e:self.close_connection=True;self.reply(e.status,{'message':str(e)})
         except (BrokenPipeError,ConnectionResetError,TimeoutError):self.close_connection=True

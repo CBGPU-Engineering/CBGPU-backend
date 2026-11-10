@@ -35,3 +35,17 @@ class ConversationTests(unittest.TestCase):
         with self.assertRaises(Failure):self.chats.send(self.owner,chat['id'],'a'*8001)
         for i in range(4):chat=self.chats.send(self.owner,chat['id'],'Q'*7000);self.completed(chat,'A'*7000)
         chat=self.chats.send(self.owner,chat['id'],'Follow up');payload=json.loads((self.store.root/'jobs'/chat['messages'][-1]['job_id']/'input.json').read_text());self.assertLess(sum(len(m['content']) for m in payload['messages']),24000);self.assertTrue(chat['context_truncated'])
+
+    def test_http_keep_alive_consumes_create_and_cancel_bodies(self):
+        import http.client,threading
+        from types import SimpleNamespace
+        from server import AIHTTPServer
+        server=AIHTTPServer(('127.0.0.1',0),self.store,SimpleNamespace(health={},current=None),'test-key');thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();conn=http.client.HTTPConnection('127.0.0.1',server.server_address[1],timeout=5)
+        headers={'x-cbgpu-ai-key':'test-key','x-cbgpu-owner':self.owner,'Content-Type':'application/json'}
+        try:
+            conn.request('POST','/chats','{}',headers);response=conn.getresponse();self.assertEqual(response.status,201);chat=json.loads(response.read())['chat']
+            conn.request('GET','/chats',headers=headers);response=conn.getresponse();self.assertEqual(response.status,200);response.read()
+            conn.request('POST','/chats/'+chat['id']+'/messages',json.dumps({'content':'test'}),headers);response=conn.getresponse();self.assertEqual(response.status,202);job=json.loads(response.read())['chat']['messages'][-1]['job_id']
+            conn.request('POST','/jobs/'+job+'/cancel','{}',headers);response=conn.getresponse();self.assertEqual(response.status,200);response.read()
+            conn.request('GET','/chats/'+chat['id'],headers=headers);response=conn.getresponse();self.assertEqual(response.status,200);self.assertEqual(json.loads(response.read())['chat']['messages'][-1]['state'],'cancelled')
+        finally:conn.close();server.shutdown();server.server_close();thread.join(timeout=2)
