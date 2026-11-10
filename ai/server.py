@@ -124,7 +124,11 @@ class Handler(BaseHTTPRequestHandler):
                 if self.command=='POST':self.reply(200,{'chat':chats.rename(owner,id,self.body().get('title'))});return
                 if self.command=='DELETE':chats.delete(owner,id);self.reply(200,{'ok':True});return
             if parts[2:]==['live'] and self.command=='GET':self.reply(200,chats.live(owner,id));return
-            if parts[2:]==['messages'] and self.command=='POST':self.reply(202,{'chat':chats.send(owner,id,self.body().get('content'),self.body().get('model','cbgpu-chat'),self.body().get('effort','medium'),self.body().get('web_search',False))});return
+            if parts[2:]==['messages'] and self.command=='POST':
+                body=self.body()
+                chat=chats.send(owner,id,body.get('content'),body.get('model','cbgpu-chat'),
+                                body.get('effort','medium'),body.get('web_search',False),body.get('attachments'))
+                self.reply(202,{'chat':chat});return
         if parts==['keys']:
             if self.command=='GET':self.reply(200,{'keys':store.keys(owner)});return
             if self.command=='POST':self.reply(201,store.create_key(owner,self.body().get('name')));return

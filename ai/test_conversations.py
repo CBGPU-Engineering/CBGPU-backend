@@ -36,6 +36,25 @@ class ConversationTests(unittest.TestCase):
         for i in range(4):chat=self.chats.send(self.owner,chat['id'],'Q'*7000);self.completed(chat,'A'*7000)
         chat=self.chats.send(self.owner,chat['id'],'Follow up');payload=json.loads((self.store.root/'jobs'/chat['messages'][-1]['job_id']/'input.json').read_text());self.assertLess(sum(len(m['content']) for m in payload['messages']),24000);self.assertTrue(chat['context_truncated'])
 
+    def test_private_csv_attachment_and_followup(self):
+        upload = self.store.upload(self.owner, 'results.csv', [b'temperature,value\n10,2\n12,4\n'])
+        other_chat = self.chats.create(self.other)
+        with self.assertRaises(Failure) as error:
+            self.chats.send(self.other, other_chat['id'], 'Read', attachments=[upload['id']])
+        self.assertEqual(error.exception.status, 404)
+
+        chat = self.chats.create(self.owner)
+        turn = self.chats.send(self.owner, chat['id'], 'Calculate', attachments=[upload['id']])
+        source, = turn['messages'][-1]['sources']
+        self.assertEqual(source['title'], 'results.csv')
+        self.assertIn('value: n=2, missing=0, mean=3', source['excerpt'])
+        self.completed(turn)
+        followup = self.chats.send(self.owner, chat['id'], 'Explain the numbers')
+        job = followup['messages'][-1]['job_id']
+        data = json.loads((self.store.root/'jobs'/job/'input.json').read_text())
+        self.assertIn('untrusted_file_sources', data['messages'][-1]['content'])
+        self.assertEqual(followup['messages'][-1]['sources'], [source])
+
     def test_http_keep_alive_consumes_create_and_cancel_bodies(self):
         import http.client,threading
         from types import SimpleNamespace
