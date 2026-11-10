@@ -9,11 +9,12 @@ from corpus import Corpus
 from conversations import Conversations
 from catalog import models
 from robotics import Robotics
+from robot_remote import RemoteRobots
 
 class AIHTTPServer(ThreadingHTTPServer):
     daemon_threads=True
     def __init__(self,address,store,scheduler,key,corpus=None):
-        super().__init__(address,Handler);self.store=store;self.scheduler=scheduler;self.key=key;self.corpus=corpus;self.conversations=Conversations(store);self.robotics=Robotics(store);self.requests=defaultdict(deque);self.rate_lock=threading.Lock()
+        super().__init__(address,Handler);self.store=store;self.scheduler=scheduler;self.key=key;self.corpus=corpus;self.conversations=Conversations(store);self.robotics=Robotics(store);self.remote=RemoteRobots(store);self.requests=defaultdict(deque);self.rate_lock=threading.Lock()
     def rate(self,owner):
         with self.rate_lock:
             now=time.time();q=self.requests[owner]
@@ -68,6 +69,8 @@ class Handler(BaseHTTPRequestHandler):
         if not hmac.compare_digest(self.headers.get('x-cbgpu-ai-key',''),self.server.key):raise Failure('Internal authentication required',401)
         owner=self.headers.get('x-cbgpu-owner','')
         if parts==['authenticate-key'] and self.command=='POST':self.reply(200,{'owner':store.key_owner(self.body().get('key',''))});return
+        if parts==['robotics','agent','enroll'] and self.command=='POST':self.reply(200,self.server.remote.enroll(self.body()));return
+        if parts==['robotics','agent','sync'] and self.command=='POST':self.reply(200,self.server.remote.sync(self.body()));return
         if not valid_id(owner):raise Failure('Authentication required',401)
         if self.command!='GET':self.server.rate(owner)
         if self.command=='POST' and parts!=['uploads']:self.body()
@@ -80,6 +83,20 @@ class Handler(BaseHTTPRequestHandler):
                 body,url=fetch_public(self.body().get('url',''));parser=Text();parser.feed(body);self.reply(200,{'url':url,'text':' '.join(' '.join(parser.parts).split())[:6000]})
             finally:gate.release()
             return
+        if parts==['robotics','devices']:
+            if self.command=='GET':self.reply(200,{'devices':self.server.remote.list(owner)});return
+            if self.command=='POST':self.reply(201,self.server.remote.create(owner,self.body().get('name')));return
+        if len(parts) in [3,4] and parts[:2]==['robotics','devices'] and valid_id(parts[2]):
+            remote=self.server.remote;id=parts[2]
+            if len(parts)==3:
+                if self.command=='GET':self.reply(200,remote.state(owner,id));return
+                if self.command=='DELETE':self.reply(200,remote.revoke(owner,id));return
+            if len(parts)==4 and self.command=='POST':
+                action=parts[3]
+                if action=='control':self.reply(200,remote.control(owner,id,self.body()));return
+                if action=='goal':self.reply(202,remote.goal(owner,id,self.body()));return
+                if action=='stop':self.reply(200,remote.stop(owner,id));return
+                if action=='pair':self.reply(200,remote.re_pair(owner,id));return
         if parts==['robotics','plans'] and self.command=='POST':self.reply(202,self.server.robotics.create(owner,self.body()));return
         if len(parts)==3 and parts[:2]==['robotics','plans'] and valid_id(parts[2]):
             if self.command=='GET':self.reply(200,self.server.robotics.get(owner,parts[2]));return

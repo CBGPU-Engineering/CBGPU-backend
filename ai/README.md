@@ -110,3 +110,27 @@ Only virtual hardware is included; physical integration requires the robot's dri
 `CBGPU-robotics/cbgpu_robotics/protocol.py` (protocol version 1). Update and test both
 copies together when changing the wire contract. Planning metadata is private SQLite,
 removed with expired jobs, and never exposed through the Supabase Data API.
+
+## Remote live maps and point navigation
+
+Account-only `/v1/robotics/devices` registers a named device and returns a one-time,
+10-minute pairing secret. The local `cbgpu-robotics connect` exchanges it for a
+separate device token, saved privately on that machine. Device tokens can only
+upload their own telemetry/map/JPEG and poll/acknowledge their own goal. AI keys
+cannot register devices or issue remote goals. Users cannot read another account's
+maps, images, device credentials or commands.
+
+The SDK uses outbound HTTPS `/v1/robotics/agent/sync` (up to 4 Hz), so no robot public
+IP or inbound control port is required. The web displays versioned occupancy grids,
+pose, optional bounded JPEG previews and acknowledgement timing. Map resets,
+revocation and operator stop cancel pending/running goals. A short operator lease
+is renewed by the owning browser; an expired lease or lost device connection stops
+local navigation. All actual collision-aware navigation remains on the robot and
+requires explicit local commissioning/arming and `--allow-navigation`.
+
+Map-click commands do not consume GPUs or use the language-model planner. The server
+validates owner, control lease, freshness, map session and a known free target cell;
+the SDK revalidates locally and uses a persistent execution ledger. Web stop is
+network-dependent, not a certified or physical emergency stop. The optional ROS2
+adapter requires the existing map, TF, LiDAR, NavigateToPose server and fresh local
+arm/e-stop heartbeats. Hardware drivers and Arduino watchdog remain robot-local.
