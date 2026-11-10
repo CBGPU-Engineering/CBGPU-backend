@@ -47,7 +47,7 @@ class Scheduler:
             if job['kind']=='python':resources.prepare_workspace(self.store,job,json.loads((folder/'input.json').read_text()))
             cards,_=resources.snapshot()
             if not any(c['uuid']==gpu['uuid'] and c['available'] for c in cards):return
-            if shutil.disk_usage(self.store.root).free<20*1024**3:raise RuntimeError('AI storage is running low')
+            if any(shutil.disk_usage(path).free<20*1024**3 for path in [self.store.root,*([self.store.bulk_directory('workspaces')] if self.store.data_root else [])]):raise RuntimeError('AI storage is running low')
             changed=self.store.execute("UPDATE jobs SET state='running',gpu=?,attempts=?,started=?,updated=?,error=NULL,progress=? WHERE id=? AND state IN ('queued','paused')",(gpu['index']+1,job['attempts']+1,time.time(),time.time(),'Running on GPU '+str(gpu['index']+1),job['id']))
             if not changed.rowcount:return
             (folder/'partial.json').unlink(missing_ok=True)
@@ -57,7 +57,7 @@ class Scheduler:
             while process.poll() is None:
                 if self.stop_event.wait(1):state='paused';message='Service restart; waiting to resume';break
                 elapsed=time.monotonic()-start
-                if shutil.disk_usage(self.store.root).free<10*1024**3:state='failed';message='AI storage is running low';break
+                if any(shutil.disk_usage(path).free<10*1024**3 for path in [self.store.root,*([self.store.bulk_directory('workspaces')] if self.store.data_root else [])]):state='failed';message='AI storage is running low';break
                 if (folder/'log.txt').exists() and (folder/'log.txt').stat().st_size>60*1024**2:state='failed';message='Task log exceeded 60 MB';break
                 record=self.store.execute('SELECT state FROM jobs WHERE id=?',(job['id'],)).fetchone()
                 if not record or record['state'] in ['cancelled','deleted']:state=record['state'] if record else 'deleted';message='Cancelled by owner';break
