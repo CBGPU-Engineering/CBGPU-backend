@@ -50,3 +50,29 @@ Existing installed apps can download AI output through their existing authentica
 ## Private conversation UI
 
 `/ai/chat` uses account-owned conversations stored in the same private SQLite database. History survives browser/device changes; the browser never uses localStorage as a conversation database. Each turn enqueues the same reservation-first local model job. Only the owner can list, open, rename, delete or append messages; API keys cannot access conversation endpoints. One live generation per conversation prevents conflicting turns. Up to 100 conversations per owner and 100 turns per conversation are supported. Model context is bounded to recent completed turns, and pending/cancelled turns are excluded. Completed responses are persisted into history when polled. Unread job results retain the standard 30-day retention; private chat messages remain until the conversation is deleted. Deletion removes chat rows and marks associated jobs deleted, so the scheduler stops only its own running generation and cleans the associated job files.
+
+## Model catalog and coding clients
+
+`GET /api/ai/v1/models` exposes ready state, model IDs and context/output limits.
+Text models: `cbgpu-chat` (Qwen2.5 7B), `cbgpu-coder` (Qwen2.5 Coder 7B),
+`cbgpu-pro` (Qwen2.5 14B). All are pinned Apache-2.0 GGUF assets, loaded into a
+single available GPU per task. Each chat turn selects and persists its model.
+
+Chat completions accept bounded OpenAI-style function definitions, assistant
+`tool_calls`, tool-result messages and `tool_choice` (`auto`, `none`, `required`,
+or a named function). The local model proposes a JSON function call or a final
+answer; the adapter validates tool names/argument objects and returns standard
+`tool_calls`. **No function is executed by the API or on the server host.**
+The calling coding agent validates arguments and asks the user for permission.
+This is a supported subset of the OpenAI interface, not every OpenAI endpoint.
+
+`stream: true` provides SSE keep-alive comments while GPU work is queued/running,
+then emits the completed response as a chunk and `[DONE]`. It does not simulate
+incremental generation. Tool-call deltas include an index and JSON arguments;
+`stream_options.include_usage` is supported. A stream has a five-minute deadline;
+disconnection cancels only its own queued/generating job. Reservations always win.
+
+[CBGPU Agent](https://github.com/CBGPU-Engineering/CBGPU-agent) wraps the pinned
+MIT-licensed OpenCode engine with this provider, restricted models, no paid fallback,
+private API-key storage, and approval defaults for edits/shell/external directories.
+Install/use instructions are at `/ai/cli`. This is not Anthropic Claude Code.

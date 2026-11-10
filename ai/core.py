@@ -1,6 +1,8 @@
 """Private persistent queue, ownership checks, bounded uploads and artifact paths."""
 import hashlib, hmac, json, os, secrets, sqlite3, threading, time, uuid, zipfile, shutil
 from pathlib import Path, PurePosixPath
+from catalog import TEXT_MODELS
+from tool_protocol import validate_tools
 
 KINDS={'chat','transcribe','embed','search','document','python'}
 LIVE={'queued','running','paused'}
@@ -67,10 +69,19 @@ class Store:
         if kind not in KINDS or not isinstance(data,dict): raise Failure('Unsupported task')
         if kind=='chat':
             messages=data.get('messages');limit=data.get('max_tokens',512)
-            if not isinstance(messages,list) or not 1<=len(messages)<=32 or any(not isinstance(m,dict) or m.get('role') not in ['system','user','assistant'] or not isinstance(m.get('content'),str) for m in messages): raise Failure('Use text chat messages')
-            if sum(len(m['content']) for m in messages)>24000: raise Failure('Text is too long',413)
+            if not isinstance(messages,list) or not 1<=len(messages)<=32 or any(not isinstance(m,dict) or m.get('role') not in ['system','user','assistant','tool'] or not (isinstance(m.get('content'),str) or m.get('role')=='assistant' and m.get('content') is None and isinstance(m.get('tool_calls'),list)) for m in messages): raise Failure('Use text chat messages')
+            if any(m['role']=='tool' and not isinstance(m.get('tool_call_id'),str) for m in messages):raise Failure('Tool results require tool_call_id')
+            if sum(len(m.get('content') or '')+len(json.dumps(m.get('tool_calls') or [])) for m in messages)>48000: raise Failure('Text is too long',413)
             if type(limit)!=int or not 1<=limit<=2048: raise Failure('max_tokens must be 1–2048')
-            data={'messages':[{'role':m['role'],'content':m['content']} for m in messages],'max_tokens':limit}
+            model=data.get('model','cbgpu-chat')
+            if model not in TEXT_MODELS:raise Failure('Unknown chat model')
+            tools=data.get('tools') or [];choice=data.get('tool_choice','auto')
+            try:
+                if tools:validate_tools(tools)
+                if choice not in ['auto','none','required'] and not (isinstance(choice,dict) and choice.get('type')=='function' and choice.get('function',{}).get('name') in {t['function']['name'] for t in tools}):raise ValueError('Unsupported tool_choice')
+                if any(m.get('tool_calls') and (not isinstance(m['tool_calls'],list) or len(json.dumps(m['tool_calls']))>24000) for m in messages):raise ValueError('Invalid tool history')
+            except (ValueError,TypeError,AttributeError) as e:raise Failure(str(e))
+            data={'messages':[{k:m[k] for k in ['role','content','tool_calls','tool_call_id'] if k in m} for m in messages],'max_tokens':limit,'model':model,'tools':tools,'tool_choice':choice}
         elif kind in ['embed','search']:
             if kind=='embed':
                 texts=data.get('input');texts=[texts] if isinstance(texts,str) else texts

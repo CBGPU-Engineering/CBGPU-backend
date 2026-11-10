@@ -7,6 +7,7 @@ from core import Store,Failure,MAX_UPLOAD,valid_id
 from scheduler import Scheduler
 from corpus import Corpus
 from conversations import Conversations
+from catalog import models
 
 class AIHTTPServer(ThreadingHTTPServer):
     daemon_threads=True
@@ -69,6 +70,7 @@ class Handler(BaseHTTPRequestHandler):
         if not valid_id(owner):raise Failure('Authentication required',401)
         if self.command!='GET':self.server.rate(owner)
         if self.command=='POST' and parts!=['uploads']:self.body()
+        if parts==['models'] and self.command=='GET':self.reply(200,{'object':'list','data':models(store.root)});return
         if parts==['status'] and self.command=='GET':
             counts={r[0]:r[1] for r in store.execute("SELECT state,count(*) FROM jobs WHERE state IN ('queued','running','paused') GROUP BY state").fetchall()}
             self.reply(200,{'scheduler':self.server.scheduler.health,'queue':counts,'corpus':self.server.corpus.health if self.server.corpus else {},'models':[{'id':'cbgpu-chat','task':'chat'},{'id':'cbgpu-embeddings','task':'embeddings'},{'id':'cbgpu-whisper','task':'transcription'}]});return
@@ -90,7 +92,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.command=='GET':self.reply(200,{'chat':chats.get(owner,id)});return
                 if self.command=='POST':self.reply(200,{'chat':chats.rename(owner,id,self.body().get('title'))});return
                 if self.command=='DELETE':chats.delete(owner,id);self.reply(200,{'ok':True});return
-            if parts[2:]==['messages'] and self.command=='POST':self.reply(202,{'chat':chats.send(owner,id,self.body().get('content'))});return
+            if parts[2:]==['messages'] and self.command=='POST':self.reply(202,{'chat':chats.send(owner,id,self.body().get('content'),self.body().get('model','cbgpu-chat'))});return
         if parts==['keys']:
             if self.command=='GET':self.reply(200,{'keys':store.keys(owner)});return
             if self.command=='POST':self.reply(201,store.create_key(owner,self.body().get('name')));return

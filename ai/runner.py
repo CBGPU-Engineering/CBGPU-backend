@@ -2,21 +2,34 @@
 import hashlib, json, os, sqlite3, sys, time
 from pathlib import Path
 from core import atomic_json
+from catalog import model_file
+from tool_protocol import prepare,decode
 
 def progress(folder,message):atomic_json(folder/'progress.json',{'message':message})
 
-def chat(state,messages,max_tokens=512):
+def chat(state,messages,max_tokens=512,model_id="cbgpu-chat",tools=None,tool_choice="auto"):
+    messages,tool_mode=prepare(messages,tools or [],tool_choice)
     from llama_cpp import Llama
-    model=Llama(model_path=str(state/'models/chat/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf'),n_gpu_layers=-1,n_ctx=8192,n_batch=256,n_threads=4,flash_attn=False,verbose=False)
+    model=Llama(model_path=str(model_file(state,model_id)),n_gpu_layers=-1,n_ctx=8192,n_batch=256,n_threads=4,flash_attn=False,verbose=False)
     # Keep the most recent text within the actual tokenizer budget; report truncation to callers.
     budget=7000-max_tokens;prepared=[];truncated=False
-    for message in messages:
+    systems=[m for m in messages if m['role']=='system'];turns=[m for m in messages if m['role']!='system']
+    if systems:
+        tokens=model.tokenize(('\n\n'.join(m['content'] for m in systems)).encode(),add_bos=False);cap=int(budget*.65)
+        if len(tokens)>cap:tokens=tokens[:cap];truncated=True
+        prepared.append({'role':'system','content':model.detokenize(tokens).decode('utf8',errors='ignore')});budget-=len(tokens)
+    recent=[]
+    for message in reversed(turns):
         tokens=model.tokenize(message['content'].encode(),add_bos=False)
-        if len(tokens)>budget:tokens=tokens[:max(0,budget)];truncated=True
-        content=model.detokenize(tokens).decode('utf8',errors='ignore');prepared.append({'role':message['role'],'content':content});budget-=len(tokens)
+        if len(tokens)>budget:
+            if not recent:tokens=tokens[:max(0,budget)]
+            else:truncated=True;break
+            truncated=True
+        content=model.detokenize(tokens).decode('utf8',errors='ignore');recent.insert(0,{'role':message['role'],'content':content});budget-=len(tokens)
         if budget<=0:truncated=True;break
-    result=model.create_chat_completion(messages=prepared,max_tokens=max_tokens,temperature=0.35)
-    result['model']='cbgpu-chat';result['truncated']=truncated;return result
+    prepared+=recent
+    result=model.create_chat_completion(messages=prepared,max_tokens=max_tokens,temperature=0.2,**({"response_format":{"type":"json_object"}} if tool_mode else {}))
+    result['model']=model_id;result['truncated']=truncated;return decode(result,tools,tool_choice) if tool_mode else result
 
 embedding_model=None
 
@@ -69,7 +82,7 @@ def document(folder,state,data):
 
 def main():
     kind,folder,state=sys.argv[1:];folder=Path(folder);state=Path(state);data=json.loads((folder/'input.json').read_text());progress(folder,'Loading the local model')
-    if kind=='chat':result=chat(state,data['messages'],data.get('max_tokens',512))
+    if kind=='chat':result=chat(state,data['messages'],data.get('max_tokens',512),data.get('model','cbgpu-chat'),data.get('tools'),data.get('tool_choice','auto'))
     elif kind=='transcribe':result=transcribe(folder,state,data)
     elif kind=='embed':
         output=vectors(state,data['input']);token_count=sum(len(ids) for ids in embedding_model.tokenizer(embedding_texts(data['input']),truncation=True,max_length=512)['input_ids']);result={'object':'list','model':'cbgpu-embeddings','data':[{'object':'embedding','index':i,'embedding':v.tolist()} for i,v in enumerate(output)],'usage':{'prompt_tokens':token_count,'total_tokens':token_count}}
