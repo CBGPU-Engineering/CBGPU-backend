@@ -1,5 +1,5 @@
 """Private persistent queue, ownership checks, bounded uploads and artifact paths."""
-import hashlib, hmac, json, os, secrets, sqlite3, threading, time, uuid, zipfile, shutil
+import hashlib, hmac, json, os, secrets, sqlite3, threading, time, uuid, zipfile, shutil, stat
 from pathlib import Path, PurePosixPath
 from catalog import TEXT_MODELS
 from tool_protocol import validate_tools
@@ -21,6 +21,21 @@ def safe_relative(value):
 
 def atomic_json(path,value):
     temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(value,ensure_ascii=False));temporary.chmod(0o600);temporary.replace(path)
+
+class SafeArtifact:
+    """An already opened, no-follow file descriptor; path swaps cannot change what is downloaded."""
+    def __init__(self,fd):self.fd=fd
+    def stat(self):return os.fstat(self.fd)
+    def open(self,mode='rb'):
+        if mode!='rb':raise ValueError('Read-only artifact')
+        return os.fdopen(os.dup(self.fd),'rb')
+    def read_text(self,encoding='utf8'):
+        with self.open() as file:return file.read().decode(encoding)
+    def close(self):
+        if self.fd is not None:os.close(self.fd);self.fd=None
+    def __del__(self):
+        try:self.close()
+        except Exception:pass
 
 class Store:
     def __init__(self,state):
@@ -129,23 +144,45 @@ class Store:
                 stream.seek(max(0,(folder/'log.txt').stat().st_size-24000));result['logs']=stream.read(24000).decode('utf8',errors='replace')
         if detail:result['artifacts']=self.artifacts(folder)
         return result
+    def _workspace_root(self,folder):
+        workspace=folder/'workspace'
+        if workspace.is_symlink():
+            data_root=getattr(self,'data_root',None)
+            if not data_root or workspace.resolve()!=data_root/'workspaces'/folder.name:raise Failure('File not found',404)
+        return workspace.resolve()
+    def _open_artifact(self,folder,relative):
+        safe_relative(relative);fd=None
+        try:
+            root=self._workspace_root(folder);fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+            parts=['output',*PurePosixPath(relative).parts]
+            for part in parts[:-1]:
+                next_fd=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);os.close(fd);fd=next_fd
+            file_fd=os.open(parts[-1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fd)
+            if not stat.S_ISREG(os.fstat(file_fd).st_mode):os.close(file_fd);raise Failure('File not found',404)
+            return SafeArtifact(file_fd)
+        except (OSError,ValueError):raise Failure('File not found',404)
+        finally:
+            if fd is not None:os.close(fd)
     def artifacts(self,folder):
-        output=folder/'workspace'/'output'
-        if not output.is_dir():return []
+        try:output=self._workspace_root(folder)/'output'
+        except Failure:return []
+        if output.is_symlink() or not output.is_dir():return []
         result=[]
-        for path in output.rglob('*'):
-            if path.is_symlink() or not path.is_file() or any(p.is_symlink() for p in path.parents if p!=output):continue
-            if len(result)>=1000:break
-            result.append({'path':str(path.relative_to(output)),'size':path.stat().st_size})
+        for number,path in enumerate(output.rglob('*')):
+            if number>=5000 or len(result)>=1000:break
+            relative=str(path.relative_to(output))
+            try:
+                file=self._open_artifact(folder,relative)
+                try:result.append({'path':relative,'size':file.stat().st_size})
+                finally:file.close()
+            except Failure:continue
         return result
     def artifact(self,owner,id,relative):
-        self.job(owner,id,False);safe_relative(relative);root=self.root/'jobs'/id/'workspace'/'output';path=root/relative
-        if not path.is_file() or path.is_symlink() or root.resolve() not in path.resolve().parents or any(p.is_symlink() for p in path.parents if p!=root): raise Failure('File not found',404)
-        return path
+        self.job(owner,id,False);return self._open_artifact(self.root/'jobs'/id,relative)
     def download_ticket(self,owner,id,kind,path=''):
         job=self.job(owner,id)
         if job['state']=='deleted':raise Failure('Task not found',404)
-        if kind=='artifact':self.artifact(owner,id,path)
+        if kind=='artifact':self.artifact(owner,id,path).close()
         elif kind in ['text','srt']:
             result=job.get('result') or {}
             value=result.get('srt') if kind=='srt' else result.get('text') or (result.get('choices') or [{}])[0].get('message',{}).get('content')
