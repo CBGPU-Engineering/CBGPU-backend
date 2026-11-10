@@ -24,3 +24,6 @@ class RoboticsTests(unittest.TestCase):
   job=self.create();self.result(job['id'],self.plan());self.store.execute('UPDATE robot_plans SET observed=0 WHERE id=?',(job['id'],));self.assertEqual(self.robotics.get(self.owner,job['id'])['state'],'failed')
  def test_clarification_does_not_create_steps(self):
   job=self.create();self.result(job['id'],{'summary':'Need a known destination','needs_clarification':True,'question':'Which waypoint?','steps':[]});mission=self.robotics.get(self.owner,job['id'])['mission'];self.assertEqual(mission['plan']['steps'],[])
+
+ def test_truncated_model_context_cannot_issue_a_mission(self):
+  job=self.create();self.result(job['id'],self.plan());path=self.store.root/'jobs'/job['id']/'result.json';value=json.loads(path.read_text());value['truncated']=True;atomic_json(path,value);result=self.robotics.get(self.owner,job['id']);self.assertEqual(result['state'],'failed');self.assertNotIn('mission',result)
