@@ -1,3 +1,4 @@
+// Deployed to the runtime folder by the delivery agent (operations/delivery: sync_functions).
 // Called by AFTER INSERT triggers on profiles (new signup) and reservations, and by monitoring scripts (ops_alert)
 // (new GPU request) — see ../../notify_triggers_migration.sql. Notifies
 // every admin (profiles.is_admin = true). Android-only, same FCM setup as
