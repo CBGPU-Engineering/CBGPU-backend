@@ -88,3 +88,25 @@ Read-only `/v1/web/search` and `/v1/web/read` support the CLI MCP bridge. DNS/IP
 ## Two-volume storage
 
 With `CBGPU_AI_DATA_ROOT=/srv/cbgpu-data/ai` and `CBGPU_AI_REQUIRE_DATA_MOUNT=1`, new uploads and Python workspaces use the mounted Samsung SSD. Existing files and model weights remain on the original NVMe, with no bulk migration. Private queue metadata stays on NVMe. Missing data mounts fail closed; cleanup removes the matching owned bulk files. Both volumes need independent backup and free-space monitoring.
+
+## Robotics planning
+
+`POST /api/ai/v1/robotics/plans` creates an account-owned asynchronous planning job;
+`GET /api/ai/v1/robotics/plans/{id}` returns status and a validated mission;
+`DELETE` cancels planning. JWTs and AI keys use the same account approval checks.
+There is no actuation endpoint or robot network access. The standalone
+[CBGPU Robotics SDK](https://github.com/CBGPU-Engineering/CBGPU-robotics) supports
+Windows/macOS/Linux Python and documents the portable HTTP contract for other OSes.
+
+The API accepts bounded closed capability schemas, structured observations and
+fresh timestamps, and uses a required tool call to propose at most six steps / 60
+seconds. It validates every argument before issuing a mission bound to the robot,
+capability hash and observation expiry. Raw model proposals never become commands.
+The SDK revalidates locally, defaults to dry-run and requires commissioning, arming,
+approval, fresh sensors and a cooperative driver with an independent stop/watchdog.
+Only virtual hardware is included; physical integration requires the robot's drivers.
+
+`robotics_protocol.py` is vendored Apache-2.0 code from
+`CBGPU-robotics/cbgpu_robotics/protocol.py` (protocol version 1). Update and test both
+copies together when changing the wire contract. Planning metadata is private SQLite,
+removed with expired jobs, and never exposed through the Supabase Data API.

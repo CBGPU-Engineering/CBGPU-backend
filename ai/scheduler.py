@@ -102,7 +102,7 @@ class Scheduler:
         try:self._cleanup()
         finally:self.store.ai_cleanup_lock.release()
     def _cleanup(self):
-        now=time.time();self.store.execute('DELETE FROM downloads WHERE expires<? OR job_id NOT IN (SELECT id FROM jobs)',(now,))
+        now=time.time();self.store.execute('DELETE FROM robot_plans WHERE id NOT IN (SELECT id FROM jobs)') if self.store.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='robot_plans'").fetchone() else None;self.store.execute('DELETE FROM downloads WHERE expires<? OR job_id NOT IN (SELECT id FROM jobs)',(now,))
         for r in self.store.execute("SELECT id FROM jobs WHERE state='deleted' OR (state NOT IN ('queued','running','paused') AND updated<?)",(now-30*86400,)).fetchall():
             if r['id']==self.current or r['id'] in self.store.ai_active:continue
             folder=self.store.root/'jobs'/r['id']

@@ -8,11 +8,12 @@ from scheduler import ParallelScheduler as Scheduler
 from corpus import Corpus
 from conversations import Conversations
 from catalog import models
+from robotics import Robotics
 
 class AIHTTPServer(ThreadingHTTPServer):
     daemon_threads=True
     def __init__(self,address,store,scheduler,key,corpus=None):
-        super().__init__(address,Handler);self.store=store;self.scheduler=scheduler;self.key=key;self.corpus=corpus;self.conversations=Conversations(store);self.requests=defaultdict(deque);self.rate_lock=threading.Lock()
+        super().__init__(address,Handler);self.store=store;self.scheduler=scheduler;self.key=key;self.corpus=corpus;self.conversations=Conversations(store);self.robotics=Robotics(store);self.requests=defaultdict(deque);self.rate_lock=threading.Lock()
     def rate(self,owner):
         with self.rate_lock:
             now=time.time();q=self.requests[owner]
@@ -79,6 +80,10 @@ class Handler(BaseHTTPRequestHandler):
                 body,url=fetch_public(self.body().get('url',''));parser=Text();parser.feed(body);self.reply(200,{'url':url,'text':' '.join(' '.join(parser.parts).split())[:6000]})
             finally:gate.release()
             return
+        if parts==['robotics','plans'] and self.command=='POST':self.reply(202,self.server.robotics.create(owner,self.body()));return
+        if len(parts)==3 and parts[:2]==['robotics','plans'] and valid_id(parts[2]):
+            if self.command=='GET':self.reply(200,self.server.robotics.get(owner,parts[2]));return
+            if self.command=='DELETE':self.reply(200,self.server.robotics.cancel(owner,parts[2]));return
         if parts==['models'] and self.command=='GET':self.reply(200,{'object':'list','data':models(store.root)});return
         if parts==['status'] and self.command=='GET':
             counts={r[0]:r[1] for r in store.execute("SELECT state,count(*) FROM jobs WHERE state IN ('queued','running','paused') GROUP BY state").fetchall()}
