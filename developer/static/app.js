@@ -214,10 +214,15 @@
   }
   function renderSystem(system = {}) {
     const root = $('system-content'); root.replaceChildren(); const list = element('div', 'resource-list');
-    for (const [key, label] of [['cpu_percent', 'CPU'], ['memory_percent', 'Memory'], ['disk_percent', 'Disk']]) {
+    for (const [key, label] of [['cpu_percent', 'CPU'], ['memory_percent', 'Memory'], ['disk_percent', 'All SSDs']]) {
       const row = element('div', 'resource-row'); const top = element('div', 'resource-top');
       top.append(element('span', '', label), element('span', 'resource-value', finite(system[key]) ? number.format(system[key]) + '%' : 'Unavailable'));
-      const meter = element('div', 'meter'); meter.setAttribute('aria-hidden', 'true'); const fill = element('div', 'meter-fill'); fill.style.width = (finite(system[key]) ? Math.max(0, Math.min(100, system[key])) : 0) + '%'; meter.append(fill); row.append(top, meter); list.append(row);
+      const meter = element('div', 'meter'); meter.setAttribute('aria-hidden', 'true'); const fill = element('div', 'meter-fill'); fill.style.width = (finite(system[key]) ? Math.max(0, Math.min(100, system[key])) : 0) + '%'; meter.append(fill); row.append(top, meter);
+      if (key === 'disk_percent' && finite(system.disk_total_bytes)) {
+        const capacity = value => number.format(value / 1024 ** 4) + ' TiB';
+        row.append(element('div', 'meta', `${capacity(system.disk_used_bytes)} used / ${capacity(system.disk_total_bytes)} total · ${capacity(system.disk_available_bytes)} available`));
+      }
+      list.append(row);
     }
     const time = element('div', 'uptime-row'); time.append(element('span', '', 'Host uptime'), element('span', '', uptime(system.uptime_seconds))); root.append(list, time);
   }
