@@ -11,7 +11,8 @@ export function claims(token){try{const c=JSON.parse(Buffer.from(token.split('.'
 export function shouldRenew(token,now=Date.now()){return claims(token).exp*1000-now<=24*3600000}
 export function validateReplacement(oldToken,next,now=Date.now()){
  const a=claims(oldToken),b=claims(next);
- if(a.userId==null||b.userId!==a.userId)throw Error('school_account_mismatch');
+ if(b.userId==null)throw Error('invalid_token');
+ // The operator's configured login may differ from a contributor's old token.
  if(b.exp*1000<now+24*3600000||b.exp<=a.exp)throw Error('replacement_not_newer');
 }
 async function main(){
@@ -61,7 +62,7 @@ async function main(){
  const iv=crypto.randomBytes(12),enc=crypto.createCipheriv('aes-256-gcm',key,iv),body=Buffer.concat([enc.update(next),enc.final()]);
  const expires=new Date(claims(next).exp*1000).toISOString();
  // Compare-and-swap: never overwrite a token just submitted by an administrator/contributor.
- const result=await db.from('eduset_settings').update({access_token_enc:Buffer.concat([iv,enc.getAuthTag(),body]).toString('base64'),updated_at:new Date().toISOString(),expires_at:expires}).eq('id',1).eq('access_token_enc',row.access_token_enc).select('id');
+ const result=await db.from('eduset_settings').update({access_token_enc:Buffer.concat([iv,enc.getAuthTag(),body]).toString('base64'),updated_at:new Date().toISOString(),updated_by:null,expires_at:expires}).eq('id',1).eq('access_token_enc',row.access_token_enc).select('id');
  if(result.error)throw Error('save_failed');
  write(result.data?.length?'renewed':'superseded',{connection_expires_at:expires});
  }catch(error){const safe=new Set(['invalid_token','school_account_mismatch','replacement_not_newer','active_release_missing','shared_connection_missing','credentials_permissions','school_rejected_token','school_response_invalid','save_failed']);write('needs_attention',{reason:safe.has(error.message)?error.message:phase==='human_verification'?'human_verification_required':'login_or_verification_failed',phase,retry_after:new Date(Date.now()+6*3600000).toISOString()});process.exitCode=1;}

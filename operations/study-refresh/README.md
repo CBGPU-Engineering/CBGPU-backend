@@ -14,8 +14,8 @@ EDUSET_USERNAME=your-school-username
 EDUSET_PASSWORD=your-school-password
 ```
 
-Use file mode `600`. Never commit credentials. The configured account must match
-the identity of the current shared token. The worker discovers the active web
+Use file mode `600`. Never commit credentials. The configured account must have authorized school lookup access; it may differ
+from the contributor who supplied the previous shared token. The worker discovers the active web
 release and its local database/encryption settings without duplicating secrets.
 
 Install `refresh.mjs` into `~/.local/lib/cbgpu-study-monitor/`, install both unit
