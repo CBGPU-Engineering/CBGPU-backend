@@ -58,6 +58,8 @@ class Store:
             if column not in {r['name'] for r in self.db.execute('PRAGMA table_info('+table+')')}:
                 self.db.execute('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition)
         self.db.commit()
+        from file_preparation import FilePreparation
+        self.preparation = FilePreparation(self)
     def execute(self,query,args=()):
         with self.lock:
             cur=self.db.execute(query,args);self.db.commit();return cur
@@ -67,6 +69,7 @@ class Store:
         target=self.data_root/name;target.mkdir(parents=True,exist_ok=True,mode=0o700);target.chmod(0o700);return target
     def remove_upload(self,id):
         if not valid_id(id):return
+        (self.root/'extracted'/(id+'.json')).unlink(missing_ok=True)
         link=self.root/'uploads'/id
         if link.is_symlink():
             target=link.resolve()

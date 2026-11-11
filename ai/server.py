@@ -105,6 +105,15 @@ class Handler(BaseHTTPRequestHandler):
         if parts==['status'] and self.command=='GET':
             counts={r[0]:r[1] for r in store.execute("SELECT state,count(*) FROM jobs WHERE state IN ('queued','running','paused') GROUP BY state").fetchall()}
             self.reply(200,{'scheduler':self.server.scheduler.health,'queue':counts,'corpus':self.server.corpus.health if self.server.corpus else {},'models':[{'id':'cbgpu-chat','task':'chat'},{'id':'cbgpu-embeddings','task':'embeddings'},{'id':'cbgpu-whisper','task':'transcription'}]});return
+        if len(parts)==2 and parts[0]=='uploads' and valid_id(parts[1]) and self.command=='GET':
+            self.reply(200,{'file':store.preparation.status(owner,parts[1])});return
+        if len(parts)==3 and parts[0]=='uploads' and valid_id(parts[1]) and parts[2]=='text' and self.command=='GET':
+            value=store.preparation.read(owner,parts[1])
+            if not value or value['state']!='ready':raise Failure('문서 처리가 끝난 뒤 확인할 수 있어요.',409)
+            result=value['result']
+            self.reply(200,{'text':'\n\n'.join((f'[{page}쪽]\n' if page else '')+text for page,text in result['chunks'])});return
+        if len(parts)==3 and parts[0]=='uploads' and valid_id(parts[1]) and parts[2]=='prepare' and self.command=='POST':
+            self.reply(202,{'file':store.preparation.start(owner,parts[1])});return
         if parts==['uploads'] and self.command=='POST':self.reply(201,store.upload(owner,urllib.parse.parse_qs(parsed.query).get('name',['upload'])[0],self.chunks(MAX_UPLOAD)));return
         if len(parts)==2 and parts[0]=='downloads' and valid_id(parts[1]) and self.command=='GET':
             value=store.download(owner,parts[1]);size=len(value) if isinstance(value,bytes) else value.stat().st_size

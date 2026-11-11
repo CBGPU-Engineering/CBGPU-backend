@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 
 from core import Failure
+from file_preparation import IMAGE_TYPES
 
 MAX_BYTES = 8 * 1024 * 1024
 PARSER_SLOTS = threading.BoundedSemaphore(2)
@@ -82,27 +83,36 @@ def evidence(store, owner, ids, question):
     for id in dict.fromkeys(ids):
         upload = store.get_upload(owner, id)
         suffix = Path(upload['name']).suffix.lower()
-        if upload['size'] > MAX_BYTES or suffix not in TEXT_TYPES | {'.pdf'}:
-            raise Failure('8MB 이하의 PDF, CSV 또는 텍스트 파일을 첨부해 주세요.')
-        python = store.root / 'venv/bin/python' if suffix == '.pdf' else sys.executable
-        if not PARSER_SLOTS.acquire(blocking=False):
-            raise Failure('다른 첨부 파일을 읽고 있어요. 잠시 후 다시 시도해 주세요.', 429)
-        try:
-            output = subprocess.check_output(
-                [str(python), str(Path(__file__).resolve()), str(store.root / 'uploads' / id), suffix],
-                timeout=8, stderr=subprocess.DEVNULL,
-            )
-            extracted = json.loads(output)
-            chunks = [(page, text.strip()) for page, text in extracted['chunks'] if text.strip()]
-        except (OSError, ValueError, subprocess.SubprocessError) as error:
-            raise Failure('파일을 읽지 못했어요. PDF는 암호 없이 100쪽까지, 텍스트는 UTF-8로 올려 주세요.') from error
-        finally:
-            PARSER_SLOTS.release()
+        if upload['size'] > MAX_BYTES or suffix not in TEXT_TYPES | IMAGE_TYPES | {'.pdf'}:
+            raise Failure('8MB 이하의 PDF, 이미지, CSV 또는 텍스트 파일을 첨부해 주세요.')
+        prepared = store.preparation.read(owner, id)
+        if prepared and prepared['state'] == 'ready':
+            extracted = prepared['result']
+        elif suffix in IMAGE_TYPES | {'.pdf'}:
+            status = store.preparation.start(owner, id)
+            raise Failure(status.get('error') or '첨부 파일을 읽고 있어요. 준비가 끝나면 다시 보내 주세요.', 409)
+        else:
+            if not PARSER_SLOTS.acquire(blocking=False):
+                raise Failure('다른 첨부 파일을 읽고 있어요. 잠시 후 다시 시도해 주세요.', 429)
+            try:
+                output = subprocess.check_output(
+                    [sys.executable, str(Path(__file__).resolve()), str(store.root / 'uploads' / id), suffix],
+                    timeout=8, stderr=subprocess.DEVNULL,
+                )
+                extracted = json.loads(output)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                raise Failure('파일을 읽지 못했어요. CSV나 UTF-8 텍스트 파일로 다시 올려 주세요.') from error
+            finally:
+                PARSER_SLOTS.release()
+        chunks = [(page, text.strip()) for page, text in extracted['chunks'] if text.strip()]
         if not chunks:
-            raise Failure('읽을 수 있는 텍스트가 없어요. 스캔 PDF는 먼저 OCR을 적용해 주세요.')
+            raise Failure('읽을 수 있는 텍스트가 없어요. 글자가 선명하게 보이는 파일을 올려 주세요.')
         ranked = sorted(chunks, key=lambda entry: sum(word in entry[1].lower() for word in words), reverse=True)
         for page, excerpt in ranked[:1 if suffix == '.csv' else 2]:
             source = {'title': upload['name'], 'page': page, 'excerpt': excerpt[:1000]}
+            source['ocr'] = page in extracted.get('ocr_page_numbers', [])
+            source['low_confidence'] = page in extracted.get('weak_pages', [])
+            source['truncated'] = bool(extracted.get('truncated'))
             if extracted.get('charts'):
                 source['charts'] = extracted['charts']
             results.append(source)

@@ -25,7 +25,7 @@ class Scheduler:
             try:
                 cards,_=resources.snapshot();self.health={'status':'ok','checked_at':time.time(),'gpus':[{'id':c['index']+1,'name':c['name'],'reserved':c['reserved'],'available':c['available']} for c in cards]}
                 candidates=[dict(r) for r in self.store.execute("SELECT * FROM jobs WHERE state IN ('queued','paused') ORDER BY CASE WHEN kind='python' THEN 1 ELSE 0 END,updated,created").fetchall()]
-                candidates=[c for c in candidates if c['id'] not in self.store.ai_active]
+                candidates=[c for c in candidates if c['id'] not in self.store.ai_active and self.document_ready(c)]
                 free=next((c for c in cards if c['available'] and c['uuid'] not in self.store.ai_leases),None)
                 if candidates and free:
                     # Rotate queued owners within the same priority.
@@ -37,6 +37,44 @@ class Scheduler:
             except Exception:
                 self.health={'status':'unavailable','checked_at':time.time(),'gpus':[],'detail':'GPU or reservation status could not be verified. New tasks are paused.'}
             self.stop_event.wait(2)
+    def document_ready(self,job):
+        if job['kind']!='document':return True
+        folder=self.store.root/'jobs'/job['id']
+        try:
+            data=json.loads((folder/'input.json').read_text())
+            if 'extracted_text' in data:return True
+            # Older large plain-text documents retain their existing text-reader path.
+            if Path(data['filename']).suffix.lower() in {'.txt','.md','.csv','.tex','.py','.log'}:
+                return True
+            state=self.store.preparation.status(job['owner'],data['upload_id'])
+            if state['state']=='failed':
+                self.store.execute("UPDATE jobs SET state='failed',error=?,progress=?,updated=? WHERE id=? AND state IN ('queued','paused')",
+                                   (state['error'],state['error'],time.time(),job['id']))
+                return False
+            if state['state']!='ready':
+                self.store.preparation.start(job['owner'],data['upload_id'])
+                self.store.execute("UPDATE jobs SET progress=? WHERE id=? AND state IN ('queued','paused')",
+                                   ('문서 읽는 중 · 스캔 페이지 자동 OCR',job['id']))
+                return False
+            prepared=self.store.preparation.read(job['owner'],data['upload_id'])['result']
+            data['extracted_text']='\n'.join(text for _,text in prepared['chunks'])
+            data['extraction_truncated']=bool(prepared.get('truncated'))
+            data['ocr_pages']=len(prepared.get('ocr_page_numbers',[]))
+            with self.store.lock:
+                row=self.store.execute("SELECT state FROM jobs WHERE id=?",(job['id'],)).fetchone()
+                if not row or row['state'] not in {'queued','paused'}:return False
+                atomic_json(folder/'input.json',data)
+            return True
+        except Failure as error:
+            if error.status!=429:
+                self.store.execute("UPDATE jobs SET state='failed',error=?,updated=? WHERE id=? AND state IN ('queued','paused')",
+                                   (str(error),time.time(),job['id']))
+            return False
+        except (OSError,ValueError,KeyError):
+            self.store.execute("UPDATE jobs SET state='failed',error=?,updated=? WHERE id=? AND state IN ('queued','paused')",
+                               ('문서를 읽지 못했어요. 다시 올려 주세요.',time.time(),job['id']))
+            return False
+
     def execute(self,job,gpu):
         with self.store.lock:
             if gpu['uuid'] in self.store.ai_leases or job['id'] in self.store.ai_active:return

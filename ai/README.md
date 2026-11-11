@@ -26,7 +26,7 @@ Uploads: 200 MiB each, 2 GiB per owner, 30/day. ZIPs: 10,000 entries and 2 GiB e
 
 The frontend selects private-note and shared-file candidates with the caller's Supabase bearer/RLS. Published papers use the same explicit published-only server projection as the public preprint API; public docs are static. The search worker receives only the caller-authorized candidate IDs. A separate CPU-only indexer extracts supported ready shared files and published paper PDFs into a private local corpus, with bounded file size, pages and text length; unsupported and image-only files retain metadata search. The indexer removes withdrawn sources during its next sync. Private notes are embedded only from the caller-authorized request and never enter that corpus. Candidate payloads are bounded and long text is truncated. Sources and permissions are checked again before a search result is returned. Private notes never become a public corpus. The vector cache contains only text hashes and embeddings, not a separately browsable document store.
 
-Document summary accepts text PDFs and selected text formats, up to the first 100 PDF pages and the model's token budget. Image-only/encrypted PDFs fail explicitly; OCR is not implemented. Truncation is reported. Native editing shows proposals; it never silently overwrites or publishes a note. If input changes after inference starts, applying the old proposal is disabled.
+Document summary accepts text PDFs and selected text formats, up to the first 100 PDF pages and the model's token budget. Scanned PDFs and PNG/JPEG/WebP/TIFF images use local Korean/English Tesseract OCR. Encrypted PDFs fail explicitly. Truncation is reported. Native editing shows proposals; it never silently overwrites or publishes a note. If input changes after inference starts, applying the old proposal is disabled.
 
 ## API
 
@@ -134,3 +134,16 @@ the SDK revalidates locally and uses a persistent execution ledger. Web stop is
 network-dependent, not a certified or physical emergency stop. The optional ROS2
 adapter requires the existing map, TF, LiDAR, NavigateToPose server and fresh local
 arm/e-stop heartbeats. Hardware drivers and Arduino watchdog remain robot-local.
+
+
+## Private document preparation
+
+Build the CPU-only OCR runtime before deploying a release that uses it:
+
+```bash
+docker build -t cbgpu-ocr:1 ai/ocr
+```
+
+The worker reads a single uploaded file in an offline, read-only container with two CPU cores, 1 GB RAM and a 128 MB temporary filesystem. It extracts native PDF text and recognizes scanned pages with Korean and English language packs. Each page has a timeout and a document has a four-minute deadline. Cached extraction remains private to its upload owner, is reused in subsequent project questions, and is removed with the upload. After a service interruption, the UI can retry an unfinished preparation. Queued document-summary tasks use the same preparation before acquiring a GPU.
+
+Browser chat accepts up to three attachments of 8 MB each and PDFs of up to 100 pages. Document-summary uploads retain the existing larger PDF upload allowance. OCR warnings identify low-confidence or empty pages and truncated extraction. Recognition quality for handwriting, equations and complex tables depends on the source document.
