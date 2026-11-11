@@ -11,6 +11,24 @@ import { requireServiceRole } from '../_shared/internalAuth.ts';
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+async function isTestSignup(fullName: unknown, studentId: unknown): Promise<boolean> {
+  if (typeof fullName !== 'string' || !fullName) return false;
+  try {
+    const client = createClient(supabaseUrl, serviceRoleKey);
+    let query = client.from('profiles').select('id').eq('full_name', fullName).limit(5);
+    query = typeof studentId === 'string' && studentId ? query.eq('student_id', studentId) : query.is('student_id', null);
+    const { data: rows } = await query;
+    if (!rows?.length) return false;
+    for (const row of rows as { id: string }[]) {
+      const { data } = await client.auth.admin.getUserById(row.id);
+      if (!/@example\.invalid$/i.test(data?.user?.email ?? '')) return false;
+    }
+    return true;
+  } catch {
+    return false; // when unsure, notify
+  }
+}
+
 Deno.serve(async (req) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -24,6 +42,11 @@ Deno.serve(async (req) => {
   let body: string;
   let url: string;
   if (type === 'signup') {
+    // Automated tests create throw-away accounts on @example.invalid (reserved, can never receive mail). They are
+    // removed within seconds, so a push for them is just noise: skip when every matching account is such a one.
+    if (await isTestSignup(payload.full_name, payload.student_id)) {
+      return Response.json({ ok: true, notified: 0, reason: 'test account' }, { headers: corsHeaders });
+    }
     const label = payload.full_name ? `${payload.full_name}(${payload.student_id ?? '학번 미입력'})` : '새 사용자';
     title = '새 회원가입';
     body = `${label}님이 가입했습니다. 승인이 필요합니다.`;
