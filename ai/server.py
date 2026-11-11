@@ -135,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
             chats.remove_project_file(owner,parts[1],parts[3]);self.reply(200,{'ok':True});return
         if parts==['chats']:
             if self.command=='GET':self.reply(200,{'chats':self.server.conversations.list(owner)});return
-            if self.command=='POST':self.reply(201,{'chat':self.server.conversations.create(owner,self.body().get('project'))});return
+            if self.command=='POST':self.reply(201,{'chat':self.server.conversations.create(owner,self.body().get('project'),self.body().get('site_search',False))});return
         if len(parts) in [2,3] and parts[0]=='chats' and valid_id(parts[1]):
             chats=self.server.conversations;id=parts[1]
             if len(parts)==2:
@@ -146,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts[2:]==['messages'] and self.command=='POST':
                 body=self.body()
                 chat=chats.send(owner,id,body.get('content'),body.get('model','cbgpu-chat'),
-                                body.get('effort','medium'),body.get('web_search',False),body.get('attachments'),body.get('research',False))
+                                body.get('effort','medium'),body.get('web_search',False),body.get('attachments'),body.get('research',False),body.get('site_context'))
                 self.reply(202,{'chat':chat});return
         if parts==['keys']:
             if self.command=='GET':self.reply(200,{'keys':store.keys(owner)});return

@@ -72,6 +72,26 @@ class ConversationTests(unittest.TestCase):
         self.chats.delete_project(self.owner, project['id'])
         self.assertIsNone(self.chats.get(self.owner, second['id'])['project'])
 
+    def test_site_search_requires_a_fresh_snapshot_each_turn(self):
+        chat=self.chats.create(self.owner,site_search=True)
+        with self.assertRaises(Failure):
+            self.chats.send(self.owner,chat['id'],'내 예약은?')
+        snapshot={'checked_at':'2026-11-11T03:00:00Z','sources':[
+            {'title':'내 예약','url':'https://cbgpu.com/dashboard','text':'예약 상태: pending'}]}
+        turn=self.chats.send(self.owner,chat['id'],'내 예약은?',site_context=snapshot)
+        self.completed(turn,'예약 대기')
+        snapshot['sources'][0]['text']='예약 상태: approved'
+        next_turn=self.chats.send(self.owner,chat['id'],'지금은?',site_context=snapshot)
+        job=next_turn['messages'][-1]['job_id']
+        data=json.loads((self.store.root/'jobs'/job/'input.json').read_text())
+        prompt=json.dumps(data,ensure_ascii=False)
+        self.assertIn('approved',prompt)
+        self.assertNotIn('pending',prompt)
+        self.assertNotIn('예약 대기',prompt)
+        self.assertEqual(next_turn['messages'][-1]['sources'][0]['kind'],'site')
+        with self.assertRaises(Failure):
+            self.chats.get(self.other,chat['id'])
+
     def test_http_keep_alive_consumes_create_and_cancel_bodies(self):
         import http.client,threading
         from types import SimpleNamespace
