@@ -36,7 +36,9 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaises(Failure):
             cached.read(self.other, upload['id'])
         self.assertIn('12.5', evidence(self.store, self.owner, [upload['id']], 'voltage')[0]['excerpt'])
-        self.store.remove_upload(upload['id'])
+        with self.assertRaises(Failure):
+            self.store.delete_upload(self.other,upload['id'])
+        self.store.delete_upload(self.owner,upload['id'])
         self.assertFalse((files.root/(upload['id']+'.json')).exists())
 
     def test_interrupted_processing_can_be_retried(self):

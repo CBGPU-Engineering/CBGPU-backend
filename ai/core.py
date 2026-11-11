@@ -104,6 +104,15 @@ class Store:
         row=self.execute('SELECT * FROM uploads WHERE id=? AND owner=?',(id,owner)).fetchone()
         if not row or not (self.root/'uploads'/id).is_file(): raise Failure('Upload not found',404)
         return dict(row)
+    def delete_upload(self,owner,id):
+        with self.lock:
+            upload=self.get_upload(owner,id)
+            if upload['job_id'] is not None or self.execute(
+                'SELECT 1 FROM ai_project_files WHERE upload=?',(id,)
+            ).fetchone():
+                raise Failure('이 파일은 작업이나 프로젝트에서 사용 중이에요.',409)
+            self.remove_upload(id)
+            self.execute('DELETE FROM uploads WHERE id=? AND owner=?',(id,owner))
     def validate(self,owner,kind,data):
         if kind not in KINDS or not isinstance(data,dict): raise Failure('Unsupported task')
         if kind=='chat':

@@ -105,6 +105,8 @@ class Handler(BaseHTTPRequestHandler):
         if parts==['status'] and self.command=='GET':
             counts={r[0]:r[1] for r in store.execute("SELECT state,count(*) FROM jobs WHERE state IN ('queued','running','paused') GROUP BY state").fetchall()}
             self.reply(200,{'scheduler':self.server.scheduler.health,'queue':counts,'corpus':self.server.corpus.health if self.server.corpus else {},'models':[{'id':'cbgpu-chat','task':'chat'},{'id':'cbgpu-embeddings','task':'embeddings'},{'id':'cbgpu-whisper','task':'transcription'}]});return
+        if len(parts)==2 and parts[0]=='uploads' and valid_id(parts[1]) and self.command=='DELETE':
+            store.delete_upload(owner,parts[1]);self.reply(200,{'ok':True});return
         if len(parts)==2 and parts[0]=='uploads' and valid_id(parts[1]) and self.command=='GET':
             self.reply(200,{'file':store.preparation.status(owner,parts[1])});return
         if len(parts)==3 and parts[0]=='uploads' and valid_id(parts[1]) and parts[2]=='text' and self.command=='GET':
