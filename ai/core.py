@@ -47,6 +47,9 @@ class Store:
           CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL,gpu INTEGER,attempts INTEGER DEFAULT 0,progress TEXT DEFAULT '',error TEXT,started REAL,finished REAL,runtime REAL NOT NULL DEFAULT 0,crashes INTEGER NOT NULL DEFAULT 0);
           CREATE INDEX IF NOT EXISTS jobs_owner ON jobs(owner,created);
           CREATE TABLE IF NOT EXISTS uploads(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,size INTEGER NOT NULL,created REAL NOT NULL,job_id TEXT);
+          CREATE TABLE IF NOT EXISTS ai_projects(id TEXT PRIMARY KEY,owner TEXT NOT NULL,title TEXT NOT NULL,created REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS ai_project_files(project TEXT NOT NULL,upload TEXT PRIMARY KEY);
+          CREATE INDEX IF NOT EXISTS ai_project_files_project ON ai_project_files(project);
           CREATE TABLE IF NOT EXISTS api_keys(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,prefix TEXT NOT NULL,hash TEXT NOT NULL UNIQUE,created REAL NOT NULL,last_used REAL,revoked INTEGER DEFAULT 0);
           CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY,owner TEXT NOT NULL,job_id TEXT NOT NULL,kind TEXT NOT NULL,path TEXT,expires REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS vectors(hash TEXT PRIMARY KEY,vector TEXT NOT NULL,updated REAL NOT NULL);
@@ -146,6 +149,10 @@ class Store:
         data=self.validate(owner,kind,data)
         with self.lock:
             if data.get('upload_id') and self.execute('SELECT job_id FROM uploads WHERE id=?',(data['upload_id'],)).fetchone()['job_id']:raise Failure('This upload already belongs to a task; upload another copy')
+            if data.get('upload_id') and self.execute(
+                'SELECT 1 FROM ai_project_files WHERE upload=?',(data['upload_id'],)
+            ).fetchone():
+                raise Failure('This upload belongs to a project; upload another copy',409)
             if self.execute("SELECT count(*) FROM jobs WHERE state IN ('queued','running','paused')").fetchone()[0]>=200: raise Failure('Queue is full. Try again later.',429)
             if self.execute("SELECT count(*) FROM jobs WHERE owner=? AND state IN ('queued','running','paused')",(owner,)).fetchone()[0]>=5: raise Failure('Finish or cancel an existing task first (maximum 5 active tasks).',429)
             id=str(uuid.uuid4());folder=self.root/'jobs'/id;folder.mkdir(mode=0o700)

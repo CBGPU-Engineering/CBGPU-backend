@@ -111,8 +111,9 @@ class Scheduler:
                 if id:self.store.remove_upload(id);self.store.execute('DELETE FROM uploads WHERE id=?',(id,))
             except (OSError,ValueError):pass
             self.store.remove_job_files(r['id']);self.store.execute('DELETE FROM jobs WHERE id=?',(r['id'],))
-        for r in self.store.execute('SELECT id FROM uploads WHERE created<? AND (job_id IS NULL OR job_id NOT IN (SELECT id FROM jobs WHERE state IN (\'queued\',\'running\',\'paused\')))',(now-14*86400,)).fetchall():
-            self.store.remove_upload(r['id']);self.store.execute('DELETE FROM uploads WHERE id=?',(r['id'],))
+        with self.store.lock:
+            for r in self.store.execute('SELECT id FROM uploads WHERE created<? AND id NOT IN (SELECT upload FROM ai_project_files) AND (job_id IS NULL OR job_id NOT IN (SELECT id FROM jobs WHERE state IN (\'queued\',\'running\',\'paused\')))',(now-14*86400,)).fetchall():
+                self.store.remove_upload(r['id']);self.store.execute('DELETE FROM uploads WHERE id=?',(r['id'],))
     def close(self):self.stop_event.set();self.thread.join(timeout=12)
 
 

@@ -55,6 +55,23 @@ class ConversationTests(unittest.TestCase):
         self.assertIn('untrusted_file_sources', data['messages'][-1]['content'])
         self.assertEqual(followup['messages'][-1]['sources'], [source])
 
+    def test_project_files_reused_across_private_conversations(self):
+        project = self.chats.create_project(self.owner, 'Lab results')
+        with self.assertRaises(Failure):
+            self.chats.create(self.other, project['id'])
+        upload = self.store.upload(self.owner, 'results.csv', [b'value\n2\n4\n'])
+        first = self.chats.create(self.owner, project['id'])
+        self.chats.send(self.owner, first['id'], 'Analyze', attachments=[upload['id']])
+        second = self.chats.create(self.owner, project['id'])
+        turn = self.chats.send(self.owner, second['id'], 'Explain the measurements')
+        source, = turn['messages'][-1]['sources']
+        self.assertEqual(source['charts'][0]['points'], [[1,2],[2,4]])
+        self.assertEqual(self.chats.projects(self.other), [])
+        self.chats.remove_project_file(self.owner, project['id'], upload['id'])
+        self.assertEqual(self.chats.projects(self.owner)[0]['files'], [])
+        self.chats.delete_project(self.owner, project['id'])
+        self.assertIsNone(self.chats.get(self.owner, second['id'])['project'])
+
     def test_http_keep_alive_consumes_create_and_cancel_bodies(self):
         import http.client,threading
         from types import SimpleNamespace

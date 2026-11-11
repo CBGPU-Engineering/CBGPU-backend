@@ -17,7 +17,7 @@ PARSER_SLOTS = threading.BoundedSemaphore(2)
 TEXT_TYPES = {'.txt', '.md', '.csv', '.json', '.tex', '.py', '.log'}
 
 
-def csv_summary(text):
+def csv_analysis(text):
     reader = csv.reader(io.StringIO(text), strict=True)
     headers = next(reader, [])
     if not headers or len(headers) > 64:
@@ -40,15 +40,21 @@ def csv_summary(text):
             if math.isfinite(value) and abs(value) <= 1e100:
                 columns[index].append(value)
     lines = [f'Rows: {rows}']
+    charts = []
     for index, values in enumerate(columns):
         if not values or len(values) != counts[index]:
             continue
+        if len(charts) < 8:
+            count = min(len(values), 80)
+            indices = [round(i * (len(values) - 1) / max(count - 1, 1)) for i in range(count)]
+            charts.append({'column': headers[index][:100], 'count': len(values),
+                           'points': [[i+1, values[i]] for i in indices]})
         lines.append(
             f'{headers[index][:100]}: n={len(values)}, missing={rows-counts[index]}, '
             f'mean={statistics.mean(values):.8g}, min={min(values):.8g}, max={max(values):.8g}'
             + (f', sample SD={statistics.stdev(values):.8g}' if len(values) > 1 else '')
         )
-    return '\n'.join(lines)
+    return {'chunks': [(None, '\n'.join(lines))], 'charts': charts}
 
 
 def extract(path, suffix):
@@ -57,12 +63,15 @@ def extract(path, suffix):
         pdf = PdfReader(path)
         if pdf.is_encrypted or len(pdf.pages) > 100:
             raise ValueError('Use an unencrypted PDF of up to 100 pages.')
-        return [(index, (page.extract_text() or '')[:12000])
-                for index, page in enumerate(pdf.pages, 1)]
+        chunks = []
+        for index, page in enumerate(pdf.pages, 1):
+            text = (page.extract_text() or '')[:12000]
+            chunks.extend((index, text[start:start+1000]) for start in range(0, len(text), 1000))
+        return {'chunks': chunks}
     text = Path(path).read_text(encoding='utf-8-sig')
     if suffix == '.csv':
-        return [(None, csv_summary(text))]
-    return [(None, text[start:start+1200]) for start in range(0, min(len(text), 200000), 1200)]
+        return csv_analysis(text)
+    return {'chunks': [(None, text[start:start+1000]) for start in range(0, min(len(text), 200000), 1000)]}
 
 
 def evidence(store, owner, ids, question):
@@ -83,7 +92,8 @@ def evidence(store, owner, ids, question):
                 [str(python), str(Path(__file__).resolve()), str(store.root / 'uploads' / id), suffix],
                 timeout=8, stderr=subprocess.DEVNULL,
             )
-            chunks = [(page, text.strip()) for page, text in json.loads(output) if text.strip()]
+            extracted = json.loads(output)
+            chunks = [(page, text.strip()) for page, text in extracted['chunks'] if text.strip()]
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             raise Failure('파일을 읽지 못했어요. PDF는 암호 없이 100쪽까지, 텍스트는 UTF-8로 올려 주세요.') from error
         finally:
@@ -92,7 +102,10 @@ def evidence(store, owner, ids, question):
             raise Failure('읽을 수 있는 텍스트가 없어요. 스캔 PDF는 먼저 OCR을 적용해 주세요.')
         ranked = sorted(chunks, key=lambda entry: sum(word in entry[1].lower() for word in words), reverse=True)
         for page, excerpt in ranked[:1 if suffix == '.csv' else 2]:
-            results.append({'title': upload['name'], 'page': page, 'excerpt': excerpt[:1000]})
+            source = {'title': upload['name'], 'page': page, 'excerpt': excerpt[:1000]}
+            if extracted.get('charts'):
+                source['charts'] = extracted['charts']
+            results.append(source)
     return results
 
 

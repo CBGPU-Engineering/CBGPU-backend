@@ -68,10 +68,10 @@ def fetch_public(url,maximum=1024*1024):
 
 class WebSearch:
  def __init__(self):self.gate=threading.BoundedSemaphore(2);self.lock=threading.Lock();self.cache={};self.usage={}
- def search(self,owner,query):
+ def search(self,owner,query,compare=False):
   if not isinstance(query,str) or not query.strip():raise Failure('검색할 질문을 입력해 주세요.')
   query=query.strip()[:500];query=re.sub(r'cbgpu_ai_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_.-]{30,}','[credential removed]',query)
-  key=(owner,hashlib.sha256(query.encode()).hexdigest());now=time.time()
+  key=(owner,compare,hashlib.sha256(query.encode()).hexdigest());now=time.time()
   with self.lock:
    cached=self.cache.get(key)
    if cached and now-cached[0]<120:return cached[1]
@@ -101,7 +101,18 @@ class WebSearch:
      if content:hit={**hit,'url':url,'content':content}
     except Exception:pass
     return hit
-   with ThreadPoolExecutor(max_workers=2) as pool:hits=list(pool.map(enrich,hits[:2]))+hits[2:]
+   if compare:
+    # Prefer different publishers before fetching full page excerpts.
+    unique=[]
+    domains=set()
+    for hit in hits:
+     host=urllib.parse.urlsplit(hit['url']).hostname or ''
+     domain=host.removeprefix('www.')
+     if domain in domains:continue
+     domains.add(domain);unique.append(hit)
+    hits=unique+ [hit for hit in hits if hit not in unique]
+   count=4 if compare else 2
+   with ThreadPoolExecutor(max_workers=2) as pool:hits=list(pool.map(enrich,hits[:count]))+hits[count:]
    result={'query':query,'sources':hits[:6],'searched_at':time.time(),'provider':'DuckDuckGo web search'}
    with self.lock:
     self.cache[key]=(now,result)
