@@ -1,0 +1,13 @@
+[Unit]
+Description=Renew shared EduSet study connection before expiration
+After=network-online.target cbgpu-frontend.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node --no-warnings %h/.local/lib/cbgpu-study-monitor/refresh.mjs
+TimeoutStartSec=120
+MemoryMax=1G
+CPUQuota=200%
+TasksMax=256
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes

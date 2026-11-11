@@ -1,0 +1,9 @@
+[Unit]
+Description=Check shared EduSet renewal every fifteen minutes
+[Timer]
+OnCalendar=*-*-* *:0/15:00 Asia/Seoul
+RandomizedDelaySec=30
+AccuracySec=5s
+Persistent=true
+[Install]
+WantedBy=timers.target
