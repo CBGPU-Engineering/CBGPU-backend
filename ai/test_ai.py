@@ -75,7 +75,46 @@ class SchedulerTests(StoreTests):
   job=self.chat();self.store.execute("UPDATE jobs SET state='cancelled' WHERE id=?",(job['id'],));s=Scheduler(self.store,'x','x','x');device={'index':0,'uuid':'GPU-x','available':True}
   with patch('resources.snapshot',return_value=([device],[])),patch('resources.start_task') as start:s.execute(job,device);start.assert_not_called()
   self.assertEqual(self.store.job(OWNER,job['id'])['state'],'cancelled')
+class SchedulerFaultTests(unittest.TestCase):
+ def test_file_handle_exhaustion_is_reported_without_private_exception_text(self):
+  import errno
+  store=SimpleNamespace(lock=threading.RLock());scheduler=Scheduler(store,'x','x','x')
+  scheduler.stop_event.wait=lambda _:scheduler.stop_event.set()
+  with patch('resources.snapshot',side_effect=OSError(errno.EMFILE,'private diagnostic')),self.assertLogs('scheduler',level='ERROR') as logs:scheduler.loop()
+  self.assertEqual(scheduler.health['reason'],'file_handles_exhausted')
+  self.assertNotIn('private diagnostic',json.dumps(scheduler.health)+str(logs.output))
+ def test_queue_failure_is_not_misreported_as_gpu_failure(self):
+  store=SimpleNamespace(lock=threading.RLock());scheduler=Scheduler(store,'x','x','x')
+  scheduler.stop_event.wait=lambda _:scheduler.stop_event.set()
+  with patch('resources.snapshot',return_value=([],[])),patch.object(store,'execute',create=True,side_effect=RuntimeError('private query')),self.assertLogs('scheduler',level='ERROR'):scheduler.loop()
+  self.assertEqual(scheduler.health['reason'],'queue_failed')
+  self.assertNotIn('reservation',scheduler.health['detail'])
+
 class CorpusTests(unittest.TestCase):
+ def test_background_corpus_connections_close_without_waiting_for_gc(self):
+  from corpus import Corpus
+  original=sqlite3.connect;opened=[]
+  class TrackedConnection(sqlite3.Connection):
+   def close(self):
+    self.was_closed=True
+    return super().close()
+  def connect(*args,**kwargs):
+   connection=original(*args,**kwargs,factory=TrackedConnection);connection.was_closed=False;opened.append(connection);return connection
+  with tempfile.TemporaryDirectory() as folder:
+   try:
+    with patch('corpus.sqlite3.connect',side_effect=connect):
+     corpus=Corpus(folder,'/unused/python','/unused/worker');cycles=0
+     def tick(_):
+      nonlocal cycles
+      cycles+=1
+      if cycles>=80:corpus.stop.set()
+     corpus.stop.wait=tick
+     with patch.object(corpus,'metadata',return_value={'materials':[],'papers':[]}):corpus.loop()
+    self.assertGreaterEqual(len(opened),161)
+    self.assertTrue(all(c.was_closed for c in opened),'SQLite transaction context does not close a connection; close every indexing connection explicitly')
+    with original(corpus.path) as db:self.assertEqual(db.execute('SELECT count(*) FROM documents').fetchone()[0],0)
+   finally:
+    for c in opened:c.close()
  def test_corpus_does_not_include_private_notes_and_removes_revoked_sources(self):
   from corpus import Corpus
   with tempfile.TemporaryDirectory() as folder:

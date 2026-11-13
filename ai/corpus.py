@@ -3,13 +3,14 @@ Private research notes never enter this corpus; the website supplies them under 
 """
 import json,os,signal,sqlite3,subprocess,threading,time,urllib.request,uuid
 from pathlib import Path
+from contextlib import closing
 import resources
 from core import valid_id
 
 class Corpus:
     def __init__(self,state,python,worker):
         self.root=Path(state);self.python=Path(python);self.worker=Path(worker);self.stop=threading.Event();self.process=None;self.health={'state':'starting','indexed':0};self.revision=json.loads(Path(__file__).with_name('models.json').read_text())['embed']['revision'];self.path=self.root/'corpus.sqlite'
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript('''PRAGMA journal_mode=WAL;CREATE TABLE IF NOT EXISTS documents(kind TEXT NOT NULL,id TEXT NOT NULL,version TEXT NOT NULL,state TEXT NOT NULL,checked REAL NOT NULL,PRIMARY KEY(kind,id));CREATE TABLE IF NOT EXISTS chunks(kind TEXT NOT NULL,id TEXT NOT NULL,number INTEGER NOT NULL,text TEXT NOT NULL,vector TEXT NOT NULL,PRIMARY KEY(kind,id,number));CREATE INDEX IF NOT EXISTS chunks_document ON chunks(kind,id);''')
         self.path.chmod(0o600);(self.root/'corpus-work').mkdir(exist_ok=True,mode=0o700)
     def metadata(self):
@@ -20,7 +21,7 @@ class Corpus:
         while not self.stop.is_set():
             try:
                 metadata=self.metadata();allowed={('material',str(r['id'])) for r in metadata['materials']}|{('paper',str(r['id'])) for r in metadata['papers']}
-                with sqlite3.connect(self.path,timeout=20) as db:
+                with closing(sqlite3.connect(self.path,timeout=20)) as db, db:
                     for kind,id in db.execute('SELECT kind,id FROM documents').fetchall():
                         if (kind,id) not in allowed:db.execute('DELETE FROM documents WHERE kind=? AND id=?',(kind,id));db.execute('DELETE FROM chunks WHERE kind=? AND id=?',(kind,id))
                 for kind,rows in [('material',metadata['materials']),('paper',metadata['papers'])]:
@@ -29,10 +30,10 @@ class Corpus:
                         id=str(row['id'])
                         if not valid_id(id):continue
                         version=str(row['version'])+':'+self.revision
-                        with sqlite3.connect(self.path) as db:old=db.execute('SELECT version,state,checked FROM documents WHERE kind=? AND id=?',(kind,id)).fetchone()
+                        with closing(sqlite3.connect(self.path)) as db, db:old=db.execute('SELECT version,state,checked FROM documents WHERE kind=? AND id=?',(kind,id)).fetchone()
                         if old and old[0]==version and (old[1] in ['ready','unsupported'] or time.time()-old[2]<3600):continue
                         self.index(kind,row,version)
-                with sqlite3.connect(self.path) as db:count=db.execute("SELECT count(*) FROM documents WHERE state='ready'").fetchone()[0]
+                with closing(sqlite3.connect(self.path)) as db, db:count=db.execute("SELECT count(*) FROM documents WHERE state='ready'").fetchone()[0]
                 self.health={'state':'ready','indexed':count,'checked_at':time.time()}
             except Exception:self.health={**self.health,'state':'unavailable','checked_at':time.time()}
             self.stop.wait(60)
@@ -60,14 +61,14 @@ class Corpus:
             except subprocess.TimeoutExpired:os.killpg(self.process.pid,signal.SIGKILL);self.process.wait();raise ValueError('Indexing time limit')
             if self.process.returncode or not output.exists():raise ValueError('No extractable text')
             parts=json.loads(output.read_text())
-            with sqlite3.connect(self.path,timeout=20) as db:
+            with closing(sqlite3.connect(self.path,timeout=20)) as db, db:
                 db.execute('DELETE FROM chunks WHERE kind=? AND id=?',(kind,id));db.executemany('INSERT INTO chunks VALUES(?,?,?,?,?)',[(kind,id,i,c['text'],json.dumps(c['vector'])) for i,c in enumerate(parts)])
             state='ready'
         except Exception:pass
         finally:
             self.process=None;output.unlink(missing_ok=True)
             if temporary:temporary.unlink(missing_ok=True)
-            with sqlite3.connect(self.path,timeout=20) as db:
+            with closing(sqlite3.connect(self.path,timeout=20)) as db, db:
                 db.execute('INSERT OR REPLACE INTO documents VALUES(?,?,?,?,?)',(kind,id,version,state,time.time()))
                 if state!='ready':db.execute('DELETE FROM chunks WHERE kind=? AND id=?',(kind,id))
     def close(self):

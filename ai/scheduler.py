@@ -1,4 +1,4 @@
-import json, os, shutil, subprocess, threading, time
+import json, os, shutil, subprocess, threading, time, logging, errno
 from pathlib import Path
 from core import atomic_json,Failure
 import resources
@@ -22,8 +22,10 @@ class Scheduler:
         self.thread=threading.Thread(target=self.loop,daemon=True);self.thread.start()
     def loop(self):
         while not self.stop_event.is_set():
+            phase='gpu_check'
             try:
                 cards,_=resources.snapshot();self.health={'status':'ok','checked_at':time.time(),'gpus':[{'id':c['index']+1,'name':c['name'],'reserved':c['reserved'],'available':c['available']} for c in cards]}
+                phase='queue'
                 candidates=[dict(r) for r in self.store.execute("SELECT * FROM jobs WHERE state IN ('queued','paused') ORDER BY CASE WHEN kind='python' THEN 1 ELSE 0 END,updated,created").fetchall()]
                 candidates=[c for c in candidates if c['id'] not in self.store.ai_active and self.document_ready(c)]
                 free=next((c for c in cards if c['available'] and c['uuid'] not in self.store.ai_leases),None)
@@ -33,9 +35,17 @@ class Scheduler:
                     job=next((c for c in same if c['owner']!=self.last_owner),same[0]);self.last_owner=job['owner']
                     if not resources.owner_allowed(job['owner']):self.update(job['id'],'cancelled',error='Account access is no longer available');continue
                     self.execute(job,free)
+                phase='maintenance'
                 self.cleanup()
-            except Exception:
-                self.health={'status':'unavailable','checked_at':time.time(),'gpus':[],'detail':'GPU or reservation status could not be verified. New tasks are paused.'}
+            except Exception as error:
+                exhausted=getattr(error,'errno',None) in (errno.EMFILE,errno.ENFILE)
+                reason='file_handles_exhausted' if exhausted else phase+'_failed'
+                detail='Local AI file-handle limit reached; new tasks are paused.' if exhausted else 'GPU or reservation status could not be verified. New tasks are paused.' if phase=='gpu_check' else 'Local AI queue processing failed; new tasks are paused.'
+                self.health={'status':'unavailable','checked_at':time.time(),'gpus':[],'detail':detail,'reason':reason}
+                fault=(reason,type(error).__name__)
+                if fault!=getattr(self,'last_fault',None) or time.monotonic()-getattr(self,'last_fault_at',0)>60:
+                    logging.getLogger(__name__).error('AI scheduler %s failed (%s)',phase,type(error).__name__)
+                    self.last_fault=fault;self.last_fault_at=time.monotonic()
             self.stop_event.wait(2)
     def document_ready(self,job):
         if job['kind']!='document':return True
