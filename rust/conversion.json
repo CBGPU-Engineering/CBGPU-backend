@@ -129,8 +129,17 @@
       "sources": [
         "CBGPU-materials"
       ],
-      "status": "not_started",
-      "data": "PostgreSQL"
+      "status": "implemented_not_active",
+      "data": "Existing PostgreSQL metadata and caller RLS API; UUID file bytes and resumable reservations preserved",
+      "rust_sources": [
+        "https://github.com/CBGPU-Engineering/CBGPU-materials/tree/f92120b/src"
+      ],
+      "validation": [
+        "9 isolated transfer/storage contracts",
+        "Rust formatting and Clippy",
+        "Non-root read-only container readiness, authentication rejection and disabled-write smoke"
+      ],
+      "activation": "Pending legacy writer drain and storage permission verification; never run Python and Rust writers concurrently"
     },
     {
       "id": "latex",

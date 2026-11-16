@@ -170,3 +170,17 @@ CBGPU_CAREERS_RUN_DOCKER_TEST=1 cargo test --locked --test careers_postgres -- -
 This starts a temporary, resource-limited `postgres:17-alpine` container on a
 random loopback port and removes that container and its tmpfs data afterwards.
 No production application data is read by this fixture.
+
+
+The materials transfer candidate lives in the separate
+[CBGPU-materials repository](https://github.com/CBGPU-Engineering/CBGPU-materials).
+Its Axum service preserves the existing UUID layout, 8 MiB resumable chunks,
+quota reservations and range downloads. Metadata stays in the existing PostgreSQL
+service: caller tokens still pass through the existing authentication and RLS API.
+It does not replace those policies with a privileged database key.
+
+Nine isolated contracts cover transfer recovery, access isolation, cancellation,
+quota concurrency and stale-upload cleanup. The hardened Docker image also has a
+readiness/authentication/disabled-write smoke test. The candidate defaults to
+disabled writes and requires an explicit drained legacy-writer handoff.
+It is not yet the production file writer.
