@@ -59,7 +59,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let state = Gateway::new(config.clone(), Arc::new(authority)).map_err(|e| e.message)?;
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
-    if enabled {
+    if enabled && std::env::var("CBGPU_GPU_UPSTREAM_PROXY").is_ok() {
+        let address = layered_upstream(&std::env::var("CBGPU_GPU_UPSTREAM_PROXY")?, config.listen)?;
+        for gpu in 1..=4 {
+            state
+                .set_upstream(gpu, Some(address))
+                .await
+                .map_err(|e| e.message)?;
+        }
+    } else if enabled {
         let discover = state.clone();
         tokio::spawn(async move {
             loop {
@@ -105,4 +113,38 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
     Ok(())
+}
+
+fn layered_upstream(
+    value: &str,
+    listen: std::net::SocketAddr,
+) -> Result<std::net::SocketAddr, Box<dyn std::error::Error>> {
+    let address: std::net::SocketAddr = value.parse()?;
+    if !address.ip().is_loopback() || address.port() == 0 || address == listen {
+        return Err("Trusted layered upstream must be a distinct numeric loopback address".into());
+    }
+    Ok(address)
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn layered_proxy_is_explicit_numeric_loopback_and_cannot_recurse() {
+        let listen = "127.0.0.1:13500".parse().unwrap();
+        assert_eq!(
+            super::layered_upstream("127.0.0.1:3500", listen)
+                .unwrap()
+                .port(),
+            3500
+        );
+        for value in [
+            "127.0.0.1:13500",
+            "127.0.0.1:0",
+            "8.8.8.8:3500",
+            "172.17.0.2:3500",
+            "localhost:3500",
+            "http://127.0.0.1:3500",
+        ] {
+            assert!(super::layered_upstream(value, listen).is_err());
+        }
+    }
 }
