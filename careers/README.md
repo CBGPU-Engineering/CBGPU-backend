@@ -1,7 +1,7 @@
 # CBGPU Careers
 
 Recruitment and team onboarding for CBGPU at **https://careers.cbgpu.com**.
-Seven role descriptions, category/search filters, application forms, private SQLite
+Seven role descriptions, category/search filters, application forms, private PostgreSQL
 storage, and a Slack / Jira / GitHub onboarding guide. This recruits school project
 contributors; it does not promise employment, pay, acceptance, or a response deadline.
 
@@ -17,15 +17,27 @@ contributors; it does not promise employment, pay, acceptance, or a response dea
 
 ## Run
 
-Python 3.11+; no third-party packages.
+The service is an Axum application backed by PostgreSQL. Build it from the
+backend Rust workspace, then provide a private environment file (permissions `600`):
 
 ```bash
-export CAREERS_STATE_DIR=/path/to/private/careers
+cargo build --locked --release --manifest-path rust/Cargo.toml -p cbgpu-careers
+export CAREERS_DATABASE_URL=postgresql://SCOPED_USER:PASSWORD@127.0.0.1/DATABASE
+export CAREERS_PUBLIC_DIR="$PWD/careers/public"
+export CAREERS_ROLES_PATH="$PWD/careers/roles.json"
+export CAREERS_FORM_KEY_PATH=/path/to/private/careers/form.key
+export CAREERS_LISTEN=127.0.0.1:3530
 export CAREERS_ORIGIN=https://careers.cbgpu.com
-# Optional: existing private backend .env containing the Resend SMTP_PASS key.
-export CAREERS_MAIL_ENV=/path/to/private/backend/.env
-python3 careers/server.py --port 3530
+export CAREERS_ENABLE_OUTBOX=0
+rust/target/release/cbgpu-careers serve
 ```
+
+Apply `rust/migrations/20261116034058_rust_careers.sql` using the database owner
+before starting the scoped runtime role. Preserve the existing 64-character form key.
+Mail stays disabled in previews. Enable `CAREERS_ENABLE_OUTBOX=1` and set
+`CAREERS_MAIL_ENV` to the existing private sending configuration only for the
+single authoritative production writer. Never run two notification workers against
+the same imported dataset during cutover.
 
 Listen on loopback behind an HTTPS tunnel. Keep `CF-Connecting-IP` trusted only
 from the Cloudflare tunnel; this service must not be exposed directly to the network.
@@ -33,14 +45,14 @@ The database, signing key, WAL files and applicant data belong outside Git.
 
 ## Review applications
 
-Use the authenticated developers portal terminal or SSH. Export the same
-`CAREERS_STATE_DIR` as the service, then:
+Use the authenticated developers portal terminal or SSH. Load the same private
+`CAREERS_DATABASE_URL` as the service, then:
 
 ```bash
-python3 careers/server.py --list
-python3 careers/server.py --show CB-YYMMDD-REFERENCE
-python3 careers/server.py --show CB-YYMMDD-REFERENCE --status contacted
-python3 careers/server.py --delete CB-YYMMDD-REFERENCE
+rust/target/release/cbgpu-careers --list
+rust/target/release/cbgpu-careers --show CB-YYMMDD-REFERENCE
+rust/target/release/cbgpu-careers --show CB-YYMMDD-REFERENCE --status contacted
+rust/target/release/cbgpu-careers --delete CB-YYMMDD-REFERENCE
 ```
 
 Review submitted links as untrusted user content. The service never fetches them.
@@ -64,12 +76,13 @@ followed by the team's explicit organization invitation. Checklist state is not 
 
 ## Content and checks
 
-Edit `roles.json` for role content and `public/app.js` for the joining guide. Styling
+Edit `roles.json` for role content and `public/app.ts` for the joining guide. Styling
 uses CBGPU assets and original copy. Toss recruiting information architecture was
 referenced, without reusing its branding, assets or job descriptions.
 
 ```bash
-python3 -m unittest discover -s careers -p 'test_*.py'
+cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-careers
+CBGPU_CAREERS_RUN_DOCKER_TEST=1 cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-careers --test careers_postgres -- --ignored
 node --check careers/public/app.js
 ```
 

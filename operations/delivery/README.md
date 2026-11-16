@@ -18,8 +18,7 @@ is needed. Repository settings should prevent force pushes and branch deletion.
 5. The service switches to the verified build. Post-switch health must report the
    exact commit. On failure, previous unit files are restored and services checked.
    A brief restart is possible; this is not a zero-downtime proxy rollout.
-6. Backend app changes validate syntax/CI and mail-queue tests, preview recruitment
-   with an isolated empty database and no email credentials, then snapshot runtime
+6. Backend app changes validate syntax/CI and mail-queue tests, build the native recruitment binary and preview it with a read-only PostgreSQL connection and its email outbox disabled, then snapshot runtime
    SQLite databases. Portal/deployment gateway/recruitment services restart only
    for changed component paths. Active user deployments defer a backend restart.
 7. GitHub production Deployments, the existing developers-page deployment history,
@@ -47,21 +46,22 @@ explicit recovery, not an automatic overwrite of new user data.
 
 ## Host operations
 
-Installed agent: `~/.local/lib/cbgpu-delivery/agent.py`.
+Native candidate: `~/.local/lib/cbgpu-rust/services/cbgpu-delivery`.
+The source implementation is Rust (`rust/crates/cbgpu-delivery`). The currently installed legacy agent stays active until an explicit reviewed handoff; updating this repository does not activate the candidate.
 State/config/logs/releases: `~/.local/share/cbgpu-delivery/` (private).
 
 ```bash
-python3 ~/.local/lib/cbgpu-delivery/agent.py --status
+~/.local/lib/cbgpu-rust/services/cbgpu-delivery --status
 journalctl --user -u cbgpu-delivery.service -n 50
 systemctl --user list-timers cbgpu-delivery.timer
 # Stop automatic polls while investigating; a running build finishes first.
 systemctl --user stop cbgpu-delivery.timer
-python3 ~/.local/lib/cbgpu-delivery/agent.py --pause
+~/.local/lib/cbgpu-rust/services/cbgpu-delivery --pause
 # Re-check a corrected/previously failed commit.
-python3 ~/.local/lib/cbgpu-delivery/agent.py --resume
-python3 ~/.local/lib/cbgpu-delivery/agent.py --retry web
+~/.local/lib/cbgpu-rust/services/cbgpu-delivery --resume
+~/.local/lib/cbgpu-rust/services/cbgpu-delivery --retry web
 # Restore the previous service configuration and block that bad commit.
-python3 ~/.local/lib/cbgpu-delivery/agent.py --rollback web
+~/.local/lib/cbgpu-rust/services/cbgpu-delivery --rollback web
 systemctl --user start cbgpu-delivery.timer
 ```
 
@@ -83,7 +83,7 @@ rebuild the pinned release and restore private runtime files to recover the host
 ## Checks
 
 ```bash
-python3 -m unittest discover -s operations/delivery -p 'test_*.py'
+cargo test --manifest-path rust/Cargo.toml -p cbgpu-delivery
 ```
 
 Tests cover exact-main CI authorization, rejected repositories, failed-health
@@ -102,7 +102,7 @@ application. A manually rolled-back commit remains blocked until explicitly retr
 
 After independently applying and verifying a protected infrastructure migration,
 an operator can acknowledge that exact CI-passed backend main commit with
-`agent.py --approve-backend FULL_SHA --only backend`. This does not execute any
+`cbgpu-delivery --approve-backend FULL_SHA --only backend`. This does not execute any
 migration: it records the operator's completed rollout and permits application
 activation for that one commit. Future protected commits still stop for review.
 
@@ -116,3 +116,5 @@ only those files into the runtime folder (never deleting), keeps the previous co
 `<runtime_backend>/backups/functions-<sha>/`, restarts `cbgpu-supabase-edge-functions`
 (`CBGPU_FUNCTIONS_CONTAINER` to override) and requires it to be healthy; otherwise it restores the previous files and
 restarts again. A `functions_synced` event lists the copied files.
+
+The Rust agent snapshots SQLite natively, uses process groups for bounded builds/previews, and retries notification outbox entries with the same idempotency key. A backend release never implicitly converts an existing service database. The existing native careers unit supplies its private EnvironmentFile; the pinned release builds a native binary, keeps the form key and live database URI, and writes a private release environment with updated public assets and roles. Its preview forces PostgreSQL default_transaction_read_only=on and disables the outbox. Careers never falls back to Python. Unknown native AI unit layouts defer rollout unless explicitly configured; unrelated backup units are never rewritten. CI authorization verifies exact authenticated GitHub API evidence; it does not claim cryptographic commit-signature verification.

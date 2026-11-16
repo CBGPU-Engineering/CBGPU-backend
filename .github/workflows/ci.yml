@@ -30,10 +30,8 @@ jobs:
       - run: python3 -m compileall -q ai
       - run: node scripts/verify-mail-queue.mts
       - run: node --check deploy/server.mts && node --check developer/server.mts
-      - run: python3 -m compileall -q deploy scripts careers
-      - run: python3 -m unittest discover -s careers -p 'test_*.py'
+      - run: python3 -m compileall -q scripts
       - run: node --check careers/public/app.js && node --check careers/public/theme.js && node --check careers/public/onboarding.js
-      - run: python3 -m unittest discover -s operations/delivery -p 'test_*.py'
       - run: node scripts/check-publication.mts
 
   rust:

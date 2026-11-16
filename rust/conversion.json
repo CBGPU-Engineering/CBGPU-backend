@@ -82,10 +82,11 @@
       "id": "careers",
       "contract": "Application forms, existing submissions, notification outbox and management",
       "sources": [
-        "careers/server.py"
+        "rust/crates/cbgpu-careers"
       ],
-      "status": "implemented_not_active",
-      "data": "PostgreSQL candidate; legacy SQLite remains authoritative until verified handoff",
+      "status": "live",
+      "data": "PostgreSQL; existing applications and notification flags preserved",
+      "activation": "Native loopback service on 3530; five existing applications matched after read-only legacy import. Native administrator reader uses PostgreSQL. Runtime database included in scheduled verified backups.",
       "rust_sources": [
         "rust/crates/cbgpu-careers"
       ]
@@ -188,10 +189,26 @@
       "sources": [
         "operations/backup.mts",
         "operations/worker.mts",
-        "operations/delivery/agent.py"
+        "rust/crates/cbgpu-delivery",
+        "rust/crates/cbgpu-backup"
       ],
       "status": "not_started",
       "data": "PostgreSQL / filesystem"
+    },
+    {
+      "id": "scheduled-backup-runner",
+      "contract": "Private database, roles, files and key snapshots; archive verification and encrypted offsite handoff",
+      "sources": ["rust/crates/cbgpu-backup"],
+      "status": "live",
+      "data": "Application and runtime PostgreSQL; private archives",
+      "activation": "Scheduled backup unit executes native Rust binary; full snapshot and encrypted offsite upload succeeded. Metadata/offsite transport helpers remain TypeScript compatibility work."
+    },
+    {
+      "id": "custom-domain-provider",
+      "contract": "Cloudflare custom TLS and project worker bindings",
+      "sources": ["rust/crates/cbgpu-domains"],
+      "status": "implemented_not_active",
+      "data": "Existing provider configuration and private token files"
     }
   ],
   "frontend_api_sources": [

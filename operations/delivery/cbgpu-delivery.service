@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 %h/.local/lib/cbgpu-delivery/agent.py --once
+ExecStart=%h/.local/lib/cbgpu-rust/services/cbgpu-delivery --once
 WorkingDirectory=%h/.local/share/cbgpu-delivery
 TimeoutStartSec=45min
 UMask=0077
