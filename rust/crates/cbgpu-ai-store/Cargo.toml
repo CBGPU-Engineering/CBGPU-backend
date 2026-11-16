@@ -1,0 +1,19 @@
+[package]
+name = "cbgpu-ai-store"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.88"
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite", "json", "macros", "migrate"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+libc = "0.2"
+zip = { version = "6", default-features = false, features = ["deflate"] }
+[dev-dependencies]
+tempfile = "3"

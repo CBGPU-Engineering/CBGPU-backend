@@ -1,0 +1,31 @@
+[package]
+name = "cbgpu-ai"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.88"
+[dependencies]
+cbgpu-ai-store = { path = "../cbgpu-ai-store" }
+cbgpu-robotics = { path = "../cbgpu-robotics" }
+cbgpu-ai-documents = { path = "../cbgpu-ai-documents" }
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util", "process", "net", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["io"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+futures-util = "0.3"
+subtle = "2"
+url = "2"
+regex = "1"
+scraper = "0.24"
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+libc = "0.2"
+csv = "1"
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

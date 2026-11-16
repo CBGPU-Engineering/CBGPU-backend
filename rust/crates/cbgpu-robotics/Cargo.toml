@@ -1,0 +1,20 @@
+[package]
+name = "cbgpu-robotics"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.88"
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite", "json", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+regex = "1"
+ryu = "1"
+async-trait = "0.1"
+[dev-dependencies]
+tempfile = "3"
