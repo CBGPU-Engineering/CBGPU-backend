@@ -515,6 +515,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbgpu-contests-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "http-body-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tower",
+ "uuid",
+]
+
+[[package]]
 name = "cbgpu-core"
 version = "0.1.0"
 dependencies = [
