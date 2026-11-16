@@ -277,6 +277,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbgpu-ops"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rand 0.8.8",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "cc"
 version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

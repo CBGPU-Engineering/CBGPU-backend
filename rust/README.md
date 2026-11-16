@@ -32,7 +32,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 cargo build --locked --release
 # On this host after provisioning; creates/drops only cbgpu_runtime_test:
-python3 scripts/integration.py
+cargo run --locked -p cbgpu-ops -- integration
 ```
 
 The real PostgreSQL integration test checks concurrent claims, a single outbound
@@ -42,16 +42,16 @@ PostgreSQL test container; the test refuses a production database name.
 
 ## Local rollout
 
-`provision-local.py` creates only new roles/database, runs SQLx migrations with a
+`cbgpu-ops provision-local` creates only new roles/database, runs SQLx migrations with a
 separate schema owner, disables owner login afterward, and writes a private 600
-runtime env file outside Git. Existing roles or databases cause a refusal rather
+runtime env file outside Git. A private recovery credential record survives failed provisioning and is removed only after successful setup. Existing roles or databases cause a refusal rather
 than credential replacement. The runtime role never receives schema ownership.
 The migration was created with the Supabase CLI and is applied by SQLx to the
 separate, non-PostgREST database.
 
 ```bash
-python3 scripts/provision-local.py
-python3 scripts/install-local.py
+cargo run --locked -p cbgpu-ops -- provision-local
+cargo run --locked -p cbgpu-ops -- install-local
 ```
 
 Installation preflights both workers without API writes, installs a content-addressed
@@ -59,8 +59,8 @@ binary, checks the new Axum readiness endpoint and preserves both existing timer
 It restarts **no public listener** and never stops a running oneshot. The next
 normal timer activation uses Rust; no extra school application is triggered to
 test deployment. Previous units and binary link are retained in a private rollback
-manifest. Use `python3 scripts/rollback-local.py ROLLBACK_DIRECTORY` to restore the saved
-units and binary link. Code rollback does not delete the PostgreSQL audit database.
+manifest. Use `cargo run --locked -p cbgpu-ops -- rollback-local ROLLBACK_DIRECTORY` to restore the saved
+units and binary link. Manifests, release paths and unit names are validated before restoration; a failed install restores and restarts the previous private core service. Code rollback does not delete the PostgreSQL audit database.
 
 The cluster currently has no published PostgreSQL port. Provisioning discovers
 its private Docker IP and saves it in the private DSN. If the database container
