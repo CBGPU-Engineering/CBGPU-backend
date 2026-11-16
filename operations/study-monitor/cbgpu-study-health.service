@@ -1,0 +1,12 @@
+[Unit]
+Description=Check actual school study records and room layouts without writing
+After=cbgpu-frontend.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node --no-warnings %h/.local/lib/cbgpu-study-monitor/check.mts
+# Admin push alert from the fresh result (a failed alert must never mark the probe itself failed).
+ExecStartPost=-/usr/bin/node --no-warnings %h/.local/lib/cbgpu-study-monitor/alert.mts
+TimeoutStartSec=115s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
