@@ -1,0 +1,11 @@
+[Unit]
+Description=CBGPU native backup of application and runtime PostgreSQL, files and private configuration
+
+[Service]
+Type=oneshot
+Environment=CBGPU_RUNTIME_BACKEND=/home/cbgpu/CBGPU-live/backend
+ExecStart=%h/.local/lib/cbgpu-rust/services/cbgpu-backup
+TimeoutStartSec=30min
+UMask=0077
+Nice=10
+CPUQuota=200%
