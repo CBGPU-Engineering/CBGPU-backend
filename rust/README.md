@@ -113,7 +113,9 @@ ports. Benchmark latency and failure behavior before enabling new public routes.
 runtime health check and static artifact publication contract in Rust. It accepts
 configuration on stdin and emits a single trusted `CBGPU_RESULT` record. Repository
 logs are prefixed so they cannot impersonate that record; secrets are redacted.
-The existing API supervisor defaults to the legacy worker until explicitly enabled.
+The existing API supervisor stays unchanged. `compat/worker-command.mjs` is a
+tested adapter for a separately drained supervisor rollout; it is not activated
+by this source release.
 
 `cbgpu-gateway` is a streaming Axum/Hyper transport. It preserves tenant Host,
 cookies, request bodies, SSE and HTTP upgrades, including existing WebSockets
@@ -141,7 +143,7 @@ acknowledgement commits independently.
 
 The separate `careers` schema is never accessible to the operational runtime
 role. Provision `cbgpu_careers` as a non-owner, non-superuser, NOINHERIT login and
-grant schema USAGE plus table SELECT/INSERT/UPDATE/DELETE. RLS admits only that
+grant database CONNECT, schema USAGE and table SELECT/INSERT/UPDATE/DELETE. RLS admits only that
 service role. Keep the schema owner as a NOLOGIN role. Do not add this schema to
 PostgREST's exposed schemas.
 
@@ -156,3 +158,15 @@ requires an empty PostgreSQL destination and explicit
 `CAREERS_LEGACY_WRITER_QUIESCED=1`; stop and drain the legacy writer before a final
 import. It verifies every imported field and rate-limit history row before commit.
 Keep the old database as a rollback artifact; never delete it during import.
+
+
+Run the isolated PostgreSQL import/concurrency contracts without touching the
+existing database cluster:
+
+```bash
+CBGPU_CAREERS_RUN_DOCKER_TEST=1 cargo test --locked --test careers_postgres -- --ignored
+```
+
+This starts a temporary, resource-limited `postgres:17-alpine` container on a
+random loopback port and removes that container and its tmpfs data afterwards.
+No production application data is read by this fixture.
