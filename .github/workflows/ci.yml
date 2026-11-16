@@ -21,7 +21,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
         working-directory: developer
       - run: sudo apt-get update -qq && sudo apt-get install -y tmux
-      - run: node --test developer/tests/*.test.mjs operations/study-refresh/*.test.mjs
+      - run: node --test developer/tests/*.test.mjs operations/study-refresh/*.test.mjs deploy/*.test.mjs
       - run: python3 -m unittest discover -s ai -p 'test_*.py'
       - run: python3 -m compileall -q ai
       - run: node scripts/verify-mail-queue.mjs
@@ -53,12 +53,21 @@ jobs:
       - run: cargo fmt --manifest-path rust/Cargo.toml --check
       - run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path rust/Cargo.toml
+      - name: Build static ingress binary
+        env:
+          CBGPU_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld"
+          RUSTFLAGS='-C linker-flavor=ld.lld' cargo build --locked --release --target x86_64-unknown-linux-musl --manifest-path rust/Cargo.toml -p cbgpu-gateway
       - name: Isolated PostgreSQL contracts
         env:
           CBGPU_RUNTIME_DATABASE_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/cbgpu_runtime_test
           CBGPU_TEST_DATABASE_URL: postgresql://cbgpu_runtime:ci-runtime-only@127.0.0.1:5432/cbgpu_runtime_test
+          CBGPU_CAREERS_TEST_DATABASE_URL: postgresql://cbgpu_careers:ci-careers-only@127.0.0.1:5432/cbgpu_runtime_test
         run: |
-          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE cbgpu_runtime LOGIN PASSWORD 'ci-runtime-only';"
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE cbgpu_runtime LOGIN PASSWORD 'ci-runtime-only'; CREATE ROLE cbgpu_careers LOGIN NOINHERIT PASSWORD 'ci-careers-only';"
           psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE cbgpu_runtime_test;"
-          cargo run --locked --manifest-path rust/Cargo.toml -- migrate
+          cargo run --locked --manifest-path rust/Cargo.toml -p cbgpu-core -- migrate
           cargo test --locked --manifest-path rust/Cargo.toml --test postgres -- --ignored
+          cargo test --locked --manifest-path rust/Cargo.toml --test careers_postgres -- --ignored

@@ -92,10 +92,11 @@ contracts are not redirected into incomplete implementations.
 | Operational backup/delivery jobs | Backup restore verification, approved-main CI, atomic routing and automatic rollback |
 | LaTeX orchestration and MCP clients | ZIP/PDF/storage compatibility; client protocol and OS packaging tests |
 
-Python-only model inference libraries and upstream services are separate
-components. They are not rewritten or deleted merely to claim that all code is
-Rust. Rust can own their HTTP/queue orchestration while keeping a narrow existing
-inference runtime when it is necessary. PostgreSQL remains the target for owned
+All owned non-frontend code remains in scope, including AI orchestration,
+MCP clients, operational tooling and application API routes. Existing Python
+inference runtimes are temporary compatibility components until a Rust engine
+passes model, GPU and output compatibility checks. Upstream dependencies and
+user-deployed workloads are not CBGPU application code. PostgreSQL remains the target for owned
 persistent service state; SQLite/MongoDB are not deleted before their consumers
 and recovery paths have been replaced and verified.
 
@@ -104,3 +105,54 @@ and new backends. The current delivery system restarts public services; changing
 a unit alone must not be described as zero downtime. Until that routing gate is
 available, move isolated background workers and compare new APIs on separate
 ports. Benchmark latency and failure behavior before enabling new public routes.
+
+
+## Deployment conversion candidates
+
+`cbgpu-front-worker` implements the Git clone, isolated Docker build, Next.js
+runtime health check and static artifact publication contract in Rust. It accepts
+configuration on stdin and emits a single trusted `CBGPU_RESULT` record. Repository
+logs are prefixed so they cannot impersonate that record; secrets are redacted.
+The existing API supervisor defaults to the legacy worker until explicitly enabled.
+
+`cbgpu-gateway` is a streaming Axum/Hyper transport. It preserves tenant Host,
+cookies, request bodies, SSE and HTTP upgrades, including existing WebSockets
+while the listener drains. It does not implement deployment business logic.
+
+`cbgpu-cutover` is a local operator tool, never an HTTP API. `test-route` uses
+only loopback ports 18510/18511 to rehearse connection-preserving routing and
+rollback. Production activation requires an exact main commit with successful
+CI and a binary built with that commit. No production routing is changed by
+building or testing these crates. Rollback removes only the owned routing jump
+and leaves established gateway connections alive.
+
+`conversion.json` tracks unfinished services and web API routes explicitly.
+Implemented candidates must not be reported as active production replacements.
+
+
+`cbgpu-careers` implements the recruitment API, existing HMAC form tokens,
+PostgreSQL concurrency limits, operator commands, verified read-only SQLite import
+and Resend outbox in Rust. It serves the existing public assets without redesign.
+It is a candidate, not the active recruitment service. Its outbox defaults off;
+`CAREERS_ENABLE_OUTBOX=1` is permitted only after the old sender is drained and
+all application notification flags have been imported. Retries use the original
+idempotency key and byte-identical notification payload. Each successful provider
+acknowledgement commits independently.
+
+The separate `careers` schema is never accessible to the operational runtime
+role. Provision `cbgpu_careers` as a non-owner, non-superuser, NOINHERIT login and
+grant schema USAGE plus table SELECT/INSERT/UPDATE/DELETE. RLS admits only that
+service role. Keep the schema owner as a NOLOGIN role. Do not add this schema to
+PostgREST's exposed schemas.
+
+Candidate configuration: `CAREERS_DATABASE_URL`, `CAREERS_PUBLIC_DIR`,
+`CAREERS_ROLES_PATH`, `CAREERS_FORM_KEY_PATH` (existing UTF-8 hexadecimal key),
+optional `CAREERS_LISTEN` (default `127.0.0.1:3532`), `CAREERS_ORIGIN`,
+`CBGPU_RELEASE_SHA`. Enabling the outbox also requires the private
+`CAREERS_MAIL_ENV` file. No provider errors, applicants, keys or tokens are logged.
+Operator `--list`, `--show REFERENCE [--status STATUS]`, `--delete REFERENCE`
+commands require the protected database credential. `--import-sqlite SOURCE`
+requires an empty PostgreSQL destination and explicit
+`CAREERS_LEGACY_WRITER_QUIESCED=1`; stop and drain the legacy writer before a final
+import. It verifies every imported field and rate-limit history row before commit.
+Keep the old database as a rollback artifact; never delete it during import.

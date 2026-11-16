@@ -1,0 +1,416 @@
+{
+  "schema_version": 1,
+  "target": "All CBGPU-owned non-UI service logic in Rust; persistent owned application state in PostgreSQL",
+  "boundaries": [
+    "Website React/Next.js UI and Flutter UI keep their current design. Only API proxy glue may remain in the frontend.",
+    "User-deployed applications, notebook kernels, model weights, PostgreSQL, Docker, OS and GPU drivers are not user-authored CBGPU service code to rewrite.",
+    "Compatibility forwarding does not count as a converted business API.",
+    "No legacy component is removed until its complete contract, authorization, persistence, recovery and active-session drain tests pass."
+  ],
+  "services": [
+    {
+      "id": "operations-core",
+      "contract": "Axum operational health and PostgreSQL audit",
+      "sources": [
+        "rust/crates/cbgpu-core"
+      ],
+      "status": "live",
+      "data": "PostgreSQL"
+    },
+    {
+      "id": "study-trigger",
+      "contract": "Weekday timer trigger only; business logic is listed separately",
+      "sources": [
+        "operations/study-auto/trigger.py"
+      ],
+      "status": "live",
+      "data": "PostgreSQL"
+    },
+    {
+      "id": "timetable-trigger",
+      "contract": "Timer/cache-warming trigger only",
+      "sources": [
+        "operations/timetable/refresh.py"
+      ],
+      "status": "live",
+      "data": "PostgreSQL"
+    },
+    {
+      "id": "frontend-build-worker",
+      "contract": "Git clone, sandboxed build, Next runtime and static artifacts",
+      "sources": [
+        "deploy/worker.py"
+      ],
+      "status": "implemented_not_active",
+      "data": "filesystem"
+    },
+    {
+      "id": "deployment-ingress",
+      "contract": "Streaming HTTP and upgraded TCP gateway; legacy business endpoints remain legacy",
+      "sources": [
+        "deploy/server.mjs HTTP forwarding"
+      ],
+      "status": "implemented_not_active",
+      "data": "none"
+    },
+    {
+      "id": "deployment-control",
+      "contract": "Projects, environment values, domains, permissions, queue and rollbacks",
+      "sources": [
+        "deploy/server.mjs"
+      ],
+      "status": "not_started",
+      "data": "SQLite -> PostgreSQL"
+    },
+    {
+      "id": "compose-executor",
+      "contract": "Validation, Docker builds, health failures, storage budgets and retained volumes",
+      "sources": [
+        "deploy/compose-worker.py",
+        "deploy/compose-manager.mjs",
+        "deploy/compose-storage.py",
+        "deploy/docker-log-proxy.mjs"
+      ],
+      "status": "not_started",
+      "data": "SQLite -> PostgreSQL"
+    },
+    {
+      "id": "careers",
+      "contract": "Application forms, existing submissions, notification outbox and management",
+      "sources": [
+        "careers/server.py"
+      ],
+      "status": "implemented_not_active",
+      "data": "PostgreSQL candidate; legacy SQLite remains authoritative until verified handoff",
+      "rust_sources": [
+        "rust/crates/cbgpu-careers"
+      ]
+    },
+    {
+      "id": "developer-portal",
+      "contract": "Operational APIs, real PTY terminals and audit",
+      "sources": [
+        "developer/server.mjs"
+      ],
+      "status": "not_started",
+      "data": "SQLite -> PostgreSQL"
+    },
+    {
+      "id": "gpu-controller",
+      "contract": "Reservation enforcement and managed GPU container lifecycle",
+      "sources": [
+        "CBGPU-gpu-daemon"
+      ],
+      "status": "not_started",
+      "data": "PostgreSQL"
+    },
+    {
+      "id": "gpu-ssh-gateways",
+      "contract": "Notebook HTTP/WebSocket and reservation-scoped SSH forwarding",
+      "sources": [
+        "gpu/server.mjs",
+        "gpu/ssh*"
+      ],
+      "status": "not_started",
+      "data": "PostgreSQL"
+    },
+    {
+      "id": "ai",
+      "contract": "Private inference orchestration, streaming, jobs, OCR, models and keys",
+      "sources": [
+        "ai"
+      ],
+      "status": "not_started",
+      "data": "SQLite -> PostgreSQL"
+    },
+    {
+      "id": "materials",
+      "contract": "Sharing, object access, uploads and range downloads",
+      "sources": [
+        "CBGPU-materials"
+      ],
+      "status": "not_started",
+      "data": "PostgreSQL"
+    },
+    {
+      "id": "latex",
+      "contract": "Documents, collaborative edits, ZIP uploads, compilation and PDF delivery",
+      "sources": [
+        "CBGPU-latex"
+      ],
+      "status": "not_started",
+      "data": "MongoDB -> PostgreSQL"
+    },
+    {
+      "id": "robotics",
+      "contract": "Robot registration, remote commands, map frames and safety state",
+      "sources": [
+        "CBGPU-robotics"
+      ],
+      "status": "not_started",
+      "data": "PostgreSQL"
+    },
+    {
+      "id": "mcp-cli",
+      "contract": "Deployment/AI agent protocols and OS packaging including env tools",
+      "sources": [
+        "CBGPU-mcp",
+        "CBGPU-agent"
+      ],
+      "status": "not_started",
+      "data": "local private credentials / PostgreSQL"
+    },
+    {
+      "id": "auth-data-storage",
+      "contract": "Auth/Data API/Storage compatibility preserving existing sessions, RLS and paths",
+      "sources": [
+        "supabase auth/rest/storage integrations"
+      ],
+      "status": "not_started",
+      "data": "PostgreSQL"
+    },
+    {
+      "id": "operations-delivery",
+      "contract": "Backups, restore tests, CI-gated delivery and alert outboxes",
+      "sources": [
+        "operations/backup.mjs",
+        "operations/worker.mjs",
+        "operations/delivery/agent.py"
+      ],
+      "status": "not_started",
+      "data": "PostgreSQL / filesystem"
+    }
+  ],
+  "frontend_api_sources": [
+    {
+      "source": "src/app/api/account/delete/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/admin/careers/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/admin/delete-user/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/admin/health/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/admin/profiles/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/ai/[...path]/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/ai/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/ai-native-files/[id]/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/app-release/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/arxiv/papers/[id]/pdf/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/arxiv/papers/[id]/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/arxiv/papers/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/contact/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/contests/[id]/announce/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/contests/[id]/registrations/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/cron/refresh-eduset-token/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/cron/study-auto/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/deploy/[...path]/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/gpu-status/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/health/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/latex/[action]/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/manufacturing/access/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/meal/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/native-session/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/news/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/public-sites/robots/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/public-sites/sitemap/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/school-news/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/study/admin-token/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/study/auth/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/study/automation/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/study/contributor/device/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/study/contributor/sync/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/study/link/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/study/proxy/[...path]/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/study/student/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/timetable/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/traffic/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/wakeup/ai-fill/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/wakeup/search/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/wakeup/spotify/callback/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/wakeup/spotify/connect/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/wakeup/spotify/playlist/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/wakeup/spotify/search/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/wakeup/youtube-resolve/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    },
+    {
+      "source": "src/app/api/workspaces/session/route.ts",
+      "status": "not_started",
+      "target": "Rust Axum API"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+[package]
+name = "cbgpu-cutover"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "process", "io-util"] }
+axum = "0.8"
+serde_json = "1"
+fs2 = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
