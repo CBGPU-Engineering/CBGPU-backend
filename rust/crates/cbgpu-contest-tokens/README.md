@@ -1,8 +1,11 @@
-# Scoped contest tokens — phase-two candidate
+# Scoped contest tokens
 
-This is separate, default-off source. It does not change the current JWT contest
-service, install a public route, apply SQL, or activate automation credentials.
-The new migration and execution login require separate review and approval.
+This service remains default-off in source and never applies SQL or provisions credentials itself.
+The reviewed CBGPU production installation was enabled on 2026-11-17 after a verified
+private PostgreSQL backup, isolated PG17 authorization tests and startup privilege checks.
+The existing JWT contest service remains unchanged. The public integration UI at
+`https://cbgpu.com/contests/api` issues one-time keys for the signed-in owner;
+`https://docs.cbgpu.com/contest-api` documents external requests.
 
 Tokens delegate only participation actions for explicitly selected existing
 contests. They cannot create/manage contests, impersonate a supplied owner,
@@ -26,7 +29,7 @@ metadata, scopes, allowlisted contest IDs, and expiration/revocation timestamps;
 they omit hashes and parent session identifiers. Neither token values nor
 request credentials are logged by this service.
 
-## Candidate contract
+## Contract
 
 All native requests require the trusted proxy's `x-cbgpu-contest-key`. This key
 must never be distributed to integrations. Ambient cookies and owner headers
@@ -104,7 +107,7 @@ preserved. No service-role key or fabricated Supabase JWT is used. When the
 separately approved account-resource oracle exists, registration uses it
 rather than granting blanket school access from legacy approval.
 
-## Separate operation
+## Operation
 
 Startup requires explicit `CBGPU_CONTEST_TOKENS_ENABLED=1`. Default listen is
 `127.0.0.1:13545`; the current JWT service on 3545 stays unchanged.
