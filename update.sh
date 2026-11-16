@@ -264,7 +264,7 @@ version your deployment was based on and record it, then re-run:
 
   1. Identify your base - the self-hosted/vX.Y.Z release (or commit) your files
      came from. Cross-reference the image tags in docker-compose.yml / .env
-     against versions.md, or the newest CHANGELOG.md section you remember pulling.
+     against pinned docker-compose.yml images and the latest CHANGELOG.md.
   2. Write it to $STAMP_FILE, e.g.:
          printf 'ref=self-hosted/v0.7.0\n' > $STAMP_FILE
   3. Re-run: sh update.sh

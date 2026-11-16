@@ -31,11 +31,10 @@ Do not copy production secrets or run destructive reset scripts on a live host.
 - `deploy/`: Git-based builds, Compose diagnostics and project domains.
 - `operations/`, `gpu/`, `materials/`: operational and resource gateway integration.
 - `supabase/migrations/`, `sql/`: current feature schema changes.
-- `schema/legacy/`: historical schema/Edge Function collections extracted from
+- `schema/legacy/`: historical SQL collections extracted from
   the former web/app/root directories, retained for provenance and review.
 
 See [schema notes](schema/README.md), [operations](OPERATIONS.md),
-[installation background](docs/OPERATIONS-LEGACY.md) and
 [console documentation](developer/README.md). New hosts need generated secrets,
 reviewed schema initialization and external integration setup; `.env.example`
 is not a complete production restore.
@@ -74,3 +73,8 @@ The delivery agent treats root tooling changes as an explicit infrastructure
 rollout, so publishing this source transition cannot silently restart the
 public deployment ingress. Existing sessions and deployments must be drained
 or routed through simultaneous old/new instances before activating it.
+
+Original component history was extracted from platform commit
+`f41d879f6b0a10192fa36235e370372a78ec7331`. Complete history and retired files
+remain available in Git; duplicate history maps and archived executable copies
+are not maintained in the current source tree.

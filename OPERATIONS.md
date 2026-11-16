@@ -232,3 +232,16 @@ Its server runtime still needs Python sqlite3 and private read access. Set
 `CBGPU_CAREERS_DB_PATH` for an isolated database; never put that file in web
 assets or source control. This temporary bridge is a tracked Rust migration
 target, not part of the intended frontend-only architecture.
+
+
+## Private backend boundary
+
+The public compatibility API is `https://cbgpu.com/backend`; only allowlisted
+Auth, REST, Storage, Realtime and Functions paths are exposed. The private API
+gateway remains on loopback port 54321 and Studio on 54324. No PostgreSQL port
+is published externally. All clients and resource services must use matching
+keys and the same database. Server mail and push credentials remain private.
+Backups must include database roles, files, encryption keys and configuration,
+with a protected off-machine copy. Do not run destructive reset commands or
+`docker compose down -v` against production. Old migration/cutover procedures
+in Git history are not current deployment instructions.
