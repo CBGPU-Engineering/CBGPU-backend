@@ -182,3 +182,11 @@ transfer recovery, account isolation, cancellation, quotas and stale-upload
 cleanup. A non-root read-only container test verifies readiness and disabled-write
 behavior. The obsolete Python source and dependencies are retired from the
 materials repository after this handoff.
+
+The frontend deployment supervisor now requires the Rust worker at
+`~/.local/lib/cbgpu-rust/workers/cbgpu-front-worker`. Build it with
+`cargo build --release --locked -p cbgpu-front-worker` from `rust/`, then
+install that binary before starting the deployment supervisor. The Python
+build-worker source is retired; missing Rust binaries fail closed without
+silently selecting the old implementation. The deployment control API and
+Compose executor are tracked separately and remain to be converted.

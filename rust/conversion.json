@@ -41,7 +41,9 @@
       "id": "frontend-build-worker",
       "contract": "Git clone, sandboxed build, Next runtime and static artifacts",
       "sources": [
-        "deploy/worker.py"
+        "rust/crates/cbgpu-front-worker",
+        "rust/compat/worker-command.mts",
+        "deploy/server.mts"
       ],
       "status": "implemented_not_active",
       "data": "filesystem"
