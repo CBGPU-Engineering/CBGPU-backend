@@ -427,7 +427,14 @@ impl<R: Runtime> Agent<R> {
     }
     fn record(&self, event: &str, details: Value) -> Result<()> {
         fs::create_dir_all(&self.root).map_err(|_| error("Cannot create event directory"))?;
-        let data = json!({"at":chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),"event":event,"details":details});
+        let mut fields = details.as_object().cloned().unwrap_or_default();
+        fields.insert("details".into(), details);
+        fields.insert(
+            "at".into(),
+            json!(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+        );
+        fields.insert("event".into(), json!(event));
+        let data = Value::Object(fields);
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -1276,6 +1283,7 @@ impl<R: Runtime> Agent<R> {
             }
             self.state["components"][&component]["poll_errors"] = json!(0);
             self.state["components"][&component]["poll_incident"] = json!(false);
+            self.state["components"][&component]["poll_error"] = Value::Null;
             let current = self.state["components"][&component].clone();
             if current["sha"] == sha
                 || current["blocked_sha"] == sha
@@ -1369,6 +1377,7 @@ impl<R: Runtime> Agent<R> {
                     state["deployed_at"] = json!(epoch());
                     state["failed_sha"] = Value::Null;
                     state["candidate"] = Value::Null;
+                    state["waiting_for"] = Value::Null;
                     self.save()?;
                     self.job(&id, &component, &sha, "succeeded", None)?;
                     self.record(
@@ -1628,9 +1637,17 @@ mod tests {
     #[test]
     fn native_once_web_checks_ci_build_preview_switch_and_reports_success() {
         let (_tmp, mut agent) = fixture("web");
+        agent.state["components"]["web"]["poll_error"] = json!("old connection error");
+        agent.state["components"]["web"]["waiting_for"] = json!("old CI run");
         agent.poll(Some("web")).unwrap();
         assert_eq!(agent.state["components"]["web"]["status"], "healthy");
         assert_eq!(agent.state["components"]["web"]["sha"], "a".repeat(40));
+        assert!(agent.state["components"]["web"]["poll_error"].is_null());
+        assert!(agent.state["components"]["web"]["waiting_for"].is_null());
+        let events = fs::read_to_string(agent.root.join("events.jsonl")).unwrap();
+        let event: Value = serde_json::from_str(events.lines().last().unwrap()).unwrap();
+        assert_eq!(event["component"], "web");
+        assert_eq!(event["commit"], "a".repeat(40));
         assert_eq!(agent.runtime.builds, 2);
         assert_eq!(agent.runtime.restarts, 1);
         assert!(

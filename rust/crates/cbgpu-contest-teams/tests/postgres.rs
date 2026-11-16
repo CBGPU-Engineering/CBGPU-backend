@@ -134,6 +134,8 @@ async fn least_privilege_deadline_concurrency_and_no_reassignment() {
         "schema/legacy/web-supabase/migrations/20261018120743_event_operations.sql",
         "supabase/migrations/20261116080117_contest_presentation_assets.sql",
         "supabase/migrations/20261116083445_contest_team_registration.sql",
+        "supabase/migrations/20261116103228_contest_start_windows.sql",
+        "schema/tests/contests/start-windows.sql",
     ] {
         db.sql(&std::fs::read_to_string(root.join(file)).unwrap());
     }

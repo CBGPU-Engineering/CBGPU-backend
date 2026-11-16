@@ -59,6 +59,10 @@ jobs:
       - run: cargo test --locked --manifest-path rust/Cargo.toml
       - name: Contest team deadline, concurrent allocator and least-privilege contracts
         run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-contest-teams --test postgres -- --ignored
+      - name: Award voting concurrency and CPU diagnostic write permissions
+        run: |
+          cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-contest-teams --test awards_race -- --ignored
+          cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-compose-worker --test cpu_diagnostics_pg -- --ignored
       - name: Build static ingress binary
         env:
           CBGPU_SOURCE_SHA: ${{ github.sha }}
