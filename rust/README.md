@@ -59,7 +59,8 @@ binary, checks the new Axum readiness endpoint and preserves both existing timer
 It restarts **no public listener** and never stops a running oneshot. The next
 normal timer activation uses Rust; no extra school application is triggered to
 test deployment. Previous units and binary link are retained in a private rollback
-manifest. Code rollback does not delete the PostgreSQL audit database.
+manifest. Use `python3 scripts/rollback-local.py ROLLBACK_DIRECTORY` to restore the saved
+units and binary link. Code rollback does not delete the PostgreSQL audit database.
 
 The cluster currently has no published PostgreSQL port. Provisioning discovers
 its private Docker IP and saves it in the private DSN. If the database container

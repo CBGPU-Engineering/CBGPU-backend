@@ -25,8 +25,12 @@ def main():
  (backup/'manifest.json').write_text(json.dumps(manifest));temp=BASE/'candidate';temp.unlink(missing_ok=True);temp.symlink_to(release);temp.replace(current)
  try:
   for name in NAMES:
-   temp=UNITS/(name+'.rust-candidate');shutil.copyfile(ROOT/'deploy'/name,temp);temp.replace(UNITS/name)
-  system('daemon-reload');system('enable','--now','cbgpu-rust-core.service')
+   temp=UNITS/(name+'.rust-candidate')
+   unit=(ROOT/'deploy'/name).read_text()
+   commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+   unit=unit.replace('[Service]','[Service]\nEnvironment=CBGPU_RELEASE_SHA='+commit)
+   temp.write_text(unit);temp.replace(UNITS/name)
+  system('daemon-reload');system('enable','cbgpu-rust-core.service');system('restart','cbgpu-rust-core.service')
   for _ in range(30):
    try:
     with urllib.request.urlopen('http://127.0.0.1:3540/health/ready',timeout=2)as r:health=json.load(r)
