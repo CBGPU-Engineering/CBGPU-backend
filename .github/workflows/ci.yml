@@ -31,3 +31,34 @@ jobs:
       - run: node --check careers/public/app.js && node --check careers/public/theme.js && node --check careers/public/onboarding.js
       - run: python3 -m unittest discover -s operations/delivery -p 'test_*.py'
       - run: node scripts/check-publication.mjs
+
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CARGO_BUILD_JOBS: 4
+      PGPASSWORD: ci-only-password
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy && rustup default 1.100.0
+      - run: cargo fmt --manifest-path rust/Cargo.toml --check
+      - run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path rust/Cargo.toml
+      - name: Isolated PostgreSQL contracts
+        env:
+          CBGPU_RUNTIME_DATABASE_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/cbgpu_runtime_test
+          CBGPU_TEST_DATABASE_URL: postgresql://cbgpu_runtime:ci-runtime-only@127.0.0.1:5432/cbgpu_runtime_test
+        run: |
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE cbgpu_runtime LOGIN PASSWORD 'ci-runtime-only';"
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE cbgpu_runtime_test;"
+          cargo run --locked --manifest-path rust/Cargo.toml -- migrate
+          cargo test --locked --manifest-path rust/Cargo.toml --test postgres -- --ignored

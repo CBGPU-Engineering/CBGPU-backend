@@ -1,0 +1,20 @@
+[Unit]
+Description=CBGPU Rust Axum operational core
+After=network-online.target
+Wants=network-online.target
+[Service]
+ExecStart=%h/.local/lib/cbgpu-rust/current/cbgpu-core serve
+EnvironmentFile=%h/.config/cbgpu/rust-core.env
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+TasksMax=64
+[Install]
+WantedBy=default.target
