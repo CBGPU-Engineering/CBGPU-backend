@@ -124,3 +124,58 @@ pub async fn admin(pool: &PgPool, args: &[String]) -> Result<serde_json::Value, 
         _=>Err("Usage: --list | --show REFERENCE [--status STATUS] | --delete REFERENCE"),
     }
 }
+
+/// Temporary read-only bridge while the legacy writer is drained for final PG import.
+/// Returns only the same admin-visible columns as --list, never notification keys.
+pub async fn legacy_admin_list(
+    source: &std::path::Path,
+) -> Result<serde_json::Value, &'static str> {
+    use sqlx::{
+        Row,
+        sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    };
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(source)
+                .read_only(true)
+                .create_if_missing(false),
+        )
+        .await
+        .map_err(|_| "Cannot open legacy recruitment data read-only")?;
+    let rows=sqlx::query("SELECT id,created,role,name,email,affiliation,motivation,experience,portfolio,status FROM applications ORDER BY created DESC LIMIT 1000").fetch_all(&pool).await.map_err(|_|"Cannot read recruitment applications")?;
+    let mut records = Vec::new();
+    for row in rows {
+        let mut object = serde_json::Map::new();
+        for key in [
+            "id",
+            "role",
+            "name",
+            "email",
+            "affiliation",
+            "motivation",
+            "experience",
+            "portfolio",
+            "status",
+        ] {
+            object.insert(
+                key.into(),
+                serde_json::json!(
+                    row.try_get::<String, _>(key)
+                        .map_err(|_| "Invalid recruitment field")?
+                ),
+            );
+        }
+        object.insert(
+            "created".into(),
+            serde_json::json!(
+                row.try_get::<i64, _>("created")
+                    .map_err(|_| "Invalid recruitment timestamp")?
+            ),
+        );
+        records.push(serde_json::Value::Object(object));
+    }
+    pool.close().await;
+    Ok(serde_json::Value::Array(records))
+}

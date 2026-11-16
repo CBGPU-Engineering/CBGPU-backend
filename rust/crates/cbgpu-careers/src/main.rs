@@ -3,6 +3,22 @@ use sqlx::postgres::PgPoolOptions;
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 async fn run() -> Result<(), &'static str> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args == ["--build-info"] {
+        println!(
+            "{}",
+            serde_json::json!({"name":"cbgpu-careers","source":option_env!("CBGPU_SOURCE_SHA")})
+        );
+        return Ok(());
+    }
+    if args.first().is_some_and(|arg| arg == "--legacy-list") {
+        if args.len() != 2 {
+            return Err("Use --legacy-list SOURCE");
+        }
+        let rows = import::legacy_admin_list(std::path::Path::new(&args[1])).await?;
+        println!("{rows}");
+        return Ok(());
+    }
     let database =
         env::var("CAREERS_DATABASE_URL").map_err(|_| "CAREERS_DATABASE_URL is required")?;
     let pool = PgPoolOptions::new()
@@ -11,7 +27,6 @@ async fn run() -> Result<(), &'static str> {
         .connect(&database)
         .await
         .map_err(|_| "Careers database connection failed")?;
-    let args: Vec<String> = env::args().skip(1).collect();
     if args.first().is_some_and(|arg| arg == "--import-sqlite") {
         if args.len() != 2 || env::var("CAREERS_LEGACY_WRITER_QUIESCED").as_deref() != Ok("1") {
             return Err(
