@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "moduleDetection": "force",
+    "allowImportingTsExtensions": true,
+    "strict": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "developer/**/*.mts",
+    "developer/static/*.ts",
+    "deploy/**/*.mts",
+    "deploy/*.ts",
+    "gpu/**/*.mts",
+    "scripts/**/*.mts",
+    "scripts/**/*.cts",
+    "operations/**/*.mts",
+    "rust/compat/*.mts",
+    "careers/public/*.ts",
+    "tooling/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "developer/node_modules"
+  ]
+}

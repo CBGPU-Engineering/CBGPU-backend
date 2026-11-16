@@ -12,7 +12,7 @@ docker exec cbgpu-supabase-storage tar -czf - -C /var/lib/storage . > "$backup_d
 docker exec cbgpu-supabase-db tar -czf - -C /etc/postgresql-custom . > "$backup_dir/database-encryption-keys.tar.gz"
 tar -czf "$backup_dir/materials.tar.gz" --exclude="*.partial" --exclude="*.upload.json" -C /home/cbgpu/cbgpu-materials .
 cp "$backend_dir/.env" "$backend_dir/functions.env" "$backup_dir/"
-CBGPU_RUNTIME_BACKEND="$backend_dir" node "$script_root/scripts/backup-developer.mjs" "$backup_dir"
+CBGPU_RUNTIME_BACKEND="$backend_dir" node "$script_root/scripts/backup-developer.mts" "$backup_dir"
 sha256sum "$backup_dir/database.dump" "$backup_dir/storage.tar.gz" > "$backup_dir/checksums.sha256"
 printf 'Backend backup saved: %s\n' "$backup_dir"
-node "$backend_dir/operations/backup.mjs" upload
+node "$backend_dir/operations/backup.mts" upload

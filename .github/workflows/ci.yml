@@ -20,17 +20,21 @@ jobs:
           node-version: 22
       - run: npm ci --no-audit --no-fund
         working-directory: developer
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check
+      - run: npm run check:source
+      - run: npm run build:browser
       - run: sudo apt-get update -qq && sudo apt-get install -y tmux
-      - run: node --test developer/tests/*.test.mjs operations/study-refresh/*.test.mjs rust/compat/*.test.mjs
+      - run: node --test developer/tests/*.test.mts operations/study-refresh/*.test.mts rust/compat/*.test.mts
       - run: python3 -m unittest discover -s ai -p 'test_*.py'
       - run: python3 -m compileall -q ai
-      - run: node scripts/verify-mail-queue.mjs
-      - run: node --check deploy/server.mjs && node --check developer/server.mjs
+      - run: node scripts/verify-mail-queue.mts
+      - run: node --check deploy/server.mts && node --check developer/server.mts
       - run: python3 -m compileall -q deploy scripts careers
       - run: python3 -m unittest discover -s careers -p 'test_*.py'
       - run: node --check careers/public/app.js && node --check careers/public/theme.js && node --check careers/public/onboarding.js
       - run: python3 -m unittest discover -s operations/delivery -p 'test_*.py'
-      - run: node scripts/check-publication.mjs
+      - run: node scripts/check-publication.mts
 
   rust:
     runs-on: ubuntu-latest

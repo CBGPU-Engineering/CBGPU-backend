@@ -15,7 +15,7 @@ The optional AGPL LaTeX adapter is a pinned nested submodule at `latex/`.
 git clone --recurse-submodules https://github.com/CBGPU-Engineering/CBGPU-backend.git
 cd CBGPU-backend
 cd developer && npm ci && cd ..
-node scripts/verify-mail-queue.mjs
+node scripts/verify-mail-queue.mts
 ```
 
 The queue check uses an in-memory database and fake transport. It sends no mail.
@@ -58,3 +58,19 @@ guide at `careers.cbgpu.com`. See its README for operations and retention.
 agent, immutable releases, health checks, rollback, deployment history and runtime
 backup boundaries. Push application changes to the extracted component repository,
 not the retired monorepo source folders.
+
+
+## TypeScript service sources
+
+Maintained Node.js services, browser integrations, tests and operational tools
+use TypeScript (`.ts`, `.mts`, `.cts`). Use Node.js 22.18 or newer. Run `npm ci`
+at the repository root and `npm ci --prefix developer`, then `npm run check`,
+`npm test` and `npm run build:browser`. Browser JavaScript and the pinned xterm
+vendor files are generated, ignored build artifacts. Service code continues to
+migrate to Rust; Python and other legacy implementations remain until their
+verified handoff, as recorded in `rust/conversion.json`.
+
+The delivery agent treats root tooling changes as an explicit infrastructure
+rollout, so publishing this source transition cannot silently restart the
+public deployment ingress. Existing sessions and deployments must be drained
+or routed through simultaneous old/new instances before activating it.

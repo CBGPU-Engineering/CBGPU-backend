@@ -113,7 +113,7 @@ ports. Benchmark latency and failure behavior before enabling new public routes.
 runtime health check and static artifact publication contract in Rust. It accepts
 configuration on stdin and emits a single trusted `CBGPU_RESULT` record. Repository
 logs are prefixed so they cannot impersonate that record; secrets are redacted.
-The existing API supervisor stays unchanged. `compat/worker-command.mjs` is a
+The existing API supervisor stays unchanged. `compat/worker-command.mts` is a
 tested adapter for a separately drained supervisor rollout; it is not activated
 by this source release.
 

@@ -18,7 +18,7 @@ Use file mode `600`. Never commit credentials. The configured account must have 
 from the contributor who supplied the previous shared token. The worker discovers the active web
 release and its local database/encryption settings without duplicating secrets.
 
-Install `refresh.mjs` into `~/.local/lib/cbgpu-study-monitor/`, install both unit
+Install `refresh.mts` into `~/.local/lib/cbgpu-study-monitor/`, install both unit
 files into `~/.config/systemd/user/`, then run:
 
 ```bash
@@ -27,8 +27,8 @@ systemctl --user enable --now cbgpu-study-refresh.timer
 systemctl --user start cbgpu-study-refresh.service
 ```
 
-`node refresh.mjs --check` checks configuration without attempting login.
-`node refresh.mjs --verify-login` verifies a real login without replacing the shared
+`node refresh.mts --check` checks configuration without attempting login.
+`node refresh.mts --verify-login` verifies a real login without replacing the shared
 token, including when renewal is not due. Failed attempts have a six-hour cooldown
 which also survives worker crashes. A successful scheduled renewal removes the
 cooldown. A human verification challenge is left to the operator; the worker does
@@ -37,5 +37,5 @@ to warn about expiry and actual lookup failures.
 
 Status is written without credentials or tokens to
 `~/.local/share/cbgpu-study-monitor/refresh-status.json`.
-Run `node --test operations/study-refresh/refresh.test.mjs` for renewal policy tests.
+Run `node --test operations/study-refresh/refresh.test.mts` for renewal policy tests.
 Disable automation with `systemctl --user disable --now cbgpu-study-refresh.timer`.

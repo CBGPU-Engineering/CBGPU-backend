@@ -19,7 +19,7 @@ component's complete license text or a guarantee about every transitive package.
 ## npm dependencies
 
 `docs/DEPENDENCIES.md` is generated from the committed npm lockfiles with
-`node scripts/dependency-inventory.mjs`. Entries reflect lockfile metadata, which
+`node scripts/dependency-inventory.mts`. Entries reflect lockfile metadata, which
 may be incomplete. Before redistribution, inspect the actual installed package's
 LICENSE/NOTICE and any package-specific restrictions. Do not assume all packages
 share the application's Apache license.

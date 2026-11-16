@@ -48,7 +48,7 @@
       "id": "deployment-ingress",
       "contract": "Streaming HTTP and upgraded TCP gateway; legacy business endpoints remain legacy",
       "sources": [
-        "deploy/server.mjs HTTP forwarding"
+        "deploy/server.mts HTTP forwarding"
       ],
       "status": "implemented_not_active",
       "data": "none"
@@ -57,7 +57,7 @@
       "id": "deployment-control",
       "contract": "Projects, environment values, domains, permissions, queue and rollbacks",
       "sources": [
-        "deploy/server.mjs"
+        "deploy/server.mts"
       ],
       "status": "not_started",
       "data": "SQLite -> PostgreSQL"
@@ -67,9 +67,9 @@
       "contract": "Validation, Docker builds, health failures, storage budgets and retained volumes",
       "sources": [
         "deploy/compose-worker.py",
-        "deploy/compose-manager.mjs",
+        "deploy/compose-manager.mts",
         "deploy/compose-storage.py",
-        "deploy/docker-log-proxy.mjs"
+        "deploy/docker-log-proxy.mts"
       ],
       "status": "not_started",
       "data": "SQLite -> PostgreSQL"
@@ -90,7 +90,7 @@
       "id": "developer-portal",
       "contract": "Operational APIs, real PTY terminals and audit",
       "sources": [
-        "developer/server.mjs"
+        "developer/server.mts"
       ],
       "status": "not_started",
       "data": "SQLite -> PostgreSQL"
@@ -108,7 +108,7 @@
       "id": "gpu-ssh-gateways",
       "contract": "Notebook HTTP/WebSocket and reservation-scoped SSH forwarding",
       "sources": [
-        "gpu/server.mjs",
+        "gpu/server.mts",
         "gpu/ssh*"
       ],
       "status": "not_started",
@@ -173,8 +173,8 @@
       "id": "operations-delivery",
       "contract": "Backups, restore tests, CI-gated delivery and alert outboxes",
       "sources": [
-        "operations/backup.mjs",
-        "operations/worker.mjs",
+        "operations/backup.mts",
+        "operations/worker.mts",
         "operations/delivery/agent.py"
       ],
       "status": "not_started",

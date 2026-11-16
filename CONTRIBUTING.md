@@ -12,7 +12,7 @@ system, use [CBGPU-platform](https://github.com/CBGPU-Engineering/CBGPU-platform
 
 ```bash
 cd developer && npm ci && cd ..
-node scripts/verify-mail-queue.mjs
+node scripts/verify-mail-queue.mts
 ```
 
 Write project documentation and PR summaries in English. Existing Korean product

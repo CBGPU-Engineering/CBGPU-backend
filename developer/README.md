@@ -10,7 +10,7 @@ All portals now use one CBGPU email/password sign-in. There is no additional sys
 
 The English sign-in markup, stylesheet and theme script are reused from the developer portal. The Next.js shells use the same `cbgpu-developer-theme` preference and generated developer stylesheet. Run `node FrontEnd/cbgpu/scripts/sync-admin-developer-style.cjs` after changing that canonical stylesheet.
 
-Verification: `node backend/scripts/verify-developer-auth.mjs` and `node backend/scripts/verify-equipment-portals.mjs`. The latter uses an isolated gateway and temporary accounts; set `CBGPU_TEST_FRONTEND_PORT` to a preview port. For live equipment-only checks use `CBGPU_TEST_PUBLIC=1 CBGPU_TEST_FRONTEND_PORT=3000`.
+Verification: `node backend/scripts/verify-developer-auth.mts` and `node backend/scripts/verify-equipment-portals.mts`. The latter uses an isolated gateway and temporary accounts; set `CBGPU_TEST_FRONTEND_PORT` to a preview port. For live equipment-only checks use `CBGPU_TEST_PUBLIC=1 CBGPU_TEST_FRONTEND_PORT=3000`.
 
 The additional-password instructions in older deployment notes below are obsolete.
 
@@ -66,7 +66,7 @@ that unit; editing files in a different checkout does not change production.
 
 ## Verification
 
-`node backend/scripts/verify-developer-workspace.cjs` exercises real local APIs,
+`node backend/scripts/verify-developer-workspace.cts` exercises real local APIs,
 permission boundaries, search/pagination, SQL, service logs, the interactive terminal,
 read-only deployment enforcement, dark mode persistence and responsive layouts.
 It creates and removes a test table only in `developer_workspace`, and removes

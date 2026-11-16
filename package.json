@@ -1,0 +1,20 @@
+{
+  "name": "@cbgpu/backend-tooling",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build:browser": "node scripts/build-browser-assets.mts",
+    "test": "node --test developer/tests/*.test.mts operations/study-refresh/*.test.mts rust/compat/*.test.mts",
+    "check:source": "node scripts/check-source-languages.mts"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "22.20.5",
+    "@types/ws": "8.18.1",
+    "esbuild": "0.28.2"
+  }
+}

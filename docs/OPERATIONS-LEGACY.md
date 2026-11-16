@@ -13,7 +13,7 @@ cd /home/cbgpu/CBGPU-live/backend
 docker compose up -d --wait
 docker compose ps
 python3 scripts/verify-backend.py
-node scripts/verify-realtime.cjs
+node scripts/verify-realtime.cts
 python3 scripts/verify-push-credentials.py
 scripts/backup.sh
 ```

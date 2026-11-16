@@ -31,3 +31,11 @@ __pycache__/
 .venv/
 /dist/
 /release-artifacts/
+
+node_modules/
+# Generated browser assets
+careers/public/*.js
+developer/static/*.js
+developer/static/vendor/*.js
+
+deploy/edge-worker.js

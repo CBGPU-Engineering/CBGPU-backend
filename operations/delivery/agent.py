@@ -257,7 +257,7 @@ def sync_functions(directory,runtime,paths,sha):
 
 def deploy_backend(config,sha,repo,previous,log,approved=False):
  paths=changed_paths(repo,previous,sha)
- protected=[p for p in paths if p.startswith(('schema/','volumes/','gpu/','latex/')) or p in ['docker-compose.yml','.gitmodules']]
+ protected=[p for p in paths if p.startswith(('schema/','volumes/','gpu/','latex/')) or p in ['docker-compose.yml','.gitmodules','package.json','package-lock.json']]
  if protected and not approved:raise Deferred('Infrastructure/schema changes require a separate rollout: '+', '.join(protected[:8]))
  if busy_backend(config):raise Deferred('User deployment is running; waiting without interrupting its workers.')
  directory=checkout('backend',repo,sha);runtime=Path(config['runtime_backend'])
@@ -270,7 +270,10 @@ def deploy_backend(config,sha,repo,previous,log,approved=False):
   if source.exists() and not (parent/name).exists():(parent/name).symlink_to(source)
  env=os.environ.copy();env['NEXT_TELEMETRY_DISABLED']='1'
  if not (directory/'developer/node_modules').exists():build(['npm','ci','--no-audit','--no-fund'],directory/'developer',env,log)
- build(['node','scripts/verify-mail-queue.mjs'],directory,env,log)
+ if (directory/'package.json').exists():
+  build(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],directory,env,log)
+  build(['npm','run','build:browser'],directory,env,log)
+ build(['node','scripts/verify-mail-queue.mts'],directory,env,log)
  build(['/usr/bin/python3','-m','unittest','discover','-s','careers','-p','test_*.py'],directory,env,log)
  if not (directory/'careers').exists():raise DeliveryError('Missing recruitment service.')
  # A preview must not send mail, expire real records or mutate production data.
@@ -283,7 +286,7 @@ def deploy_backend(config,sha,repo,previous,log,approved=False):
  synced=sync_functions(directory,runtime,paths,sha)
  if synced:record('functions_synced',component='backend',commit=sha,files=synced)
  units={};checks=[]
- definitions=[('careers','cbgpu-careers.service','/usr/bin/python3 '+str(directory/'careers/server.py')+' --port 3530','http://127.0.0.1:3530/health'),('developer','cbgpu-developer-portal.service','/usr/bin/node '+str(directory/'developer/server.mjs'),'http://127.0.0.1:3400/health'),('deploy','cbgpu-deploy.service','/usr/bin/node '+str(directory/'deploy/server.mjs'),'http://127.0.0.1:3510/health'),('ai','cbgpu-ai.service','/usr/bin/python3 '+str(directory/'ai/server.py')+' --port 3550','http://127.0.0.1:3550/health')]
+ definitions=[('careers','cbgpu-careers.service','/usr/bin/python3 '+str(directory/'careers/server.py')+' --port 3530','http://127.0.0.1:3530/health'),('developer','cbgpu-developer-portal.service','/usr/bin/node '+str(directory/'developer/server.mts'),'http://127.0.0.1:3400/health'),('deploy','cbgpu-deploy.service','/usr/bin/node '+str(directory/'deploy/server.mts'),'http://127.0.0.1:3510/health'),('ai','cbgpu-ai.service','/usr/bin/python3 '+str(directory/'ai/server.py')+' --port 3550','http://127.0.0.1:3550/health')]
  for prefix,name,execution,url in definitions:
   if previous and not any(p.startswith(prefix+'/') for p in paths):continue
   original=(SETTINGS/name).read_text()
@@ -355,7 +358,7 @@ def poll(config,state,only=None):
    if current.get('sha')==sha or current.get('blocked_sha')==sha:continue
    if component=='backend' and current.get('sha'):
     paths=changed_paths(repo,current['sha'],sha)
-    protected=[p for p in paths if p.startswith(('schema/','volumes/','gpu/','latex/')) or p in ['docker-compose.yml','.gitmodules']]
+    protected=[p for p in paths if p.startswith(('schema/','volumes/','gpu/','latex/')) or p in ['docker-compose.yml','.gitmodules','package.json','package-lock.json']]
     if protected and current.get('approved_infrastructure_sha')!=sha:raise Deferred('Infrastructure/schema changes require a separate rollout: '+', '.join(protected[:8]))
    if component=='backend' and busy_backend(config):raise Deferred('Waiting for active user deployment workers to finish.')
    if current.get('failed_sha')==sha:continue # Explicit retry is required after a failed deployment.
