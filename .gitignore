@@ -39,3 +39,7 @@ developer/static/*.js
 developer/static/vendor/*.js
 
 deploy/edge-worker.js
+
+# Supabase CLI local state
+/supabase/.temp/
+/supabase/.branches/
