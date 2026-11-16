@@ -74,8 +74,9 @@
         "rust/crates/cbgpu-compose-worker",
         "deploy/compose-manager.mts"
       ],
-      "status": "implemented_not_active",
-      "data": "Named Docker volumes retained; existing control state remains under deployment-control migration"
+      "status": "live",
+      "data": "Named Docker volumes retained; existing control state remains under deployment-control migration",
+      "activation": "Deployment supervisor release e611ab0 uses the exact-source Rust Compose binary; existing deployment and Compose state verified unchanged during handoff."
     },
     {
       "id": "careers",

@@ -207,3 +207,9 @@ existing deployment result on stdin; `--capture-existing PROJECT_UUID` preserves
 the current SQLite control database solely for compatibility while control-state
 migration to PostgreSQL remains tracked separately. It never creates a new
 production database. Python execution and verification helpers are retired.
+
+The native Compose worker was activated with supervisor release e611ab0 after
+its exact CI run and temporary Docker contracts passed. Existing project
+production pointers, deployment results and Compose state were unchanged.
+The TypeScript control supervisor and its SQLite state are still a separate
+Rust/PostgreSQL migration target.
