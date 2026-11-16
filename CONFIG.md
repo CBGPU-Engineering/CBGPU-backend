@@ -1451,3 +1451,25 @@ The fields below are repeated for each provider. Substitute `<PROVIDER>` with on
 | `SWITCH_ACTIVE_COUNT` | integer (count) | | Number of activity ticks before a pool is switched out. | Default: `100` |
 | `TRANSACTION_PROXY_PORTS` | string (CSV) | | Comma-separated list of additional internal transaction-mode proxy listener ports. | Default: `12104,12105,12106,12107` |
 | `VAULT_ENC_KEY` | string | Self-hosted | AES.GCM encryption key for the Cloak vault used to encrypt tenant credentials at rest. | Required |
+
+
+## Spotify wakeup integration
+
+Set server-only `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` and
+`SPOTIFY_REDIRECT_URI` in the web compatibility API runtime until this API is
+moved to Rust. Register the exact callback URI of the admin host with Spotify,
+for example `https://admin.cbgpu.com/api/wakeup/spotify/callback`. The configured
+URI must match the registered value. No client secret may use a `NEXT_PUBLIC_`
+prefix. The wakeup manager authorizes playlist creation from the admin workspace.
+Historical table changes are in `schema/legacy/web-root`; initialize and verify
+a test database rather than blindly replaying every historical script.
+
+## Self-study notification integration
+
+Reminder delivery is opt-in. Its historical schema is retained under
+`schema/legacy/app-supabase`; the active function source is under
+`volumes/functions/selfstudy-reminder`. Configure school-token encryption and
+Firebase credentials privately on the function runtime. Push requires the native
+app registration; iOS additionally requires APNs configuration. Never expose a
+service-role key to browser code or replay notification jobs against real
+students while testing.

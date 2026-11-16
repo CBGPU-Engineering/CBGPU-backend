@@ -104,3 +104,131 @@ The app host uses one header, account entry, search entry and bottom navigation.
 Feature page content uses cb-page-content sections/divs inside the shared main landmark. App-specific CSS owns outer spacing once, cancelling desktop feature-wrapper padding/max-width/margins while preserving normal user-web layouts. The frontend deployment feature does not repeat the CBGPU brand inside the app. Tests cover single-main landmarks on20 routes, mobile header size/overflow, first-service placement, mode persistence, original greetings, search, authentication handoff and deployment settings.
 
 App brand and bottom Home links explicitly point to https://app.cbgpu.com/?mode=SELECTED_MODE and use document navigation. This carries the active audience into the server-resolved home route. verify-app-home-links.mts tests logo clicks from home/services, bottom Home, refresh/back, origin/mode preservation and absence of a nested launch site in all three audiences; CBGPU_TEST_PUBLIC=1 checks the deployed HTTPS site.
+
+
+## School study lookup reliability
+
+The shared proxy is approved-user/read-only: GET of allowlisted school resources,
+and POST `/selfstudy/search` (a query). It cannot submit/cancel applications.
+Personal writes remain in the separate student contract with ownership checks,
+official opening policy, confirmation readback and durable duplicate leases.
+
+## Failure boundaries
+
+- Discriminate `selfstudy` from `outstay` before reading classroom fields.
+- Validate source collections; unknown student details retain occupied seats with
+  an explicit placeholder instead of dropping an application.
+- A missing classroom/period in a real application fails closed. An unplaceable
+  active seat disables the affected room's vacancy display; applicants remain
+  visible. Missing layouts affect one room, not the complete room list.
+- Match numeric/string IDs consistently and validate seat coordinates/duplicates.
+- Limit layout and proxy work to four concurrent reads; coalesce identical pending
+  requests even on manual refresh. After repeated transport failures, pause new
+  upstream attempts for 20 seconds. Errors are not cached as successful data.
+- Coalesce server auth checks, retain user-token RLS, cap auth cache by JWT expiry,
+  and use the local backend rather than looping through the public tunnel.
+- Refresh visible pages every 30 seconds; discard results from obsolete accounts,
+  requests or dates. Existing results show their verification time and update error;
+  map-based application shortcuts are disabled while stale/loading.
+- Never persist historical seat occupancy as current availability. No automatic
+  retry is added to apply/cancel operations.
+
+## Operator probe
+
+Install `check.mts` in `~/.local/lib/cbgpu-study-monitor/` and the two user units in
+`~/.config/systemd/user/`. Enable `cbgpu-study-health.timer` after the web release.
+The probe discovers the current immutable web release from the frontend unit,
+reads its private runtime environment, decrypts the existing shared read token
+inside the process, and performs only school read operations. It uses the same
+normalizer and room view builder as the application, checks every room with three
+concurrent layout reads, and warns before the shared token expires (24 hours).
+It never signs in as a user, borrows personal sessions, sends emails, submits or
+cancels school applications, or logs tokens/student records.
+
+The probe atomically writes aggregate status, counts and connection expiry to
+`~/.local/share/cbgpu-study-monitor/status.json` with mode 600. The developer
+portal's **Study lookup** health card reads this file; an overdue (>15 minutes),
+missing, malformed or future-dated result cannot report healthy.
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now cbgpu-study-health.timer
+systemctl --user start cbgpu-study-health.service
+journalctl --user -u cbgpu-study-health.service -n 10
+```
+
+Run synthetic transport, auth, room-projection and mixed-response tests via
+`npm test`. The browser demo includes `outstay` records and a missing room layout;
+no real school applications are used for testing.
+
+## Admin push alerts
+
+`alert.mts` runs right after each probe (`ExecStartPost`). It reads only `status.json` and, when needed, sends a short
+push to every admin through the internal `notify-admin-event` function (`type: ops_alert`); tapping it opens the
+admin study settings in the app. It never reads tokens or student records.
+
+| Situation | Level | When it is sent |
+| --- | --- | --- |
+| token expires in ≤24h | warning | once it enters the last day, then every 12h |
+| token expired, missing, or school read failing | critical | immediately, then every 3h |
+| some room layouts failing | warning | when it starts, then every 12h |
+| probe result missing/overdue (>15 min) | critical | immediately, then every 3h |
+| back to healthy | info | once |
+
+State lives in `~/.local/share/cbgpu-study-monitor/alert-state.json`. Install next to `check.mts`
+(`~/.local/lib/cbgpu-study-monitor/alert.mts`), reload the unit, and check with `node alert.mts --dry-run`.
+The notify function authenticates with `INTERNAL_TRIGGER_SECRET` from the backend `functions.env`
+(path override: `CBGPU_FUNCTIONS_ENV`). Decision logic is covered by `tests/study-alert.test.mts`.
+
+
+## Timetable availability
+
+The public Comcigan viewer rotates its request format, token, transport encoding,
+field identifiers and school-code position. The adapter reads current literals
+from the official viewer, including nested encoding and reordered key fragments,
+without evaluating remote JavaScript. Authenticated payloads are verified before
+use; invalid data never replaces a valid snapshot.
+
+The server coalesces concurrent requests, caches successful data for five minutes,
+reloads current provider metadata once on failure, and backs off for one minute
+when unavailable. Even forced refreshes share the in-flight request/backoff.
+When a usable snapshot exists, a slow refresh gets a three-second response budget;
+the page receives flagged last-good data while the single refresh continues.
+
+Successful school-wide data is written atomically with mode 600 to
+`~/.local/share/cbgpu-timetable/latest.json`. This path survives immutable web
+releases and service restarts. A failed refresh may serve a last-good snapshot
+only up to 48 hours old and only for the current Korean calendar week (or the
+upcoming week on Saturday/Sunday). Old-week, future-timestamped and malformed
+snapshots are rejected. No timetable is invented when no usable snapshot exists.
+
+The API returns `stale`, `fetchedAt` and `weekStart`. The student/admin UI identifies
+fallback data and warns that substitutions may be missing, and checks again every
+minute while visible. The home AI summary excludes stale timetable data. A stale
+response retains the original verification time; serving it never extends age.
+
+Use the Rust `cbgpu-core timetable-refresh` trigger and the service in
+`rust/deploy/cbgpu-timetable-refresh.service`, then enable
+`cbgpu-timetable-refresh.timer`. It checks
+one class every five minutes, 06:00–22:59 KST, daily. A single successful fetch
+preserves every class in the school snapshot. A stale or failed response marks
+the refresh service failed for monitoring, without stopping the website.
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now cbgpu-timetable-refresh.timer
+journalctl --user -u cbgpu-timetable-refresh.service -n 10
+```
+
+Regression tests cover old and nested enc5 transport, token/key rotation,
+request coalescing, restart/outage recovery, week/age limits, and atomic storage.
+
+
+## Web careers compatibility bridge
+
+Until the careers API is migrated, the web admin route reads the legacy careers
+SQLite database read-only after verifying the CBGPU session and admin profile.
+Its server runtime still needs Python sqlite3 and private read access. Set
+`CBGPU_CAREERS_DB_PATH` for an isolated database; never put that file in web
+assets or source control. This temporary bridge is a tracked Rust migration
+target, not part of the intended frontend-only architecture.
