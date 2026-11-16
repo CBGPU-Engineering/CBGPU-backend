@@ -172,15 +172,13 @@ random loopback port and removes that container and its tmpfs data afterwards.
 No production application data is read by this fixture.
 
 
-The materials transfer candidate lives in the separate
+The materials transfer service lives in the separate
 [CBGPU-materials repository](https://github.com/CBGPU-Engineering/CBGPU-materials).
-Its Axum service preserves the existing UUID layout, 8 MiB resumable chunks,
-quota reservations and range downloads. Metadata stays in the existing PostgreSQL
-service: caller tokens still pass through the existing authentication and RLS API.
-It does not replace those policies with a privileged database key.
-
-Nine isolated contracts cover transfer recovery, access isolation, cancellation,
-quota concurrency and stale-upload cleanup. The hardened Docker image also has a
-readiness/authentication/disabled-write smoke test. The candidate defaults to
-disabled writes and requires an explicit drained legacy-writer handoff.
-It is not yet the production file writer.
+Its Axum implementation is the active file writer on loopback port 8421.
+The legacy Python container was stopped after readiness and connection-drain
+checks, and remains a private rollback artifact. The UUID layout and existing
+PostgreSQL metadata authorization are preserved. Nine isolated contracts cover
+transfer recovery, account isolation, cancellation, quotas and stale-upload
+cleanup. A non-root read-only container test verifies readiness and disabled-write
+behavior. The obsolete Python source and dependencies are retired from the
+materials repository after this handoff.

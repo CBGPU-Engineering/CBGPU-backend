@@ -21,7 +21,8 @@
       "id": "study-trigger",
       "contract": "Weekday timer trigger only; business logic is listed separately",
       "sources": [
-        "operations/study-auto/trigger.py"
+        "rust/crates/cbgpu-core",
+        "rust/deploy/cbgpu-study-auto.service"
       ],
       "status": "live",
       "data": "PostgreSQL"
@@ -30,7 +31,8 @@
       "id": "timetable-trigger",
       "contract": "Timer/cache-warming trigger only",
       "sources": [
-        "operations/timetable/refresh.py"
+        "rust/crates/cbgpu-core",
+        "rust/deploy/cbgpu-timetable-refresh.service"
       ],
       "status": "live",
       "data": "PostgreSQL"
@@ -129,17 +131,17 @@
       "sources": [
         "CBGPU-materials"
       ],
-      "status": "implemented_not_active",
+      "status": "live",
       "data": "Existing PostgreSQL metadata and caller RLS API; UUID file bytes and resumable reservations preserved",
       "rust_sources": [
-        "https://github.com/CBGPU-Engineering/CBGPU-materials/tree/f92120b/src"
+        "https://github.com/CBGPU-Engineering/CBGPU-materials/tree/main/src"
       ],
       "validation": [
         "9 isolated transfer/storage contracts",
         "Rust formatting and Clippy",
         "Non-root read-only container readiness, authentication rejection and disabled-write smoke"
       ],
-      "activation": "Pending legacy writer drain and storage permission verification; never run Python and Rust writers concurrently"
+      "activation": "Rust is the sole writer on loopback port 8421. Legacy Python container is stopped and retained privately for rollback."
     },
     {
       "id": "latex",

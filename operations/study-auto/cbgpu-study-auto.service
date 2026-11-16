@@ -1,11 +1,16 @@
 [Unit]
-Description=CBGPU opt-in weekday self-study applications
+Description=CBGPU Rust opt-in weekday self-study trigger
 After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 %h/.local/lib/cbgpu-study-auto/trigger.py
+ExecStart=%h/.local/lib/cbgpu-rust/current/cbgpu-core study-auto
+EnvironmentFile=%h/.config/cbgpu/rust-core.env
 TimeoutStartSec=180s
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+MemoryMax=256M
+TasksMax=32
