@@ -30,4 +30,22 @@ separate inventories for a complete deployment SBOM.
 
 ## Local AI runtime and models
 
+Native candidates use Candle (MIT/Apache-2.0), Whisper/whisper-rs (MIT),
+llama.cpp (MIT), Poppler (GPL), ImageMagick (ImageMagick License), and Tesseract
+(Apache-2.0). OCR system packages remain separately licensed programs in the
+runtime image. Preserve their image package notices when redistributing it.
+
+`rust/crates/cbgpu-ai-inference/src/ffi.rs` was generated with bindgen 0.72.1
+from llama.cpp commit `0c1e57098bba43ac29e6e3b677cdceebdd22334f`, bundled
+with llama-cpp-python 0.3.36. The header SHA-256 is
+`d5cf9203bea63b575e76cba4881f29cfd1b611451578b01582b75b72ecbb04bc`.
+The matching MIT notice is retained in the crate's `LLAMA_LICENSE`. The worker
+loads the native shared library directly and refuses an unreviewed library ABI;
+it does not invoke the Python package.
+
+The native Whisper large-v3 asset is the MIT-licensed ggml conversion at
+`ggerganov/whisper.cpp`, revision `5359861c739e955e79d9a303bcbc70fb988958b1`,
+SHA-256 `64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2`.
+Model weights are downloaded separately and are not committed to this repository.
+
 The optional local AI service downloads Qwen2.5-7B-Instruct GGUF (Apache-2.0), multilingual E5-small (MIT), and faster-whisper large-v3 (MIT); exact repositories and revisions are in `ai/models.json`. Model weights and inference virtual environments are not distributed in this repository. llama-cpp-python and faster-whisper are MIT, PyTorch is BSD-style, sentence-transformers and transformers are Apache-2.0, pypdf is BSD-3-Clause, and PyAV is BSD-3-Clause with separately licensed FFmpeg components. See upstream package/model licenses before redistributing a runtime image.

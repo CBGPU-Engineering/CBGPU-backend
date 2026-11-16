@@ -36,7 +36,7 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:17
@@ -52,6 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy && rustup default 1.100.0
+      - name: Native CPU model build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y cmake clang libclang-dev
       - run: cargo fmt --manifest-path rust/Cargo.toml --check
       - run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path rust/Cargo.toml

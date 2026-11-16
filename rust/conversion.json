@@ -125,8 +125,20 @@
       "sources": [
         "ai"
       ],
-      "status": "not_started",
-      "data": "SQLite -> PostgreSQL"
+      "status": "implemented_not_active",
+      "data": "SQLite -> PostgreSQL",
+      "rust_sources": [
+        "rust/crates/cbgpu-ai",
+        "rust/crates/cbgpu-ai-store",
+        "rust/crates/cbgpu-ai-inference",
+        "rust/crates/cbgpu-ai-models"
+      ],
+      "validation": [
+        "Isolated PostgreSQL store/import/ownership contracts",
+        "Native API and reservation-first scheduler contracts",
+        "Actual CPU Qwen answer and tool-call smoke without Python"
+      ],
+      "activation": "Live AI API remains legacy until GPU model verification, writer drain and verified core/robotics import. No production AI database migration applied."
     },
     {
       "id": "materials",
@@ -161,8 +173,15 @@
       "sources": [
         "CBGPU-robotics"
       ],
-      "status": "not_started",
-      "data": "PostgreSQL"
+      "status": "implemented_not_active",
+      "data": "Private PostgreSQL candidate; legacy SQLite unchanged",
+      "rust_sources": [
+        "rust/crates/cbgpu-robotics"
+      ],
+      "validation": [
+        "Actual isolated PostgreSQL ownership, map, lease, stop and mission contracts",
+        "Read-only legacy importer preserves identifiers and source database bytes"
+      ]
     },
     {
       "id": "mcp-cli",
@@ -192,13 +211,16 @@
         "rust/crates/cbgpu-delivery",
         "rust/crates/cbgpu-backup"
       ],
-      "status": "not_started",
-      "data": "PostgreSQL / filesystem"
+      "status": "partially_live",
+      "data": "Existing private delivery state and verified PostgreSQL snapshots; metadata/offsite and alert helpers remain TypeScript",
+      "activation": "CI-gated delivery polling and backup runner use native Rust binaries. Native delivery successfully deployed contest team, period and award changes."
     },
     {
       "id": "scheduled-backup-runner",
       "contract": "Private database, roles, files and key snapshots; archive verification and encrypted offsite handoff",
-      "sources": ["rust/crates/cbgpu-backup"],
+      "sources": [
+        "rust/crates/cbgpu-backup"
+      ],
       "status": "live",
       "data": "Application and runtime PostgreSQL; private archives",
       "activation": "Scheduled backup unit executes native Rust binary; full snapshot and encrypted offsite upload succeeded. Metadata/offsite transport helpers remain TypeScript compatibility work."
@@ -206,9 +228,43 @@
     {
       "id": "custom-domain-provider",
       "contract": "Cloudflare custom TLS and project worker bindings",
-      "sources": ["rust/crates/cbgpu-domains"],
+      "sources": [
+        "rust/crates/cbgpu-domains"
+      ],
+      "status": "live",
+      "data": "Existing provider configuration and private token files",
+      "activation": "Installed native provider binary invoked by the deployment supervisor release a76d673; existing project and Compose state preserved."
+    },
+    {
+      "id": "native-document-extraction",
+      "contract": "Offline PDF/image OCR, text/CSV evidence and chart extraction",
+      "sources": [
+        "rust/crates/cbgpu-ai-documents",
+        "ai/ocr/Dockerfile"
+      ],
+      "status": "live",
+      "data": "Owner-bound existing upload files and cache; no data import",
+      "activation": "New OCR jobs use native Rust image without restarting AI service or existing containers; previous image retained privately.",
+      "validation": [
+        "Native unit contracts",
+        "Offline actual Docker PDF/PNG/multiframe TIFF and rejection contracts",
+        "74 existing AI regression tests"
+      ]
+    },
+    {
+      "id": "routing-maintenance-tools",
+      "contract": "Tunnel/DNS routing and bounded server maintenance commands",
+      "sources": [
+        "rust/crates/cbgpu-routing",
+        "rust/crates/cbgpu-admin-ops"
+      ],
       "status": "implemented_not_active",
-      "data": "Existing provider configuration and private token files"
+      "data": "Private existing configuration and provider records",
+      "activation": "Email-domain systemd command alone is installed and verified native. Other mutation commands remain explicit operator actions; historical destructive source replay commands are retired.",
+      "validation": [
+        "22 native routing and maintenance contracts",
+        "Rust clippy with warnings denied"
+      ]
     }
   ],
   "frontend_api_sources": [
