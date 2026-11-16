@@ -64,7 +64,7 @@
       "sources": [
         "deploy/server.mts"
       ],
-      "status": "not_started",
+      "status": "implemented_not_active",
       "data": "SQLite -> PostgreSQL"
     },
     {
@@ -106,7 +106,7 @@
       "sources": [
         "CBGPU-gpu-daemon"
       ],
-      "status": "not_started",
+      "status": "implemented_not_active",
       "data": "PostgreSQL"
     },
     {
@@ -116,7 +116,7 @@
         "gpu/server.mts",
         "gpu/ssh*"
       ],
-      "status": "not_started",
+      "status": "implemented_not_active",
       "data": "PostgreSQL"
     },
     {
@@ -164,7 +164,7 @@
       "sources": [
         "CBGPU-latex"
       ],
-      "status": "not_started",
+      "status": "implemented_not_active",
       "data": "MongoDB -> PostgreSQL"
     },
     {
@@ -190,7 +190,7 @@
         "CBGPU-mcp",
         "CBGPU-agent"
       ],
-      "status": "not_started",
+      "status": "implemented_not_active",
       "data": "local private credentials / PostgreSQL"
     },
     {
@@ -211,7 +211,7 @@
         "rust/crates/cbgpu-delivery",
         "rust/crates/cbgpu-backup"
       ],
-      "status": "partially_live",
+      "status": "live",
       "data": "Existing private delivery state and verified PostgreSQL snapshots; metadata/offsite and alert helpers remain TypeScript",
       "activation": "CI-gated delivery polling and backup runner use native Rust binaries. Native delivery successfully deployed contest team, period and award changes."
     },
@@ -258,13 +258,49 @@
         "rust/crates/cbgpu-routing",
         "rust/crates/cbgpu-admin-ops"
       ],
-      "status": "implemented_not_active",
+      "status": "partially_live",
       "data": "Private existing configuration and provider records",
       "activation": "Email-domain systemd command alone is installed and verified native. Other mutation commands remain explicit operator actions; historical destructive source replay commands are retired.",
       "validation": [
         "22 native routing and maintenance contracts",
         "Rust clippy with warnings denied"
       ]
+    },
+    {
+      "id": "contest-external-api",
+      "contract": "Bearer-authenticated contest listing and own individual/team registration",
+      "sources": [
+        "rust/crates/cbgpu-contests-api"
+      ],
+      "status": "live",
+      "data": "Existing PostgreSQL contest tables"
+    },
+    {
+      "id": "contest-scoped-tokens",
+      "contract": "One-time personal scoped contest credentials, fresh session/RLS checks and owned lifecycle",
+      "sources": [
+        "rust/crates/cbgpu-contest-tokens"
+      ],
+      "status": "live",
+      "data": "PostgreSQL private contest_api schema"
+    },
+    {
+      "id": "account-access-rollover",
+      "contract": "Identity/affiliation/resource permissions and explicit academic-year workflow",
+      "sources": [
+        "rust/crates/cbgpu-accounts"
+      ],
+      "status": "implemented_not_active",
+      "data": "PostgreSQL; production migration not applied"
+    },
+    {
+      "id": "ai-corpus",
+      "contract": "Authorized school materials/published papers ingestion and retrieval",
+      "sources": [
+        "rust/crates/cbgpu-ai-corpus"
+      ],
+      "status": "implemented_not_active",
+      "data": "PostgreSQL candidate cache"
     }
   ],
   "frontend_api_sources": [
