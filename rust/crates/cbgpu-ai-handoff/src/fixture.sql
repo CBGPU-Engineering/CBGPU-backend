@@ -1,0 +1,25 @@
+-- Synthetic isolated handoff contract; no school data or credentials.
+CREATE TABLE jobs(id TEXT PRIMARY KEY,owner TEXT,kind TEXT,title TEXT,state TEXT,created REAL,updated REAL);
+CREATE TABLE uploads(id TEXT PRIMARY KEY,owner TEXT,name TEXT,size INTEGER,created REAL,job_id TEXT);
+CREATE TABLE ai_projects(id TEXT PRIMARY KEY,owner TEXT,title TEXT,created REAL);
+CREATE TABLE ai_project_files(project TEXT,upload TEXT PRIMARY KEY);
+CREATE TABLE api_keys(id TEXT PRIMARY KEY,owner TEXT,name TEXT,prefix TEXT,hash TEXT,created REAL);
+CREATE TABLE downloads(id TEXT PRIMARY KEY,owner TEXT,job_id TEXT,kind TEXT,path TEXT,expires REAL);
+CREATE TABLE vectors(hash TEXT PRIMARY KEY,vector TEXT,updated REAL);
+CREATE TABLE conversations(id TEXT PRIMARY KEY,owner TEXT,title TEXT,created REAL,updated REAL);
+CREATE TABLE chat_messages(id TEXT PRIMARY KEY,conversation TEXT,role TEXT,content TEXT,job_id TEXT,created REAL);
+CREATE TABLE remote_robots(id TEXT PRIMARY KEY,owner TEXT,name TEXT,created REAL,revoked INTEGER,pair_hash TEXT,pair_until REAL,token_hash TEXT,agent_session TEXT,seen REAL,lease TEXT,lease_until REAL,telemetry TEXT,map TEXT,image TEXT,stop_epoch INTEGER);
+CREATE TABLE robot_commands(id TEXT PRIMARY KEY,device TEXT,kind TEXT,state TEXT,created REAL,expires REAL,lease TEXT,payload TEXT,error TEXT,updated REAL,accepted_at REAL);
+CREATE TABLE robot_plans(id TEXT PRIMARY KEY,owner TEXT,robot TEXT,capabilities TEXT,observed REAL,mission TEXT,error TEXT);
+INSERT INTO jobs VALUES('10000000-0000-4000-8000-000000000001','owner','chat','retained','succeeded',1.,2.);
+INSERT INTO uploads VALUES('upload','owner','note.txt',22,1.,NULL);
+INSERT INTO ai_projects VALUES('project','owner','retained project',1.);
+INSERT INTO ai_project_files VALUES('project','upload');
+INSERT INTO api_keys VALUES('key','owner','retained key','prefix','existing-hash',1.);
+INSERT INTO downloads VALUES('download','owner','10000000-0000-4000-8000-000000000001','text',NULL,99.);
+INSERT INTO vectors VALUES('cache','[1.0,0.0]',1.);
+INSERT INTO conversations VALUES('conversation','owner','retained chat',1.,2.);
+INSERT INTO chat_messages VALUES('message','conversation','assistant','retained message',NULL,1.);
+INSERT INTO remote_robots VALUES('robot','owner','car',1.,0,'hashed-pair',2.,'hashed-device','session',3.,'lease',4.,'{"battery":90}','{"revision":1}',NULL,0);
+INSERT INTO robot_commands VALUES('command','robot','navigate','succeeded',1.,5.,'lease','{"goal":{"x":1}}',NULL,2.,1.);
+INSERT INTO robot_plans VALUES('plan','owner','car','{"lidar":true}',1.,'{"goal":"test"}',NULL);

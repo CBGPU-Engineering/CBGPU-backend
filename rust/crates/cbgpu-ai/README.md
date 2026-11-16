@@ -115,3 +115,54 @@ native mock executables and never reset GPUs or stop user notebooks. Actual
 model smoke tests require explicit local model paths and are separate from
 ordinary CI. A passing mock test does not establish GPU model readiness or
 authorize a live service restart.
+
+## Reviewed handoff stages
+
+`cbgpu-ai-handoff` is separate candidate operational tooling. Its default
+`preflight --state PATH` opens legacy SQLite read-only and reports job counts,
+nonterminal work, and user-service state. It neither changes admission nor
+stops jobs. Unknown legacy tables or job states require review.
+
+The web BFF currently targets `127.0.0.1:3550`. To preserve that route, an
+approved native replacement must bind that port explicitly; `13550` is only the
+candidate default. Never start both schedulers against the same filesystem.
+
+After an operator establishes a maintenance/admission window, lets all jobs
+finish, stops both AI units, and runtime-masks the legacy unit, the explicitly
+gated `import-drained --apply` stage can copy and byte-verify the full state and
+optional bulk trees into a new private backup. It refuses nonterminal jobs,
+active listeners on either AI port, nonempty native targets, missing schemas,
+and insufficient backup capacity. Core and robotics imports perform their own
+row equality checks; the resulting private manifest records table counts and
+row fingerprints. It does not change BFF routing or activate a native unit.
+
+The import confirmation is `IMPORT_DRAINED_PRIVATE_AI_AFTER_REVIEW`. The database
+URL is accepted only through a private regular `--database-url-file`, not a
+command-line credential. Root must review this source before any production
+apply. Keep legacy unit files, environment files, and credentials in the
+separate operational backup as well; this tool backs up data trees only.
+
+`rollback-check` performs read-only eligibility checks while both services are
+stopped. It refuses rollback if any native row or legacy database/WAL changed
+since the completed import. It never drops native data, overwrites legacy
+SQLite, unmasks a unit, or restarts a service. A failed partial import must stay
+inactive and be investigated; it is not permission to erase either database.
+If native writes exist, reconcile them before returning traffic to the legacy
+service.
+
+Admission control, approved service-unit installation, migration provisioning,
+full release/credential backup, and final activation remain explicit reviewed
+operator stages. This staged tool is not an unattended zero-downtime cutover.
+
+The handoff orchestration fixture additionally uses an empty
+`cbgpu_ai_handoff_test` database:
+
+```bash
+CBGPU_AI_TEST_DATABASE_URL=postgresql://fixture:fixture@127.0.0.1:5432/cbgpu_ai_handoff_test cargo test --manifest-path rust/Cargo.toml -p cbgpu-ai-handoff --lib -- --ignored
+```
+
+It uses a compiled mock service-state executable and private ephemeral listener
+ports, imports all twelve legacy core/robotics tables, checks original SQLite
+bytes, restores the private snapshot in a temporary directory, rejects queued
+work and repeat imports, and forbids rollback after a new native row. It never
+queries real systemd units or uses the production AI ports.

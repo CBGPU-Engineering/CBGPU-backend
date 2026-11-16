@@ -390,6 +390,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbgpu-ai-handoff"
+version = "0.1.0"
+dependencies = [
+ "cbgpu-ai-store",
+ "cbgpu-robotics",
+ "libc",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "cbgpu-ai-inference"
 version = "0.1.0"
 dependencies = [
