@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers", "crates/cbgpu-compose-worker"]
+members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers", "crates/cbgpu-compose-worker", "crates/cbgpu-contest-teams"]
+exclude = ["crates/cbgpu-accounts", "crates/cbgpu-ops", "crates/cbgpu-delivery", "crates/cbgpu-domains"]
 resolver = "2"
 
 [workspace.package]

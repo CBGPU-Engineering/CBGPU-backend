@@ -1,0 +1,17 @@
+[Unit]
+Description=CBGPU deadline-based random contest team allocation
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/cbgpu/contest-teams.env
+ExecStart=%h/.local/lib/cbgpu-rust/workers/cbgpu-contest-teams
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=160M
+CPUQuota=50%
+TimeoutStartSec=90
+UMask=0077

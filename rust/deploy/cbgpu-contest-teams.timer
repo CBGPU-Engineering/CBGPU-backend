@@ -1,0 +1,12 @@
+[Unit]
+Description=Check closed contest registration queues every 30 seconds
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=2s
+Persistent=true
+Unit=cbgpu-contest-teams.service
+
+[Install]
+WantedBy=timers.target
