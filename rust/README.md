@@ -42,6 +42,33 @@ PostgreSQL test container; the test refuses a production database name.
 
 ## Local rollout
 
+### Routing and maintenance commands
+
+`cbgpu-routing` replaces the eight former `scripts/route-*.py` helpers. Commands
+are `careers`, `developers`, `manufacturing`, `equipment-portals`, `deployments`,
+`latex`, `workspaces` and `project-namespaces`. The default is a read-only plan;
+`--apply` snapshots the existing tunnel and DNS records privately before changing
+them. Concurrent changes or conflicting routes stop the operation. Unrelated
+routes and origin settings are preserved.
+
+`cbgpu-admin-ops` replaces the maintained Python maintenance helpers. Run
+`--help` for commands. Each operation defaults to a plan and requires `--apply`
+to execute. `check-email-domain` performs DNS/provider reads and writes only the
+private status file; it does not send email. Recovery-email simulation additionally
+requires `--allow-test-email`. Controller restart additionally requires
+`--allow-controller-restart`, root access and no active reservations.
+
+The historical `activate-local-backend`, `final-sync` and
+`configure-scheduled-jobs` cutovers are retired. Replaying their original bulk
+imports against the current database could overwrite existing users and projects;
+the native command refuses them rather than preserving that destructive behavior.
+
+```bash
+cargo run --locked -p cbgpu-admin-ops -- check-email-domain
+cargo run --locked -p cbgpu-admin-ops -- check-email-domain --apply --root /home/cbgpu/CBGPU-live/backend
+cargo run --locked -p cbgpu-routing -- developers
+```
+
 `cbgpu-ops provision-local` creates only new roles/database, runs SQLx migrations with a
 separate schema owner, disables owner login afterward, and writes a private 600
 runtime env file outside Git. A private recovery credential record survives failed provisioning and is removed only after successful setup. Existing roles or databases cause a refusal rather

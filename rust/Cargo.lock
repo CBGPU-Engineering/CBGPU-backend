@@ -166,6 +166,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cbgpu-admin-ops"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "cbgpu-delivery",
+ "cbgpu-front-worker",
+ "chrono",
+ "hmac",
+ "libc",
+ "rand 0.8.8",
+ "reqwest",
+ "rsa",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "cbgpu-backup"
 version = "0.1.0"
 dependencies = [
@@ -328,6 +347,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "cbgpu-routing"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1581,6 +1612,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core 0.6.4",
+ "sha2",
  "signature",
  "spki",
  "subtle",

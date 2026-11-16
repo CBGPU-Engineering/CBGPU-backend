@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers", "crates/cbgpu-compose-worker", "crates/cbgpu-contest-teams", "crates/cbgpu-backup", "crates/cbgpu-ops", "crates/cbgpu-domains", "crates/cbgpu-delivery"]
+members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers", "crates/cbgpu-compose-worker", "crates/cbgpu-contest-teams", "crates/cbgpu-backup", "crates/cbgpu-ops", "crates/cbgpu-domains", "crates/cbgpu-delivery", "crates/cbgpu-routing", "crates/cbgpu-admin-ops"]
 exclude = ["crates/cbgpu-accounts", "crates/cbgpu-ai-store", "crates/cbgpu-robotics"]
 resolver = "2"
 

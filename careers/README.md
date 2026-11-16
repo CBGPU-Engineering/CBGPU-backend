@@ -93,7 +93,7 @@ Apache-2.0, as the enclosing backend repository.
 Add a published application route to the existing Cloudflare Tunnel:
 `careers.cbgpu.com` → `http://127.0.0.1:3530`, with the Path field empty.
 Public TLS terminates at Cloudflare; the origin is loopback HTTP.
-`scripts/route-careers.py --apply` performs the same additive change when
+`cbgpu-routing careers --apply` performs the same additive change when
 the existing Cloudflare routing authentication is valid. It checks for DNS
 conflicts and snapshots the tunnel before making changes.
 
