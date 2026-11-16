@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers", "crates/cbgpu-compose-worker", "crates/cbgpu-contest-teams", "crates/cbgpu-backup", "crates/cbgpu-ops", "crates/cbgpu-domains", "crates/cbgpu-delivery", "crates/cbgpu-ai-documents", "crates/cbgpu-ai-store", "crates/cbgpu-routing", "crates/cbgpu-admin-ops", "crates/cbgpu-robotics", "crates/cbgpu-ai", "crates/cbgpu-ai-inference", "crates/cbgpu-ai-models", "crates/cbgpu-edge-policy", "crates/cbgpu-gpu-gateway", "crates/cbgpu-ai-handoff", "crates/cbgpu-contests-api"]
+members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers", "crates/cbgpu-compose-worker", "crates/cbgpu-contest-teams", "crates/cbgpu-backup", "crates/cbgpu-ops", "crates/cbgpu-domains", "crates/cbgpu-delivery", "crates/cbgpu-ai-documents", "crates/cbgpu-ai-store", "crates/cbgpu-routing", "crates/cbgpu-admin-ops", "crates/cbgpu-robotics", "crates/cbgpu-ai", "crates/cbgpu-ai-inference", "crates/cbgpu-ai-models", "crates/cbgpu-edge-policy", "crates/cbgpu-gpu-gateway", "crates/cbgpu-ai-handoff", "crates/cbgpu-contests-api", "crates/cbgpu-contest-tokens"]
 exclude = ["crates/cbgpu-accounts"]
 resolver = "2"
 
