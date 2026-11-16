@@ -24,6 +24,16 @@ async fn real_pg17_oracle_observes_rls_revocation_and_existing_registration_rule
     for _ in 0..2 {
         sqlx::raw_sql(&migration).execute(&pool).await.unwrap();
     }
+    let resource_oracle = std::fs::read_to_string(
+        repo.join("supabase/migrations/20261116235440_contest_account_resource_oracle.sql"),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        sqlx::raw_sql(&resource_oracle)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
     for role in ["anon", "authenticated"] {
         let mut tx = pool.begin().await.unwrap();
         sqlx::query(&format!("SET LOCAL ROLE {role}"))
@@ -139,6 +149,34 @@ async fn real_pg17_oracle_observes_rls_revocation_and_existing_registration_rule
     assert_eq!(verifier.active(session, owner).await.unwrap(), None);
     sqlx::query("UPDATE auth.users SET deleted_at=NULL WHERE id=$1")
         .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // A verified scoped guest can register without legacy blanket approval;
+    // an approved legacy profile cannot bypass a resource revocation.
+    sqlx::raw_sql("CREATE SCHEMA cbgpu_accounts; CREATE TABLE cbgpu_accounts.fixture_resource(subject uuid,enabled boolean); CREATE FUNCTION cbgpu_accounts.can_user_use_resource(subject_id uuid,resource text,target_school text) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$SELECT coalesce((SELECT enabled FROM cbgpu_accounts.fixture_resource WHERE subject=subject_id AND resource='contests' AND target_school='cbsh'),false)$$;").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO cbgpu_accounts.fixture_resource VALUES($1,true)")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE public.profiles SET is_approved=false WHERE id=$1")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(verifier.active(session, owner).await.unwrap(), Some(true));
+    sqlx::query("UPDATE cbgpu_accounts.fixture_resource SET enabled=false")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE public.profiles SET is_approved=true WHERE id=$1")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(verifier.active(session, owner).await.unwrap(), Some(false));
+    sqlx::raw_sql("DROP SCHEMA cbgpu_accounts CASCADE")
         .execute(&pool)
         .await
         .unwrap();
