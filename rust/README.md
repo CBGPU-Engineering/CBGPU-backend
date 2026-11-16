@@ -183,10 +183,16 @@ cleanup. A non-root read-only container test verifies readiness and disabled-wri
 behavior. The obsolete Python source and dependencies are retired from the
 materials repository after this handoff.
 
-The frontend deployment supervisor now requires the Rust worker at
+The active frontend deployment supervisor uses the Rust worker at
 `~/.local/lib/cbgpu-rust/workers/cbgpu-front-worker`. Build it with
 `cargo build --release --locked -p cbgpu-front-worker` from `rust/`, then
 install that binary before starting the deployment supervisor. The Python
 build-worker source is retired; missing Rust binaries fail closed without
 silently selecting the old implementation. The deployment control API and
 Compose executor are tracked separately and remain to be converted.
+
+The live supervisor was switched to the TypeScript release 9fad69d after its
+exact CI run passed and both build queues and existing connections were empty.
+Project production pointers, deployment results and Compose state were compared
+before and after the handoff. Only the frontend build worker is Rust; the
+control API remains TypeScript and the Compose build worker remains Python.

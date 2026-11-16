@@ -45,8 +45,9 @@
         "rust/compat/worker-command.mts",
         "deploy/server.mts"
       ],
-      "status": "implemented_not_active",
-      "data": "filesystem"
+      "status": "live",
+      "data": "filesystem",
+      "activation": "Deployment supervisor release 9fad69d uses installed Rust binary; existing project, deployment and Compose state verified unchanged during handoff."
     },
     {
       "id": "deployment-ingress",
