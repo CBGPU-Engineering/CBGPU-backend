@@ -52,6 +52,14 @@ fn diagnostics_are_service_managed_even_with_table_wide_authenticated_update() {
             "-d",
             "--name",
             &name,
+            "--network",
+            "none",
+            "--memory",
+            "256m",
+            "--cpus",
+            "1",
+            "--tmpfs",
+            "/var/lib/postgresql/data:rw,size=192m",
             "--label",
             "cbgpu.test=native-cpu-diagnostics",
             "-e",
@@ -63,10 +71,19 @@ fn diagnostics_are_service_managed_even_with_table_wide_authenticated_update() {
     assert!(output.status.success());
     let mut ready = false;
     for _ in 0..100 {
-        if Command::new("docker")
-            .args(["exec", &name, "pg_isready", "-U", "postgres"])
+        // pg_isready can see the temporary initialization server just before it
+        // exits. Wait for the entrypoint's final-server marker as well.
+        let initialized = Command::new("docker")
+            .args(["logs", &name])
             .output()
-            .is_ok_and(|r| r.status.success())
+            .is_ok_and(|r| {
+                String::from_utf8_lossy(&r.stdout).contains("PostgreSQL init process complete")
+            });
+        if initialized
+            && Command::new("docker")
+                .args(["exec", &name, "pg_isready", "-U", "postgres"])
+                .output()
+                .is_ok_and(|r| r.status.success())
         {
             ready = true;
             break;
