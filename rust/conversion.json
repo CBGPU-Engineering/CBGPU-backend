@@ -71,13 +71,11 @@
       "id": "compose-executor",
       "contract": "Validation, Docker builds, health failures, storage budgets and retained volumes",
       "sources": [
-        "deploy/compose-worker.py",
-        "deploy/compose-manager.mts",
-        "deploy/compose-storage.py",
-        "deploy/docker-log-proxy.mts"
+        "rust/crates/cbgpu-compose-worker",
+        "deploy/compose-manager.mts"
       ],
-      "status": "not_started",
-      "data": "SQLite -> PostgreSQL"
+      "status": "implemented_not_active",
+      "data": "Named Docker volumes retained; existing control state remains under deployment-control migration"
     },
     {
       "id": "careers",

@@ -75,3 +75,7 @@ jobs:
           cargo run --locked --manifest-path rust/Cargo.toml -p cbgpu-core -- migrate
           cargo test --locked --manifest-path rust/Cargo.toml --test postgres -- --ignored
           cargo test --locked --manifest-path rust/Cargo.toml --test careers_postgres -- --ignored
+      - name: Isolated Rust Compose contracts
+        env:
+          CBGPU_COMPOSE_RUN_DOCKER_TEST: '1'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-compose-worker --test docker_contract -- --ignored

@@ -196,3 +196,14 @@ exact CI run passed and both build queues and existing connections were empty.
 Project production pointers, deployment results and Compose state were compared
 before and after the handoff. Only the frontend build worker is Rust; the
 control API remains TypeScript and the Compose build worker remains Python.
+
+
+`cbgpu-compose-worker` owns native Compose validation, managed configuration,
+isolated buildx builds, readiness, failure evidence, retained data volumes and
+storage measurement. Install its release binary alongside the frontend worker
+in `~/.local/lib/cbgpu-rust/workers/` before starting the deployment supervisor.
+The supervisor passes `CBGPU_COMPOSE_BASE` privately. `--measure` accepts the
+existing deployment result on stdin; `--capture-existing PROJECT_UUID` preserves
+the current SQLite control database solely for compatibility while control-state
+migration to PostgreSQL remains tracked separately. It never creates a new
+production database. Python execution and verification helpers are retired.

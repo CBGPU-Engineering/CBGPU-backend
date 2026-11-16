@@ -1,0 +1,19 @@
+[package]
+name = "cbgpu-compose-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "io-std", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+uuid = { version = "1", features = ["v4"] }
+regex = "1"
+sha2 = "0.10"
+walkdir = "2"
+chrono = {version="0.4",default-features=false,features=["clock"]}
+sqlx = { version="0.8",default-features=false,features=["runtime-tokio","sqlite"] }
+[dev-dependencies]
+tempfile = "3"

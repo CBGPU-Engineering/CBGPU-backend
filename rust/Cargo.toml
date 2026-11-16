@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers"]
+members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers", "crates/cbgpu-compose-worker"]
 resolver = "2"
 
 [workspace.package]
