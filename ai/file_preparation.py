@@ -64,7 +64,6 @@ class FilePreparation:
         timer = None
         try:
             if suffix in IMAGE_TYPES | {'.pdf'}:
-                script = Path(__file__).with_name('ocr') / 'extract.py'
                 source = (self.store.root / 'uploads' / id).resolve(strict=True)
                 args = ['docker', 'run', '--rm', '--name', name, '--network', 'none',
                         '--label', 'cbgpu.ocr.managed=true', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
@@ -72,7 +71,6 @@ class FilePreparation:
                         '--tmpfs', '/tmp:rw,nosuid,nodev,size=128m',
                         '--user', f'{os.getuid()}:{os.getgid()}',
                         '--mount', f'type=bind,src={source},dst=/input,readonly',
-                        '--mount', f'type=bind,src={script},dst=/extract.py,readonly',
                         'cbgpu-ocr:1', '/input', suffix]
                 process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
                 def expire():

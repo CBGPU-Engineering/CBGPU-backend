@@ -141,9 +141,15 @@ arm/e-stop heartbeats. Hardware drivers and Arduino watchdog remain robot-local.
 Build the CPU-only OCR runtime before deploying a release that uses it:
 
 ```bash
-docker build -t cbgpu-ocr:1 ai/ocr
+rustup target add x86_64-unknown-linux-musl
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld"
+RUSTFLAGS='-C linker-flavor=ld.lld' cargo build --locked --release --target x86_64-unknown-linux-musl --manifest-path rust/Cargo.toml -p cbgpu-ai-documents
+CBGPU_OCR_BUILD_DIR=$(mktemp -d)
+cp ai/ocr/Dockerfile "$CBGPU_OCR_BUILD_DIR/Dockerfile"
+cp rust/target/x86_64-unknown-linux-musl/release/cbgpu-ai-documents "$CBGPU_OCR_BUILD_DIR/cbgpu-ai-documents"
+docker build -t cbgpu-ocr:1 "$CBGPU_OCR_BUILD_DIR"
 ```
 
-The worker reads a single uploaded file in an offline, read-only container with two CPU cores, 1 GB RAM and a 128 MB temporary filesystem. It extracts native PDF text and recognizes scanned pages with Korean and English language packs. Each page has a timeout and a document has a four-minute deadline. Cached extraction remains private to its upload owner, is reused in subsequent project questions, and is removed with the upload. After a service interruption, the UI can retry an unfinished preparation. Queued document-summary tasks use the same preparation before acquiring a GPU.
+The Rust worker uses native Poppler, ImageMagick and Tesseract without Python. It reads a single uploaded file in an offline, read-only container with two CPU cores, 1 GB RAM and a 128 MB temporary filesystem. It extracts native PDF text and recognizes scanned pages with Korean and English language packs. Each page has a timeout and a document has a four-minute deadline. Cached extraction remains private to its upload owner, is reused in subsequent project questions, and is removed with the upload. After a service interruption, the UI can retry an unfinished preparation. Queued document-summary tasks use the same preparation before acquiring a GPU.
 
 Browser chat accepts up to three attachments of 8 MB each and PDFs of up to 100 pages. Document-summary uploads retain the existing larger PDF upload allowance. OCR warnings identify low-confidence or empty pages and truncated extraction. Recognition quality for handwriting, equations and complex tables depends on the source document.
