@@ -23,7 +23,8 @@ pub fn extract_zip_with_floor(source: &Path, destination: &Path, min_free: u64) 
         let mut item = archive
             .by_index(i)
             .map_err(|_| fail("Invalid ZIP entry", 400))?;
-        let relative = safe_relative(item.name())?;
+        let entry_name = item.name().map_err(|_| fail("Invalid ZIP entry name", 400))?;
+        let relative = safe_relative(&entry_name)?;
         if item.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
             return Err(fail("ZIP symlinks are not supported", 400));
         }
