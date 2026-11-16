@@ -25,9 +25,7 @@ fn fixture() -> App {
 async fn python_compatible_tokens_expire_and_cannot_be_forged() {
     let app = fixture();
     // Python uses UTF-8 bytes of the key's hexadecimal text, not decoded bytes.
-    let output=std::process::Command::new("python3").args(["-c","import hmac,hashlib; s='1700000000.'+'a'*32; print(s+'.'+hmac.new(b'0123456789abcdef'*4,s.encode(),hashlib.sha256).hexdigest())"]).output().unwrap();
-    let token = String::from_utf8(output.stdout).unwrap();
-    let token = token.trim();
+    let token = include_str!("fixtures/legacy-token.txt").trim();
     assert!(valid_token(&app.key, token, 1700000000));
     assert!(valid_token(&app.key, token, 1700007199));
     assert!(!valid_token(&app.key, token, 1700007200));
@@ -39,34 +37,9 @@ async fn python_compatible_tokens_expire_and_cannot_be_forged() {
 
 #[test]
 fn resend_retry_body_is_byte_identical_to_the_original_sender() {
-    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../careers");
-    let script = r#"
-import sys,contextlib,os,json
-sys.path.insert(0,sys.argv[1]); import server as s
-class DB:
- def execute(self,*args): return self
- def commit(self): pass
- def fetchall(self): return [{'id':'CB-261116-A1B2C3D4','role':'frontend'}]
-@contextlib.contextmanager
-def connect(): yield DB()
-class Reply:
- def __enter__(self): return self
- def __exit__(self,*args): pass
- def read(self): return b'{"id":"synthetic-provider-ack"}'
-def send(request,timeout):
- sys.stdout.buffer.write(request.data)
- return Reply()
-s.connect=connect;s.urllib.request.urlopen=send
-os.environ.pop('CAREERS_MAIL_ENV',None);os.environ['RESEND_API_KEY']='re_test_only'
-s.process_outbox()
-"#;
-    let output = std::process::Command::new("python3")
-        .args(["-c", script, source.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
+    // Frozen bytes captured with a mocked provider from the retired sender at f847d74.
     assert_eq!(
-        output.stdout,
+        include_bytes!("fixtures/legacy-notification.json"),
         cbgpu_careers::outbox::mail_body("프론트엔드 개발", "CB-261116-A1B2C3D4").as_bytes()
     );
 }
