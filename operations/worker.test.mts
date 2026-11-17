@@ -86,3 +86,27 @@ test('scheduled check samples history only on 5-minute marks', async () => {
     }
   } finally { globalThis.fetch = realFetch }
 });
+
+test('GPU gateway 401 (signed-out visitor) counts as healthy, other 4xx/5xx do not', async () => {
+  const realFetch = globalThis.fetch;
+  const status: Record<string, number> = {};
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input?.url ?? input);
+    const gpu = url.match(/gpu\.cbgpu\.com\/(\d)\/login/);
+    return new Response('x', {status: gpu ? (status['gpu' + gpu[1]] ?? 401) : url.includes('docs.') ? 500 : 200});
+  }) as typeof fetch;
+  try {
+    status.gpu2 = 502;
+    const puts: string[] = [];
+    let pending: Promise<unknown> = Promise.resolve();
+    const realDate = Date, fixed = realDate.parse('2026-11-17T10:07:20.000Z');
+    class FakeDate extends realDate { constructor(value?: any) { super(value === undefined ? fixed : value) } static now() { return fixed } }
+    (globalThis as any).Date = FakeDate;
+    try { await worker.scheduled({}, fakeEnv({failures: 0, successes: 0, incident: false}, puts), {waitUntil: (p: Promise<unknown>) => { pending = p }}); await pending } finally { (globalThis as any).Date = realDate }
+    const saved = puts.map(p => p.replace(/^monitor:/, '')).map(p => { try { return JSON.parse(p) } catch { return null } }).find(Boolean);
+    assert.equal(saved.checks.gpu1, true, '401 means the gateway is up');
+    assert.equal(saved.checks.gpu2, false, '502 is a real failure');
+    assert.equal(saved.checks.docs, false, '500 on a normal site is a failure');
+    assert.equal(saved.checks.website, true);
+  } finally { globalThis.fetch = realFetch }
+});
