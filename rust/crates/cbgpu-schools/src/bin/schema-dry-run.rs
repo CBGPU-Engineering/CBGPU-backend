@@ -330,6 +330,7 @@ fn main() -> Result<()> {
         "20261117092500_portal_principal_authority.sql",
         "20261117093022_equipment_operator_school_authority.sql",
         "20261117095936_manufacturing_file_self_authority.sql",
+        "20261117103045_official_ad_revenue_reporting.sql",
     ];
     let sources = migrations
         .iter()
@@ -604,6 +605,25 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(
             repo.join("schema/tests/portal-auth/principal.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/ad-revenue/contract.sql"),
         )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;

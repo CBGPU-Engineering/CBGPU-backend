@@ -65,6 +65,8 @@ jobs:
         run: |
           docker pull postgres:17-alpine
           cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-portal-auth --test postgres -- --ignored
+      - name: Official ad report transaction, privacy and experiment contracts
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-ad-revenue --test postgres -- --ignored
       - name: Build static ingress binary
         env:
           CBGPU_SOURCE_SHA: ${{ github.sha }}
