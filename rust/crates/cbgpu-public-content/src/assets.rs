@@ -1,4 +1,8 @@
 //! Opaque contest banner alias: fixed internal origin, private resolver, no redirects.
+//! Dedicated NOINHERIT login membership is required; raw auth/public/storage
+//! table or column privileges fail startup. Catalog OIDs avoid granting auth
+//! schema access merely to inspect privileges. Each connection SET ROLEs to the
+//! reviewed non-login resolver and enforces read-only transactions.
 use axum::{
     body::Body,
     http::{StatusCode, header},
@@ -30,9 +34,12 @@ impl Assets {
             .acquire_timeout(Duration::from_secs(3))
             .after_connect(|connection, _| {
                 Box::pin(async move {
+                    let safe:bool=sqlx::query_scalar("SELECT NOT login.rolsuper AND NOT login.rolbypassrls AND NOT login.rolcreatedb AND NOT login.rolcreaterole AND NOT login.rolreplication AND pg_has_role(session_user,'cbgpu_public_asset_reader','member') AND NOT pg_has_role(session_user,'authenticated','member') AND NOT pg_has_role(session_user,'service_role','member') AND NOT reader.rolsuper AND NOT reader.rolbypassrls AND NOT reader.rolcanlogin AND NOT reader.rolinherit AND NOT has_schema_privilege(session_user,'cbgpu_schools','CREATE') AND has_function_privilege('cbgpu_public_asset_reader',(SELECT p.oid FROM pg_proc p JOIN pg_namespace pn ON pn.oid=p.pronamespace WHERE pn.nspname='cbgpu_schools' AND p.proname='public_contest_banner' AND p.proargtypes='2950'::oidvector),'EXECUTE') AND NOT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('auth','public','storage','cbgpu_schools') AND c.relkind IN('r','p','v','m','f') AND(has_table_privilege(session_user,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')OR has_any_column_privilege(session_user,c.oid,'SELECT,INSERT,UPDATE,REFERENCES')OR has_table_privilege('cbgpu_public_asset_reader',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')OR has_any_column_privilege('cbgpu_public_asset_reader',c.oid,'SELECT,INSERT,UPDATE,REFERENCES'))) FROM pg_roles login CROSS JOIN pg_roles reader WHERE login.rolname=session_user AND reader.rolname='cbgpu_public_asset_reader'").fetch_one(&mut *connection).await?;
+                    if !safe{return Err(sqlx::Error::Protocol("Public asset login must be a dedicated EXECUTE-only reader".into()));}
                     sqlx::query("SET ROLE cbgpu_public_asset_reader")
                         .execute(&mut *connection)
                         .await?;
+                    sqlx::query("SET default_transaction_read_only=on").execute(&mut *connection).await?;
                     sqlx::query("SET statement_timeout='3000ms'")
                         .execute(connection)
                         .await?;
@@ -441,5 +448,104 @@ mod tests {
         );
         assert!(r.headers().get(header::LOCATION).is_none());
         assert_eq!(r.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    }
+    #[tokio::test]
+    #[ignore = "explicit private synthetic PostgreSQL HTTP stage only"]
+    async fn actual_stage_reader_rejects_raw_columns_and_authority_drift() {
+        let file = std::env::var("CBGPU_PUBLIC_ASSET_STAGE_DATABASE_URL_FILE")
+            .expect("Private stage DSN file required");
+        let meta = std::fs::symlink_metadata(&file).unwrap();
+        assert!(meta.is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(meta.permissions().mode() & 0o077, 0)
+        }
+        let dsn = std::fs::read_to_string(file).unwrap();
+        let url = Url::parse(dsn.trim()).unwrap();
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        assert_eq!(url.port(), Some(55485));
+        assert_eq!(url.username(), "cbgpu_stage_public_asset");
+        let store = Assets::connect(dsn.trim(), "http://127.0.0.1:9", None)
+            .await
+            .unwrap();
+        let role: String = sqlx::query_scalar("select current_user::text")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(role, "cbgpu_public_asset_reader");
+        for query in [
+            "select id from auth.users limit 1",
+            "select full_name from public.profiles limit 1",
+            "select name from storage.objects limit 1",
+            "set role authenticated",
+        ] {
+            assert!(
+                sqlx::query(query).execute(&store.pool).await.is_err(),
+                "raw authority must remain denied"
+            )
+        }
+        assert!(store.resolve(Uuid::nil()).await.unwrap().is_none());
+        let name = std::env::var("CBGPU_PUBLIC_ASSET_STAGE_CONTAINER").unwrap();
+        assert!(
+            name.strip_prefix("cbgpu-school-http-stage-")
+                .is_some_and(|x| !x.is_empty() && x.bytes().all(|b| b.is_ascii_digit()))
+        );
+        fn sql(name: &str, statement: &str) {
+            use std::io::Write;
+            use std::process::{Command, Stdio};
+            let mut c = Command::new("docker")
+                .args([
+                    "exec",
+                    "-i",
+                    name,
+                    "psql",
+                    "-h",
+                    "/tmp",
+                    "-U",
+                    "cbgpu_clone_bootstrap",
+                    "-d",
+                    "postgres",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-qAt",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            c.stdin
+                .take()
+                .unwrap()
+                .write_all(statement.as_bytes())
+                .unwrap();
+            assert!(c.wait().unwrap().success());
+        }
+        struct Reset(String);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                sql(
+                    &self.0,
+                    "revoke select(full_name)on public.profiles from cbgpu_stage_public_asset;",
+                )
+            }
+        }
+        sql(
+            &name,
+            "grant select(full_name)on public.profiles to cbgpu_stage_public_asset;",
+        );
+        let reset = Reset(name);
+        assert!(
+            Assets::connect(dsn.trim(), "http://127.0.0.1:9", None)
+                .await
+                .is_err()
+        );
+        drop(reset);
+        assert!(
+            Assets::connect(dsn.trim(), "http://127.0.0.1:9", None)
+                .await
+                .is_ok()
+        );
     }
 }
