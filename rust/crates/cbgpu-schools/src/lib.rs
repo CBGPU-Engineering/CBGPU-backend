@@ -327,6 +327,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         "cbgpu_school_api"
     };
     let (rpc, rpc_action) = match action {
+        "draft_create" => ("cbgpu_school_catalog_application_api", "draft_create"),
         "feature_operator_list" => ("cbgpu_school_feature_operator_api", "list"),
         "feature_operator_review" => ("cbgpu_school_feature_operator_api", "review"),
         "publication_list" => ("cbgpu_public_project_api", "list"),

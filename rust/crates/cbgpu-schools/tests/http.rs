@@ -278,3 +278,39 @@ async fn operator_review_uses_real_caller_and_route_identity() {
     assert_eq!(r.status(), 400);
     task.abort();
 }
+
+#[tokio::test]
+async fn catalog_selection_is_forwarded_to_authoritative_draft_creation() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|| async { Json(json!({"id":"trusted"})) }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_catalog_application_api",
+            post(|headers: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer fixture");
+                assert_eq!(v["action"], "draft_create");
+                assert_eq!(v["payload"]["catalog_school_id"], "official-1192068");
+                Json(json!({"application":{"catalog_school_id":"official-1192068","revision":1}}))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let r = router(config(true, format!("http://{address}")))
+        .oneshot(
+            Request::post("/v1/school-applications")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(r#"{"catalog_school_id":"official-1192068"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        body(r).await["application"]["catalog_school_id"],
+        "official-1192068"
+    );
+    task.abort();
+}
