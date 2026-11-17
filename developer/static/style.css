@@ -52,3 +52,5 @@ input,select,textarea,.field select,.sql-editor,.editor-value textarea,.button,.
 .login-card label{font-size:14px;font-weight:600}
 .login-card input{border-radius:10px;padding:10px 14px;font-size:15px;font-weight:500}
 .login-card .button{min-height:48px;border-radius:10px;font-size:15px}
+
+[data-theme="dark"] img[src*="assets/logo.png"]{content:url("/static/assets/symbol_white.svg");filter:none!important;opacity:1}

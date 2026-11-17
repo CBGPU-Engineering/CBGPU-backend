@@ -27,7 +27,7 @@ export function renderEmail(options: {
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">${esc(options.preview)}</div>
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f6fb;"><tr><td align="center" style="padding:32px 16px;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;background:#ffffff;border:1px solid #e4e7ec;border-radius:20px;">
-<tr><td style="padding:28px 32px 24px;border-bottom:1px solid #edf0f5;"><a href="${SITE_URL}" style="text-decoration:none;color:#191f28;"><img src="${SITE_URL}/img/cbgpu-logo.png" width="40" height="40" alt="CBGPU 로고" style="vertical-align:middle;border:0;display:inline-block;object-fit:contain;"><span style="vertical-align:middle;font-size:23px;line-height:40px;font-weight:800;padding-left:10px;letter-spacing:-0.7px;">CBGPU</span></a></td></tr>
+<tr><td style="padding:28px 32px 24px;border-bottom:1px solid #edf0f5;"><a href="${SITE_URL}" style="text-decoration:none;color:#191f28;"><img src="${SITE_URL}/brand/v1/symbol_black.png" width="40" height="40" alt="CBGPU 로고" style="vertical-align:middle;border:0;display:inline-block;object-fit:contain;"><span style="vertical-align:middle;font-size:23px;line-height:40px;font-weight:800;padding-left:10px;letter-spacing:-0.7px;">CBGPU</span></a></td></tr>
 <tr><td style="padding:32px;">
 <h1 style="margin:0 0 16px;font-size:26px;line-height:1.4;letter-spacing:-0.7px;font-weight:800;color:#191f28;">${esc(options.title)}</h1>
 <p style="margin:0 0 24px;font-size:15px;line-height:1.8;color:#565d66;">${esc(options.description)}</p>
