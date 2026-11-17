@@ -6,6 +6,14 @@ select ('fa100000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,'synthetic-acade
 insert into auth.sessions(id,user_id) select ('fa200000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,('fa100000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid from generate_series(1,5)x;
 insert into cbgpu_schools.memberships(user_id,school_id,membership_type,status,verified,school_roles,student_number,student_number_school_year)
 select ('fa100000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,'cbsh',case when x=4 then 'TEACHER' when x=5 then 'EXTERNAL' else 'STUDENT' end,'ACTIVE',true,case when x=5 then array['SCHOOL_ADMIN'] else '{}'::text[] end,case when x<=3 then x::text||'198' end,extract(year from now())::integer from generate_series(1,5)x;
+insert into public.reservations(id,user_id,gpu_id,status,start_time,end_time) values('fa300000-0000-4000-8000-000000000001','fa100000-0000-4000-8000-000000000001',1,'approved',now()+interval '4000 days',now()+interval '4000 days 1 hour');
+select set_config('request.jwt.claims','{"sub":"fa100000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fa200000-0000-4000-8000-000000000001"}',true);
+set local role authenticated;
+do $$begin if not public.get_is_approved(auth.uid()) then raise exception 'VERIFIED_MEMBER_CANNOT_USE_LEGACY_ADAPTER';end if;end$$;
+reset role;
+set local role service_role;
+do $$begin if not exists(select 1 from public.cbgpu_service_gpu_assignments() where id='fa300000-0000-4000-8000-000000000001') then raise exception 'FRESH_ASSIGNMENT_NOT_VISIBLE';end if;end$$;
+reset role;
 create temp table academic_before as select id,account_type,account_status,student_id,student_id_school_year from public.profiles where id::text like 'fa100000%';
 create temp table academic_fixture(k text,v jsonb);grant all on academic_fixture to authenticated;
 -- Other-school policies fail closed even if an administrator config imitates CBsh.
@@ -49,6 +57,18 @@ end$$;
 reset role;
 do $$begin if not exists(select 1 from cbgpu_schools.memberships where user_id='fa100000-0000-4000-8000-000000000001' and student_number='2198' and not verified and status='PENDING_VERIFICATION') then raise exception 'REVERIFY_MUST_REMAIN_PENDING';end if;end$$;
 do $$begin if exists((select id,account_type,account_status,student_id,student_id_school_year from public.profiles where id::text like 'fa100000%') except select * from academic_before) then raise exception 'LEGACY_PROFILE_CHANGED';end if;end$$;
+select set_config('request.jwt.claims','{"sub":"fa100000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fa200000-0000-4000-8000-000000000001"}',true);
+set local role authenticated;
+do $$begin
+ if public.get_is_approved(auth.uid()) then raise exception 'ROLLOVER_BORROWED_PRIMARY_APPROVAL';end if;
+ if (public.cbgpu_self_resource_access('cbsh')#>>'{resources,gpu}')::boolean then raise exception 'REVERIFY_GPU_ACCESS_RETAINED';end if;
+ begin perform * from public.cbgpu_service_gpu_assignments();raise exception 'USER_CONTROLLER_ASSIGNMENTS_LEAK';exception when insufficient_privilege then null;end;
+end$$;
+reset role;
+set local role service_role;
+do $$begin if exists(select 1 from public.cbgpu_service_gpu_assignments() where id='fa300000-0000-4000-8000-000000000001') then raise exception 'ROLLOVER_ASSIGNMENT_NOT_REVOKED';end if;end$$;
+reset role;
+do $$begin if not exists(select 1 from public.reservations where id='fa300000-0000-4000-8000-000000000001' and status='approved') then raise exception 'RESERVATION_HISTORY_MUTATED';end if;end$$;
 update auth.sessions set not_after=now()-interval '1 second' where id='fa200000-0000-4000-8000-000000000005';
 select set_config('request.jwt.claims','{"sub":"fa100000-0000-4000-8000-000000000005","role":"authenticated","session_id":"fa200000-0000-4000-8000-000000000005"}',true);
 set local role authenticated;

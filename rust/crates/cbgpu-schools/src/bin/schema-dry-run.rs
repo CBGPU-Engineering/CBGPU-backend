@@ -318,6 +318,7 @@ fn main() -> Result<()> {
         "20261117040558_contest_identity_snapshot_consent.sql",
         "20261117043016_fresh_authenticated_resource_policies.sql",
         "20261117045629_school_academic_rollover.sql",
+        "20261117050216_legacy_school_resource_adapter.sql",
     ];
     let sources = migrations
         .iter()
