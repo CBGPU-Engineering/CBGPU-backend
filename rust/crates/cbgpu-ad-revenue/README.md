@@ -54,3 +54,13 @@ The ignored integration fixture uses disposable network-isolated PostgreSQL 17,
 not operating reports or registrations. The school schema dry-run also verifies
 this migration twice against a same-image operating-schema clone and rolls back
 synthetic reporting assertions.
+
+Local image verification on 2026-11-17 passed from clean allowlisted source
+`19d8229dec5c2bcc2306d2bc7ac840e912e984ca`: package-specific Docker build plus
+`CBGPU_CLOUD_TEST_PACKAGE=cbgpu-ad-revenue npm run test:container`.
+The fixture verified UID 65532, read-only filesystem, network-none, no mounts or
+published ports, bundled Cargo/source provenance and license notices, disabled
+API liveness, and graceful SIGTERM exit 0. The local review image was
+`sha256:35075655a4d4d07163fe50b58a9cc2c8cca3a8fb2b6d588d18d4246692ac1ac1`
+(12,489,250 bytes). This verifies the credential-free disabled container only;
+configured database connectivity, real imports and AWS operation remain untested.
