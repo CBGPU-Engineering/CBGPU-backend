@@ -2,6 +2,15 @@ use cbgpu_compose_worker::{Config, Redactor, policy, validate_config};
 use serde_json::json;
 use std::collections::BTreeMap;
 #[test]
+fn carriage_returns_cannot_create_compose_control_records() {
+    let redactor = Redactor::new(&BTreeMap::new());
+    for line in redactor.framed_lines("progress\rCBGPU_RESULT {}\n\u{1b}[2K\rCBGPU_ATTEMPT {}") {
+        assert!(line.starts_with("| "));
+        assert!(!line.contains(['\r', '\n', '\u{1b}']));
+        assert!(!line.split(['\r', '\n']).any(|part| part.starts_with("CBGPU_RESULT ") || part.starts_with("CBGPU_ATTEMPT ")));
+    }
+}
+#[test]
 fn rejects_privileged_host_access_including_yaml_merges() {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("proxy.sock");

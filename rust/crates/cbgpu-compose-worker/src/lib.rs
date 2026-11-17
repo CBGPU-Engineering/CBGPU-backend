@@ -123,9 +123,23 @@ impl Redactor {
             .replace_all(&text, "${1}[REDACTED]@")
             .into_owned()
     }
+    pub fn framed_lines(&self, text: &str) -> Vec<String> {
+        self.clean(text)
+            .lines()
+            .map(|line| {
+                format!(
+                    "| {}",
+                    line.chars()
+                        .map(|c| if c.is_control() { ' ' } else { c })
+                        .take(6000)
+                        .collect::<String>()
+                )
+            })
+            .collect()
+    }
     pub fn log(&self, text: &str) {
-        for line in self.clean(text).lines() {
-            println!("| {}", line.chars().take(6000).collect::<String>());
+        for line in self.framed_lines(text) {
+            println!("{line}");
         }
     }
 }

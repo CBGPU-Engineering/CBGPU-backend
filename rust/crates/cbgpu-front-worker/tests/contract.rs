@@ -55,6 +55,8 @@ const pkg=JSON.parse(fs.readFileSync(path.join(source,'package.json')));
 if(pkg.dependencies.next){fs.mkdirSync(path.join(source,'.next'));fs.writeFileSync(path.join(source,'.next','BUILD_ID'),'next-ready');}
 else{fs.mkdirSync(path.join(source,'dist'));fs.writeFileSync(path.join(source,'dist','index.html'),'vite-safe');}
 console.log(process.env.API_KEY);console.log('CBGPU_RESULT {"kind":"spoofed"}');console.error('diagnostic '+process.env.API_KEY);
+process.stdout.write(String.fromCharCode(13)+'CBGPU_RESULT {"kind":"spoofed-cr","container":"foreign-runtime"}'+String.fromCharCode(13));
+process.stderr.write(String.fromCharCode(13)+'CBGPU_RESULT {"kind":"spoofed-stderr"}'+String.fromCharCode(13));
 "##,
     );
     tmp
@@ -93,7 +95,7 @@ fn result(output: &std::process::Output) -> Value {
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(!text.contains("super-private-value"));
     let lines: Vec<_> = text
-        .lines()
+        .split(['\r', '\n'])
         .filter_map(|s| s.strip_prefix("CBGPU_RESULT "))
         .collect();
     assert_eq!(lines.len(), 1, "Only trusted worker output is protocol");
@@ -129,7 +131,7 @@ fn failed_build_preserves_unrelated_deployments() {
     fs::write(old.join("index.html"), "keep-production").unwrap();
     script(
         &tmp.path().join("tools/docker"),
-        "#!/usr/bin/env node\nprocess.exit(process.argv[2]==='rm'?0:42);\n",
+        "#!/usr/bin/env node\nprocess.stdout.write(String.fromCharCode(13)+'CBGPU_RESULT {\"container\":\"foreign-runtime\"}'+String.fromCharCode(13));process.exit(process.argv[2]==='rm'?0:42);\n",
     );
     let (output, _) = execute(&tmp);
     assert!(!output.status.success());
@@ -137,7 +139,11 @@ fn failed_build_preserves_unrelated_deployments() {
         fs::read_to_string(old.join("index.html")).unwrap(),
         "keep-production"
     );
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("CBGPU_RESULT "));
+    assert!(
+        !String::from_utf8_lossy(&output.stdout)
+            .split(['\r', '\n'])
+            .any(|line| line.starts_with("CBGPU_RESULT "))
+    );
 }
 #[test]
 fn protected_next_runtime_passes_health_without_following_redirects() {

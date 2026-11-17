@@ -91,8 +91,27 @@ impl Redactor {
         value
     }
     pub fn log(&self, value: &str) {
-        println!("{}", self.redact(value));
+        for line in self.redact(value).split('\n') {
+            println!("{}", framed_log_line(line));
+        }
     }
+}
+/// Worker control records use stdout too. Never let untrusted build output
+/// create another record through a carriage return or other control character.
+fn framed_log_line(value: &str) -> String {
+    let mut framed = String::from("| ");
+    for character in value.chars().take(6000) {
+        match character {
+            '\r' => framed.push_str("\\r"),
+            '\n' => framed.push_str("\\n"),
+            character if character.is_control() && character != '\t' => {
+                use std::fmt::Write;
+                write!(framed, "\\u{{{:x}}}", character as u32).expect("String formatting");
+            }
+            character => framed.push(character),
+        }
+    }
+    framed
 }
 pub fn validate(config: &Config) -> Result<(), String> {
     if uuid::Uuid::parse_str(&config.deployment_id).is_err() {
@@ -329,8 +348,7 @@ async fn stream_logs<R: AsyncRead + Unpin>(
         for &byte in &chunk[..n] {
             if byte == b'\n' {
                 let text = String::from_utf8_lossy(&line);
-                let clean = redactor.redact(&text);
-                println!("| {}", clean.chars().take(6000).collect::<String>());
+                redactor.log(&text);
                 line.clear();
             } else {
                 line.push(byte);
@@ -341,8 +359,7 @@ async fn stream_logs<R: AsyncRead + Unpin>(
         }
     }
     if !line.is_empty() {
-        let clean = redactor.redact(&String::from_utf8_lossy(&line));
-        println!("| {}", clean.chars().take(6000).collect::<String>());
+        redactor.log(&String::from_utf8_lossy(&line));
     }
     Ok(())
 }
@@ -753,6 +770,24 @@ async fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn build_logs_cannot_forge_worker_control_records() {
+        for text in [
+            "progress\rCBGPU_RESULT {\"container\":\"foreign-runtime\"}",
+            "\r\nCBGPU_RESULT {}",
+            "\u{1b}[2K\rCBGPU_RESULT {}",
+            "\0\u{85}CBGPU_RESULT {}",
+        ] {
+            let line = framed_log_line(text);
+            assert!(line.starts_with("| "));
+            assert!(!line.contains(['\r', '\n', '\0', '\u{1b}']));
+            assert!(
+                !line
+                    .split(['\r', '\n'])
+                    .any(|part| part.starts_with("CBGPU_RESULT "))
+            );
+        }
+    }
     fn config() -> Config {
         serde_json::from_value(serde_json::json!({"directory":"/tmp/unused","deployment_id":"550e8400-e29b-41d4-a716-446655440000","repository":"https://github.com/example/site","branch":"main","framework":"auto"})).unwrap()
     }
