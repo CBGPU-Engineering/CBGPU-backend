@@ -25,7 +25,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if std::env::args().any(|value| value == "--help") {
         println!(
-            "Default-off native deployment control candidate. Required CBGPU_DEPLOY_CONTROL_ENABLED=1, CBGPU_DEPLOY_DATABASE_URL, CBGPU_DEPLOY_KEY_FILE(existing raw32-byte legacy key), CBGPU_DEPLOY_BACKEND_KEY_FILE, CBGPU_DEPLOY_DATA. Optional workers require CBGPU_DEPLOY_WORKERS_ENABLED=1 plus trusted FRONT_WORKER/COMPOSE_WORKER/DOMAINS_WORKER absolute ELF paths. No automatic schema/import or live cutover."
+            "Default-off native deployment control candidate. Required CBGPU_DEPLOY_CONTROL_ENABLED=1, CBGPU_DEPLOY_DATABASE_URL, CBGPU_DEPLOY_KEY_FILE(existing raw32-byte legacy key), CBGPU_DEPLOY_BACKEND_KEY_FILE, CBGPU_DEPLOY_DATA. Optional workers require CBGPU_DEPLOY_WORKERS_ENABLED=1 plus trusted FRONT_WORKER/COMPOSE_WORKER/DOMAINS_WORKER absolute ELF paths. No automatic schema/import or live cutover. Reverse commands: --export-legacy PATH, --inspect-reverse PATH, --verify-reverse-current PATH, --import-reverse-bundle PATH. Export/import/current-verification require --confirm-stopped-writers and CBGPU_DEPLOY_WRITERS_FENCED=1; bounds --max-rows=N --max-bytes=N."
         );
         return Ok(());
     }
@@ -53,6 +53,85 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         data: data.clone(),
         free_floor: 5 * 1024 * 1024 * 1024,
     };
+    if args.get(1).is_some_and(|arg| {
+        matches!(
+            arg.as_str(),
+            "--export-legacy"
+                | "--import-reverse-bundle"
+                | "--inspect-reverse"
+                | "--verify-reverse-current"
+        )
+    }) {
+        let command = &args[1];
+        let source = args.get(2).ok_or("Reverse snapshot path required")?;
+        let mut options = cbgpu_deploy_control::reverse::Options::default();
+        let mut confirmed = false;
+        for arg in &args[3..] {
+            if arg == "--confirm-stopped-writers" {
+                confirmed = true
+            } else if let Some(value) = arg.strip_prefix("--max-rows=") {
+                options.max_rows = value.parse()?
+            } else if let Some(value) = arg.strip_prefix("--max-bytes=") {
+                options.max_bytes = value.parse()?
+            } else {
+                return Err("Unknown reverse snapshot option".into());
+            }
+        }
+        options.writers_fenced =
+            confirmed && std::env::var("CBGPU_DEPLOY_WRITERS_FENCED").as_deref() == Ok("1");
+        let result = if command == "--inspect-reverse" {
+            cbgpu_deploy_control::reverse::inspect_bundle(
+                &store,
+                std::path::Path::new(source),
+                &options,
+            )?
+        } else {
+            if !options.writers_fenced {
+                return Err(
+                    "Explicit --confirm-stopped-writers and CBGPU_DEPLOY_WRITERS_FENCED=1 required"
+                        .into(),
+                );
+            }
+            let legacy: std::net::SocketAddr = std::env::var("CBGPU_DEPLOY_LEGACY_LISTEN")
+                .unwrap_or("127.0.0.1:3510".into())
+                .parse()?;
+            if !legacy.ip().is_loopback() {
+                return Err("Legacy listener must remain loopback-only".into());
+            }
+            for endpoint in [address, legacy] {
+                if tokio::net::TcpStream::connect(endpoint).await.is_ok() {
+                    return Err(
+                        "Deployment writer listener still active; reverse operation refused".into(),
+                    );
+                }
+            }
+            let _lock = WorkerLock::acquire(&data)?;
+            if command == "--verify-reverse-current" {
+                cbgpu_deploy_control::reverse::verify_current_bundle(
+                    &store,
+                    std::path::Path::new(source),
+                    &options,
+                )
+                .await?
+            } else if command == "--export-legacy" {
+                cbgpu_deploy_control::reverse::export_legacy(
+                    &store,
+                    std::path::Path::new(source),
+                    &options,
+                )
+                .await?
+            } else {
+                cbgpu_deploy_control::reverse::import_bundle(
+                    &store,
+                    std::path::Path::new(source),
+                    &options,
+                )
+                .await?
+            }
+        };
+        println!("{}", result);
+        return Ok(());
+    }
     if args.get(1).is_some_and(|v| v == "--import-snapshot") && args.len() == 3 {
         if std::env::var("CBGPU_DEPLOY_WRITERS_FENCED").as_deref() != Ok("1") {
             return Err("Explicit legacy writer fence confirmation required".into());

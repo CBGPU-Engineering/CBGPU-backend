@@ -35,3 +35,23 @@ the rollback checker rejects it. There is no automatic reverse SQLite exporter;
 use fix-forward or a separately reviewed reverse-state transfer. Never overwrite
 newer native state with the old snapshot. No production service, schema, queue,
 artifact directory or container is changed by workspace integration.
+
+## Reverse snapshots after native writes
+
+Reverse export writes a **new** private SQLite file plus `<file>.manifest.json`; it never overwrites the original SQLite or starts a legacy/native service. The six legacy runtime tables retain their IDs, ciphertext, project memberships, deployment history, artifact references, `requested_by`, and `access_state`. Terminal native work history is archived in the manifest and restored by reverse-bundle import, so it is not silently discarded by a legacy-only schema.
+
+The version `cbgpu-deploy-reverse-v1` manifest is authenticated and encrypted, not digitally signed. It uses the existing `Cipher` and existing 32-byte deployment key: random 12-byte nonce, AES-256-GCM ciphertext and 16-byte tag, encoded as Base64. No new key or custom cryptographic algorithm is introduced. The authenticated payload includes schema/SQLite SHA-256 proofs and the complete native state fingerprint. Files are created with mode 0600 in a private operator-owned directory; hard-link publication refuses an existing destination. Source tables are locked for a consistent snapshot, and active queue/build states cause refusal. Bounds default to 100,000 rows and 512 MiB of serialized metadata; `--max-rows=N` and `--max-bytes=N` are explicit bounded overrides.
+
+With the existing CLI environment configured and **both controllers/workers actually stopped and fenced**, use:
+
+```text
+cbgpu-deploy-control --export-legacy /absolute/private/new.sqlite --confirm-stopped-writers
+cbgpu-deploy-control --inspect-reverse /absolute/private/new.sqlite
+cbgpu-deploy-control --verify-reverse-current /absolute/private/new.sqlite --confirm-stopped-writers
+```
+
+Mutating commands and current-state verification also require `CBGPU_DEPLOY_WRITERS_FENCED=1`, a private controller lock, and closed configured native/legacy listeners. These checks do not replace an operator's verification of orphan/background writers. Keep writers fenced after verification. No command automatically switches listeners or imports a stale original snapshot.
+
+A reviewed legacy rollback can set `CBGPU_DEPLOY_LEGACY_DATABASE` to the **new** file and `CBGPU_DEPLOY_REVERSE_FINGERPRINT` to the fingerprint returned by the fresh verification. Without the database override, the legacy default path is unchanged. An override must authenticate the manifest with the existing key, match the expected fingerprint/artifact root, and match the file hash before SQLite is opened. The original database remains available as a separate historical snapshot.
+
+To restore a reviewed reverse bundle into a provisioned **empty** native database, use `--import-reverse-bundle /absolute/private/new.sqlite --confirm-stopped-writers` with the same fence requirements. Restoration is transactional, includes terminal work history, verifies the exact schema and full state fingerprint, and refuses an existing target or a changed/tampered bundle. Artifact paths are preserved; relocation is not performed implicitly.
