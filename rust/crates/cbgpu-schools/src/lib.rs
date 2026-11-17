@@ -151,6 +151,35 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         (["v1", "schools", school, "feature-requests"], &Method::POST) => {
             Some(("feature_request_create", json!({"school_id":school})))
         }
+        (["v1", "messaging", "preferences"], &Method::GET) => Some(("dm_preferences", json!({}))),
+        (["v1", "messaging", "preferences"], &Method::PATCH) => {
+            Some(("dm_preferences_save", json!({})))
+        }
+        (["v1", "direct-recipients"], &Method::GET) => Some(("dm_recipients", {
+            let mut fields = serde_json::Map::new();
+            for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+                if ["scope", "school_id"].contains(&k.as_ref()) {
+                    fields.insert(k.into_owned(), json!(v));
+                }
+            }
+            Value::Object(fields)
+        })),
+        (["v1", "direct-conversations"], &Method::GET) => Some(("dm_conversations", json!({}))),
+        (["v1", "direct-conversations"], &Method::POST) => {
+            Some(("dm_conversation_create", json!({})))
+        }
+        (["v1", "direct-conversations", id, "messages"], &Method::GET) => {
+            Some(("dm_direct_messages", json!({"conversation_id":id})))
+        }
+        (["v1", "direct-conversations", id, "messages"], &Method::POST) => {
+            Some(("dm_direct_send", json!({"conversation_id":id})))
+        }
+        (["v1", "direct-messages", id], &Method::DELETE) => {
+            Some(("dm_direct_delete", json!({"id":id})))
+        }
+        (["v1", "direct-messages", id, "report"], &Method::POST) => {
+            Some(("dm_direct_report", json!({"id":id})))
+        }
         (["v1", "messages"], &Method::GET) => Some(("messages", {
             let mut fields = query_fields.clone();
             for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
@@ -165,6 +194,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         (["v1", "messages", id, "report"], &Method::POST) => {
             Some(("message_report", json!({"id":id})))
         }
+        (["v1", "message-mutes"], &Method::GET) => Some(("message_mutes", json!({}))),
         (["v1", "message-mutes"], &Method::POST) => Some(("message_mute", json!({}))),
         (["v1", "publications"], &Method::GET) => Some(("publication_list", json!({}))),
         (["v1", "publications"], &Method::POST) => Some(("publication_save", json!({}))),
@@ -327,6 +357,20 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         "cbgpu_school_api"
     };
     let (rpc, rpc_action) = match action {
+        "dm_preferences"
+        | "dm_preferences_save"
+        | "dm_recipients"
+        | "dm_conversations"
+        | "dm_conversation_create"
+        | "dm_direct_messages"
+        | "dm_direct_send"
+        | "dm_direct_delete"
+        | "dm_direct_report" => (
+            "cbgpu_school_direct_messaging_api",
+            action.strip_prefix("dm_").unwrap(),
+        ),
+        "messages" | "message_create" | "message_delete" | "message_report" | "message_mute"
+        | "message_mutes" => ("cbgpu_school_messenger_api", action),
         "draft_create" => ("cbgpu_school_catalog_application_api", "draft_create"),
         "feature_operator_list" => ("cbgpu_school_feature_operator_api", "list"),
         "feature_operator_review" => ("cbgpu_school_feature_operator_api", "review"),

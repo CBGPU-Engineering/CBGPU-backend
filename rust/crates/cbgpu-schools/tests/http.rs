@@ -314,3 +314,85 @@ async fn catalog_selection_is_forwarded_to_authoritative_draft_creation() {
     );
     task.abort();
 }
+
+#[tokio::test]
+async fn direct_messaging_and_mute_routes_use_caller_jwt_and_bound_thread() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|| async { Json(json!({"id":"actual-caller"})) }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_direct_messaging_api",
+            post(|headers: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer fixture");
+                assert!(v["payload"].get("user_id").is_none());
+                match v["action"].as_str().unwrap() {
+                    "preferences" => Json(json!({"allow_direct_messages":false,"display_name":""})),
+                    "recipients" => {
+                        assert_eq!(v["payload"]["scope"], "SCHOOL");
+                        assert_eq!(v["payload"]["school_id"], "school-b");
+                        Json(json!({"items":[]}))
+                    }
+                    "direct_send" => {
+                        assert_eq!(
+                            v["payload"]["conversation_id"],
+                            "00000000-0000-4000-8000-000000000001"
+                        );
+                        assert_eq!(
+                            v["payload"]["client_message_id"],
+                            "00000000-0000-4000-8000-000000000002"
+                        );
+                        Json(json!({"message":{"id":"sent"},"duplicate":false}))
+                    }
+                    other => panic!("unexpected action {other}"),
+                }
+            }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_messenger_api",
+            post(|Json(v): Json<Value>| async move {
+                assert_eq!(v["action"], "message_mutes");
+                Json(json!({"items":[]}))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let app = router(config(true, format!("http://{address}")));
+    for path in [
+        "/v1/messaging/preferences",
+        "/v1/direct-recipients?scope=SCHOOL&school_id=school-b",
+        "/v1/message-mutes",
+    ] {
+        assert_eq!(
+            app.clone()
+                .oneshot(
+                    Request::get(path)
+                        .header("authorization", "Bearer fixture")
+                        .body(Body::empty())
+                        .unwrap()
+                )
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+    }
+    let r=app.clone().oneshot(Request::post("/v1/direct-conversations/00000000-0000-4000-8000-000000000001/messages").header("authorization","Bearer fixture").body(Body::from(r#"{"body":"Message","client_message_id":"00000000-0000-4000-8000-000000000002"}"#)).unwrap()).await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(body(r).await["message"]["id"], "sent");
+    let r = app
+        .oneshot(
+            Request::post("/v1/direct-conversations/00000000-0000-4000-8000-000000000001/messages")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(
+                    r#"{"conversation_id":"other","user_id":"spoof"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    task.abort();
+}
