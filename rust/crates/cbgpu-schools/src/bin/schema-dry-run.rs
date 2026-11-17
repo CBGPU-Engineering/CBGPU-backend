@@ -343,6 +343,7 @@ fn main() -> Result<()> {
         "20261117130935_scoped_school_contest_authoring.sql",
         "20261117131755_eduset_private_shared_credential_reader.sql",
         "20261117131930_contest_owner_returning_visibility.sql",
+        "20261117132746_contest_school_operator_nominations.sql",
     ];
     let sources = migrations
         .iter()
@@ -833,6 +834,25 @@ fn main() -> Result<()> {
         Some(&fs::read(
             repo.join("schema/tests/schools/eduset-private-reader.sql"),
         )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(repo.join(
+            "schema/tests/schools/contest-operator-nominations.sql",
+        ))?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
     let directory_sql = format!(
