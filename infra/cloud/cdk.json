@@ -1,0 +1,4 @@
+{
+  "app": "node dist/src/app.js",
+  "context": { "@aws-cdk/core:checkSecretUsage": true }
+}

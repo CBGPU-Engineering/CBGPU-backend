@@ -1,0 +1,17 @@
+# Candidate override of the EXISTING Supabase Storage backend, not a replacement API.
+# Config validation only until bytes/metadata/RLS/S3 restore tests pass. Never run on live volumes.
+services:
+  storage:
+    image: supabase/storage-api:v1.81.0@sha256:98ffec5d0678803783c30e404c27f4ec65e97efbe014088f2a86b4b8b54b9f54
+    environment:
+      STORAGE_BACKEND: s3
+      REGION: ${CBGPU_AWS_REGION:?explicit region required}
+      GLOBAL_S3_BUCKET: ${CBGPU_AWS_STORAGE_BUCKET:?explicit private bucket required}
+      GLOBAL_S3_ENDPOINT: https://s3.${CBGPU_AWS_REGION}.amazonaws.com
+      GLOBAL_S3_PROTOCOL: https
+      GLOBAL_S3_FORCE_PATH_STYLE: "false"
+      # Empty inherited static credentials: the exact pinned S3 adapter uses the SDK
+      # default chain (ECS task role / instance profile). Never embed long-lived keys.
+      AWS_ACCESS_KEY_ID: ""
+      AWS_SECRET_ACCESS_KEY: ""
+      AWS_SESSION_TOKEN: ""

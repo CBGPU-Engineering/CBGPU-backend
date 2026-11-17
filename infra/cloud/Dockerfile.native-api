@@ -1,0 +1,28 @@
+# Build ONLY the generated allowlisted context; never pass the live checkout/private data.
+FROM rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea AS build
+WORKDIR /build
+ARG CBGPU_PACKAGE=cbgpu-schools
+ENV CARGO_BUILD_JOBS=4
+COPY rust/ rust/
+COPY supabase/migrations/ supabase/migrations/
+COPY schema/data/ schema/data/
+COPY healthcheck.rs healthcheck.rs
+COPY licenses/ /out/licenses/
+COPY context-manifest.json /out/context-manifest.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/build/rust/target case "$CBGPU_PACKAGE" in cbgpu-schools|cbgpu-accounts|cbgpu-gpu-enrollment) ;; *) exit 1;; esac \
+ && mkdir -p /out \
+ && cargo build --manifest-path rust/Cargo.toml --locked --release -p "$CBGPU_PACKAGE" --bin "$CBGPU_PACKAGE" \
+ && cp "rust/target/release/$CBGPU_PACKAGE" /out/cbgpu-api \
+ && rustc --edition=2024 -C opt-level=2 healthcheck.rs -o /out/cbgpu-healthcheck \
+ && mkdir -p /out/licenses/third-party \
+ && find /usr/local/cargo/registry/src -type f \( -iname 'LICENSE*' -o -iname 'NOTICE*' -o -iname 'COPYING*' -o -iname 'AUTHORS*' \) -exec cp --parents {} /out/licenses/third-party/ \;
+
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+COPY --from=build --chown=65532:65532 /out/cbgpu-api /cbgpu-api
+COPY --from=build --chown=65532:65532 /out/cbgpu-healthcheck /cbgpu-healthcheck
+COPY --from=build --chown=65532:65532 /out/licenses/ /usr/share/licenses/
+COPY --from=build --chown=65532:65532 /out/context-manifest.json /usr/share/cbgpu/context-manifest.json
+USER 65532:65532
+ENV CBGPU_HEALTH_PORT=3546
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD ["/cbgpu-healthcheck"]
+ENTRYPOINT ["/cbgpu-api"]
