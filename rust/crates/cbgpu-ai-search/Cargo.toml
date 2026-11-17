@@ -1,0 +1,19 @@
+[package]
+name = "cbgpu-ai-search"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.88"
+[features]
+default = []
+cuda = ["cbgpu-ai-models/cuda"]
+[dependencies]
+anyhow = "1"
+cbgpu-ai-corpus = { path = "../cbgpu-ai-corpus" }
+cbgpu-ai-models = { path = "../cbgpu-ai-models" }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "json", "uuid"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = "1"
+[dev-dependencies]
+tempfile = "3"

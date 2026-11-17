@@ -277,6 +277,23 @@ impl Runner for NativeRunner {
                 "CBGPU_AI_DATA_ROOT",
                 "CBGPU_AI_CPU_ONLY",
                 "CBGPU_AI_MODELS_RUNNER",
+                "CBGPU_AI_SEARCH_RUNNER",
+            ] {
+                if let Some(value) = std::env::var_os(name) {
+                    command.env(name, value);
+                }
+            }
+        }
+        if !python
+            && job["kind"] == "search"
+            && std::env::var_os("CBGPU_AI_SEARCH_RUNNER").is_some()
+        {
+            for name in [
+                "CBGPU_AI_CORPUS_POLICY_DATABASE_URL",
+                "CBGPU_AI_MATERIALS_ROOT",
+                "CBGPU_AI_PAPER_ORIGIN",
+                "CBGPU_AI_CORPUS_OCR_IMAGE",
+                "CBGPU_ACCOUNT_V2",
             ] {
                 if let Some(value) = std::env::var_os(name) {
                     command.env(name, value);

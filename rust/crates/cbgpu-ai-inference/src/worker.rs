@@ -219,7 +219,12 @@ pub fn chat(state: &Path, folder: &Path, input: &Value) -> Result<Value> {
 /// Its path is trusted server configuration, never an input.json field.
 fn model_helper(kind: &str, folder: &Path, state: &Path) -> Result<()> {
     use std::os::unix::process::CommandExt;
-    let path = std::env::var_os("CBGPU_AI_MODELS_RUNNER")
+    let configured = if kind == "search" && std::env::var_os("CBGPU_AI_SEARCH_RUNNER").is_some() {
+        "CBGPU_AI_SEARCH_RUNNER"
+    } else {
+        "CBGPU_AI_MODELS_RUNNER"
+    };
+    let path = std::env::var_os(configured)
         .map(PathBuf::from)
         .ok_or("Native embedding/audio worker is not configured")?;
     let path = trusted_helper(&path)?;
