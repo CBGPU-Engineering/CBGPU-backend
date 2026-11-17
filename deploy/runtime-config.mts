@@ -27,3 +27,5 @@ export function composeManagedFile(base:string,projectId:string,file:unknown){
  if(typeof file!=='string'||!path.isAbsolute(file)||!/^[-a-f0-9]{36}$/i.test(projectId))throw Error('Invalid Compose stop path');
  try{const root=fs.realpathSync(base),project=fs.realpathSync(path.join(root,projectId)),target=fs.realpathSync(file);if(!project.startsWith(root+path.sep)||!target.startsWith(project+path.sep)||!fs.statSync(target).isFile())throw Error();return target}catch{throw Error('Invalid Compose stop path')}
 }
+
+export function boundComposeResult(base:string,value:any,projectId:string){if(value?.namespace!=='cbgpu-compose-'+projectId)throw Error('Worker namespace mismatch');value.file=composeManagedFile(base,projectId,value.file);if(typeof value.release!=='string'||fs.realpathSync(value.release)!==path.dirname(value.file))throw Error('Worker release mismatch');const socket=path.join(path.dirname(base),'compose-sockets',projectId+'.sock');if(typeof value.socket!=='string'||path.basename(value.socket)!==projectId+'.sock'||fs.realpathSync(path.dirname(value.socket))!==fs.realpathSync(path.dirname(socket)))throw Error('Worker socket mismatch');return value}
