@@ -20,6 +20,7 @@ do $$begin
  if not public.cbgpu_equipment_operator('print',81001) or public.cbgpu_equipment_operator('print',81002) or public.cbgpu_equipment_operator('laser',null) then raise exception 'EXACT_EQUIPMENT_ASSIGNMENT_MISMATCH';end if;
  if(select count(*) from public.print_jobs where id::text like 'ef830000-%')<>1 then raise exception 'PRINT1_SEES_PRINT2_JOBS';end if;
  if(select count(*) from storage.objects where bucket_id='manufacturing' and name like '%/fixture-%')<>1 then raise exception 'PRINT1_FILE_SCOPE_LEAK';end if;
+ if not public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-print1.stl') or public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-print2.stl') or public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-laser.dxf') or public.cbgpu_manufacturing_file_access('missing') then raise exception 'SELF_FILE_ORACLE_PRINTER_SCOPE';end if;
  begin perform public.start_print_job('ef830000-0000-4000-8000-000000000002',81002,1);raise exception 'PRINT1_STARTED_PRINT2_JOB' using errcode='XX000';exception when insufficient_privilege then null;end;
  begin update public.print_jobs set preferred_printer_id=81002 where id='ef830000-0000-4000-8000-000000000001';raise exception 'PRINTER_MOVE_BYPASS' using errcode='XX000';exception when insufficient_privilege then null;end;
 end$$;
@@ -41,6 +42,7 @@ do $$begin
  if exists(select 1 from public.print_jobs where id::text like 'ef830000-%') or exists(select 1 from public.laser_jobs where id::text like 'ef840000-%') then raise exception 'FORMER_MANAGER_QUEUE_LEAK';end if;
  if exists(select 1 from public.cbgpu_manufacturing_profiles('print',array['ef810000-0000-4000-8000-000000000007'::uuid])) or exists(select 1 from public.cbgpu_manufacturing_profiles('laser',array['ef810000-0000-4000-8000-000000000007'::uuid])) then raise exception 'FORMER_MANAGER_PROFILE_LEAK';end if;
  if(select count(*) from storage.objects where bucket_id='manufacturing' and(name like '%/fixture-%' or name like '%/own-history.stl'))<>1 then raise exception 'FORMER_MANAGER_PRIVATE_FILES_LEAK';end if;
+ if not public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000004/own-history.stl') or public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-print1.stl') or public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-laser.dxf') then raise exception 'GUEST_FILE_ORACLE_ROLE_RESURRECTION';end if;
  begin perform public.start_print_job('ef830000-0000-4000-8000-000000000002',81002,1);raise exception 'FORMER_MANAGER_START_RPC' using errcode='XX000';exception when insufficient_privilege then null;end;
  begin insert into public.print_jobs(mode,user_id,preferred_printer_id,status) values('beginner',auth.uid(),81001,'accepted');raise exception 'REQUESTER_FAKE_ACCEPTED' using errcode='XX000';exception when insufficient_privilege then null;end;
  begin insert into public.print_jobs(mode,user_id,preferred_printer_id,status,printer_id,started_at) values('beginner',auth.uid(),81001,'pending',81001,now());raise exception 'REQUESTER_FORGED_INITIAL_PRINTER' using errcode='XX000';exception when insufficient_privilege then null;end;
@@ -55,6 +57,39 @@ set local role authenticated;
 update public.print_jobs set status='canceled' where id='ef830000-0000-4000-8000-000000000004';
 do $$begin if not exists(select 1 from public.print_jobs where id='ef830000-0000-4000-8000-000000000004' and status='canceled') then raise exception 'EXPIRED_GUEST_OWN_HISTORY_LOST';end if;if not exists(select 1 from storage.objects where bucket_id='manufacturing' and name='ef810000-0000-4000-8000-000000000004/own-history.stl') then raise exception 'OWN_FILE_LOST_AFTER_RESOURCE_REVOKE';end if;end$$;
 reset role;
+-- Existing private own keys survive grant loss; bucket/role policy drift denies.
+set local role authenticated;
+do $$declare key text;begin
+ if not public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000004/own-history.stl') then raise exception 'OWN_FILE_ORACLE_AFTER_GRANT_REVOKE';end if;
+ foreach key in array array['','/leading','trailing/','double//segment','a/../escape','a/./escape',chr(10)||'control',chr(92)||'backslash',repeat('x',2049)] loop if public.cbgpu_manufacturing_file_access(key) then raise exception 'INVALID_OBJECT_KEY_ACCEPTED';end if;end loop;
+end$$;
+reset role;
+update storage.buckets set public=true where id='manufacturing';
+set local role authenticated;
+do $$begin if public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000004/own-history.stl') then raise exception 'PUBLIC_BUCKET_ORACLE_BYPASS';end if;end$$;
+reset role;
+update storage.buckets set public=false where id='manufacturing';
+alter function cbgpu_schools.manufacturing_file_visible(text) owner to supabase_admin;
+set local role authenticated;
+do $$begin if public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000004/own-history.stl') then raise exception 'SUPER_OWNED_POLICY_READER_BYPASS';end if;end$$;
+reset role;
+alter function cbgpu_schools.manufacturing_file_visible(text) owner to cbgpu_equipment_file_reader;
+alter role cbgpu_equipment_file_reader bypassrls;
+set local role authenticated;
+do $$begin if public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000004/own-history.stl') then raise exception 'BYPASS_POLICY_READER_ACCEPTED';end if;end$$;
+reset role;
+alter role cbgpu_equipment_file_reader nobypassrls;
+create temp table equipment_file_policy_restore as select pg_get_expr(polqual,polrelid) expression from pg_catalog.pg_policy where polrelid='storage.objects'::regclass and polname='scoped_equipment_file_read';
+alter policy scoped_equipment_file_read on storage.objects using(true);
+set local role authenticated;
+do $$begin if public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000004/own-history.stl') then raise exception 'CHANGED_FILE_POLICY_CONTRACT_ACCEPTED';end if;end$$;
+reset role;
+do $$begin execute format('alter policy scoped_equipment_file_read on storage.objects using(%s)',(select expression from equipment_file_policy_restore));end$$;
+
+set local role authenticated;
+do $$begin if not public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000004/own-history.stl') then raise exception 'RESTORED_POLICY_READER_DENIED';end if;end$$;
+reset role;
+do $$begin if has_function_privilege('anon','public.cbgpu_manufacturing_file_access(text)','EXECUTE') or has_function_privilege('service_role','public.cbgpu_manufacturing_file_access(text)','EXECUTE') or has_function_privilege('authenticated','cbgpu_schools.manufacturing_file_visible(text)','EXECUTE') or has_table_privilege('cbgpu_equipment_file_reader','auth.users','SELECT') then raise exception 'FILE_ORACLE_PRIVILEGE_LEAK';end if;end$$;
 -- Pending affiliation never makes an existing assignment operational.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"ef810000-0000-4000-8000-000000000005","session_id":"ef820000-0000-4000-8000-000000000005"}',true);
 set local role authenticated;
@@ -63,13 +98,13 @@ reset role;
 -- Laser assignment does not grant print authority, and vice versa.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"ef810000-0000-4000-8000-000000000003","session_id":"ef820000-0000-4000-8000-000000000003"}',true);
 set local role authenticated;
-do $$begin if not public.cbgpu_equipment_operator('laser',null) or public.cbgpu_equipment_operator('print',81001) or(select count(*) from public.laser_jobs where id::text like 'ef840000-%')<>1 then raise exception 'LASER_ASSIGNMENT_MISMATCH';end if;end$$;
+do $$begin if not public.cbgpu_equipment_operator('laser',null) or public.cbgpu_equipment_operator('print',81001) or(select count(*) from public.laser_jobs where id::text like 'ef840000-%')<>1 then raise exception 'LASER_ASSIGNMENT_MISMATCH';end if;if not public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-laser.dxf') or public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-print1.stl') then raise exception 'LASER_FILE_ORACLE_SCOPE';end if;end$$;
 update public.laser_jobs set status='accepted' where id='ef840000-0000-4000-8000-000000000001';
 reset role;
 -- Explicit platform oversight is not an equipment operator/portal role.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"ef810000-0000-4000-8000-000000000006","session_id":"ef820000-0000-4000-8000-000000000006"}',true);
 set local role authenticated;
-do $$begin if not public.cbgpu_equipment_platform_oversight() or public.cbgpu_equipment_operator('print',81001) or public.cbgpu_equipment_operator('laser',null) then raise exception 'PLATFORM_ADMIN_IMPERSONATED_OPERATOR';end if;if(select count(*) from public.print_jobs where id::text like 'ef830000-%')<>3 then raise exception 'EXPLICIT_PRINT_ADMIN_OVERSIGHT_LOST';end if;end$$;
+do $$begin if not public.cbgpu_equipment_platform_oversight() or public.cbgpu_equipment_operator('print',81001) or public.cbgpu_equipment_operator('laser',null) then raise exception 'PLATFORM_ADMIN_IMPERSONATED_OPERATOR';end if;if(select count(*) from public.print_jobs where id::text like 'ef830000-%')<>3 then raise exception 'EXPLICIT_PRINT_ADMIN_OVERSIGHT_LOST';end if;if not public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-print2.stl') then raise exception 'KNOWN_JOB_ADMIN_FILE_ORACLE_LOST';end if;end$$;
 reset role;
 -- All checks are fresh: membership, ban and actual session revocation.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"ef810000-0000-4000-8000-000000000001","session_id":"ef820000-0000-4000-8000-000000000001"}',true);
@@ -86,6 +121,11 @@ reset role;
 update auth.users set banned_until=null where id='ef810000-0000-4000-8000-000000000001';
 delete from auth.sessions where id='ef820000-0000-4000-8000-000000000001';
 set local role authenticated;
-do $$begin if public.cbgpu_equipment_operator('print',81001) or exists(select 1 from public.print_jobs where id::text like 'ef830000-%') or exists(select 1 from storage.objects where name like '%/fixture-%') then raise exception 'REVOKED_SESSION_OPERATOR';end if;end$$;
+do $$begin if public.cbgpu_equipment_operator('print',81001) or exists(select 1 from public.print_jobs where id::text like 'ef830000-%') or exists(select 1 from storage.objects where name like '%/fixture-%') or public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000007/fixture-print1.stl') then raise exception 'REVOKED_SESSION_OPERATOR';end if;end$$;
+reset role;
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"ef810000-0000-4000-8000-000000000004","session_id":"ef820000-0000-4000-8000-000000000004"}',true);
+delete from auth.sessions where id='ef820000-0000-4000-8000-000000000004';
+set local role authenticated;
+do $$begin if public.cbgpu_manufacturing_file_access('ef810000-0000-4000-8000-000000000004/own-history.stl') then raise exception 'REVOKED_OWNER_SESSION_FILE_ACCESS';end if;end$$;
 reset role;
 rollback;
