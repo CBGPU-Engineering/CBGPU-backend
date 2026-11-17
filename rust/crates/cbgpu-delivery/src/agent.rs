@@ -610,6 +610,7 @@ impl<R: Runtime> Agent<R> {
                         "CBGPU_ACCOUNTS_API_URL",
                         "CBGPU_MULTISCHOOL_V1",
                         "CBGPU_SCHOOLS_API_URL",
+                        "CBGPU_TIMETABLE_WARM_SECRET_FILE",
                         "CBGPU_PUBLIC_CONTENT_API_URL",
                         "CBGPU_AD_REVENUE_ENABLED",
                         "CBGPU_AD_REVENUE_API_URL",
@@ -1605,7 +1606,7 @@ mod tests {
         let env = tmp.path().join("frontend.env");
         fs::write(
             &env,
-            "NEXT_PUBLIC_TEST=visible\nEDUSET_TOKEN_SECRET=synthetic-secret\nSPOTIFY_CLIENT_ID=synthetic-client\nSPOTIFY_CLIENT_SECRET=synthetic-server-secret\nSPOTIFY_REDIRECT_URI=https://cbgpu.com/api/wakeup/spotify/callback\nCBGPU_AD_REVENUE_ENABLED=0\nCBGPU_AD_REVENUE_API_URL=http://127.0.0.1:3549\nNEXT_PUBLIC_CBGPU_AD_REVENUE_V1=0\nCBGPU_MULTISCHOOL_V1=0\nCBGPU_SCHOOLS_API_URL=http://127.0.0.1:3546\nUNRELATED_PRIVATE_KEY=must-not-persist\n",
+            "NEXT_PUBLIC_TEST=visible\nEDUSET_TOKEN_SECRET=synthetic-secret\nSPOTIFY_CLIENT_ID=synthetic-client\nSPOTIFY_CLIENT_SECRET=synthetic-server-secret\nSPOTIFY_REDIRECT_URI=https://cbgpu.com/api/wakeup/spotify/callback\nCBGPU_AD_REVENUE_ENABLED=0\nCBGPU_AD_REVENUE_API_URL=http://127.0.0.1:3549\nNEXT_PUBLIC_CBGPU_AD_REVENUE_V1=0\nCBGPU_MULTISCHOOL_V1=0\nCBGPU_SCHOOLS_API_URL=http://127.0.0.1:3546\nCBGPU_TIMETABLE_WARM_SECRET_FILE=/private/timetable-warm-secret\nUNRELATED_PRIVATE_KEY=must-not-persist\n",
         )
         .unwrap();
         fs::write(settings.join("cbgpu-frontend.service"),"[Service]\nWorkingDirectory=/previous\nExecStart=/previous/server\nEnvironmentFile=/previous/.env\n").unwrap();
@@ -1682,6 +1683,10 @@ mod tests {
         assert!(saved.contains("NEXT_PUBLIC_CBGPU_AD_REVENUE_V1=0\n"));
         assert!(saved.contains("CBGPU_MULTISCHOOL_V1=0\n"));
         assert!(saved.contains("CBGPU_SCHOOLS_API_URL=http://127.0.0.1:3546\n"));
+        assert!(
+            saved.contains("CBGPU_TIMETABLE_WARM_SECRET_FILE=/private/timetable-warm-secret\n")
+        );
+        assert!(!saved.contains("NEXT_PUBLIC_CBGPU_TIMETABLE_WARM"));
     }
     #[test]
     fn backend_component_rollout_keeps_unrelated_units_and_previews_without_mail() {
