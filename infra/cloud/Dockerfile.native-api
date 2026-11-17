@@ -9,7 +9,7 @@ COPY schema/data/ schema/data/
 COPY healthcheck.rs healthcheck.rs
 COPY licenses/ /out/licenses/
 COPY context-manifest.json /out/context-manifest.json
-RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/build/rust/target case "$CBGPU_PACKAGE" in cbgpu-schools|cbgpu-accounts|cbgpu-gpu-enrollment) ;; *) exit 1;; esac \
+RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/build/rust/target case "$CBGPU_PACKAGE" in cbgpu-schools|cbgpu-accounts|cbgpu-gpu-enrollment|cbgpu-ad-revenue) ;; *) exit 1;; esac \
  && mkdir -p /out \
  && cargo build --manifest-path rust/Cargo.toml --locked --release -p "$CBGPU_PACKAGE" --bin "$CBGPU_PACKAGE" \
  && cp "rust/target/release/$CBGPU_PACKAGE" /out/cbgpu-api \

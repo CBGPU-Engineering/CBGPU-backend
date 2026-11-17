@@ -34,11 +34,22 @@ npm run test:container
 ```
 
 `Dockerfile.native-api` supports the existing Rust packages `cbgpu-schools`,
-`cbgpu-accounts` and the optional GPU registry. It compiles an exact Cargo lockfile,
+`cbgpu-accounts`, the optional GPU registry, and `cbgpu-ad-revenue`. It compiles an exact Cargo lockfile,
 uses digest-pinned base images, runs as UID65532, and includes a shell-free Rust
 loopback health probe. APIs keep their private-loopback binding. A future ingress
 sidecar must share the task network and preserve the current trusted-host policy;
 these APIs are not changed to listen publicly just to accommodate a container.
+
+For the optional official-report API, build with
+`--build-arg CBGPU_PACKAGE=cbgpu-ad-revenue` and set `CBGPU_HEALTH_PORT=3549` at
+runtime. Its reporting flag remains off by default. `/health` is a liveness
+probe, not proof of configured database authority, imported official reports,
+provider approval or revenue. No image build enables serving or imports data.
+After building the local image as `cbgpu/native-ad-revenue:cloud-review`, run
+`CBGPU_CLOUD_TEST_PACKAGE=cbgpu-ad-revenue npm run test:container` to verify the
+disabled binary, bundled provenance/licenses, non-root read-only execution and
+graceful shutdown in a disposable network-none container. The default test still
+targets the school API; neither test loads credentials or contacts an ad provider.
 
 The standalone `compose.native-review.yml` is disabled, credential-free and has no
 published ports or mounted data. It is **not** an override for the production

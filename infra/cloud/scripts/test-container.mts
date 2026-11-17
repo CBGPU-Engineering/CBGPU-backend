@@ -5,6 +5,9 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+const candidate=process.env.CBGPU_CLOUD_TEST_PACKAGE||'cbgpu-schools';
+if(!['cbgpu-schools','cbgpu-ad-revenue'].includes(candidate))throw Error('Unsupported local container fixture package');
+const revenue=candidate==='cbgpu-ad-revenue';
 if (process.env.DOCKER_HOST && !process.env.DOCKER_HOST.startsWith("unix://"))
   throw Error("Only a local Unix Docker socket is permitted.");
 const endpoint = JSON.parse(
@@ -45,14 +48,16 @@ try {
       "--pids-limit",
       "64",
       "--env",
-      "CBGPU_MULTISCHOOL_V1=false",
+      revenue?"CBGPU_AD_REVENUE_ENABLED=false":"CBGPU_MULTISCHOOL_V1=false",
       "--env",
-      "CBGPU_SCHOOLS_LISTEN=127.0.0.1:3546",
+      revenue?"CBGPU_AD_REVENUE_LISTEN=127.0.0.1:3549":"CBGPU_SCHOOLS_LISTEN=127.0.0.1:3546",
       "--env",
-      "CBGPU_SCHOOLS_BACKEND_URL=http://127.0.0.1:1",
+      revenue?"CBGPU_AD_REVENUE_BACKEND_URL=http://127.0.0.1:1":"CBGPU_SCHOOLS_BACKEND_URL=http://127.0.0.1:1",
       "--env",
-      "CBGPU_SCHOOLS_ANON_KEY=synthetic-no-production-access",
-      "cbgpu/native-school-api:cloud-review",
+      revenue?"CBGPU_AD_REVENUE_ANON_KEY=synthetic-no-production-access":"CBGPU_SCHOOLS_ANON_KEY=synthetic-no-production-access",
+      "--env",
+      revenue?"CBGPU_HEALTH_PORT=3549":"CBGPU_HEALTH_PORT=3546",
+      revenue?"cbgpu/native-ad-revenue:cloud-review":"cbgpu/native-school-api:cloud-review",
     ],
     { encoding: "utf8" },
   ).trim();
