@@ -12,3 +12,10 @@ export async function readSchool(endpoint:string, token:string, body:unknown, de
  }
  throw Error('school_network');
 }
+
+/** Operator-only backend reader. Public/caller sessions must never decrypt shared credentials. */
+export function operatorBackendKey(env:Record<string,string|undefined>):string {
+ const key=env.SUPABASE_SERVICE_ROLE_KEY;
+ if(!key||key.trim()!==key||/[\r\n]/.test(key)||key===env.NEXT_PUBLIC_SUPABASE_ANON_KEY)throw Error('operator_credentials_missing');
+ return key;
+}
