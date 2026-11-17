@@ -35,6 +35,29 @@ DDL waits are bounded. PGRST receives its reload notification only on commit.
 No academic rollover, guest approval, GPU enrollment, sharing or job execution
 is run. Public catalog rows remain listed/unverified with no enabled features.
 
+### Non-GPU core boundary and pairing window
+
+The initial schema backfill preserves existing approved internal CBsh access;
+new-school members retain their global EXTERNAL identity and primary approval
+bit. School-B membership does not grant CBsh GPU, AI or server execution. The
+operating root controller is neither replaced nor stopped: its service-role
+reads bypass RLS, and maintenance updates retain their explicit trusted-service
+path. Existing reservations and kernels are not reset. This is **non-GPU school
+activation**, not completed scoped compute enforcement. GPU guest approvals,
+new-school execution/sharing and runtime-safe CBsh academic rollover remain
+outside this handoff.
+
+Restrictive policies take effect immediately at SQL commit, regardless of old
+web flags. In particular, broad profile joins and shared-credential reads in an
+old frontend cannot be assumed compatible. Prestage and verify all binaries,
+private configuration, immutable web artifacts and rollback unit snapshots
+before committing SQL. Then provision narrow roles, start private APIs, pair
+already-tested auxiliary server adapters and switch immediately to the matching
+web artifact in one bounded operator window. Do not leave an old web release
+running for an open-ended interval after commit. A failed post-commit check
+requires narrow service/UI rollback plus fix-forward; reverting to old web alone
+does not undo privacy policies or justify restoring a stale database dump.
+
 ### Final operator sequence
 
 1. Freeze the complete final inventory, rerun actual-role injected-failure and
@@ -131,7 +154,7 @@ owner must be resolved before proposing an operating change.
 
 | Operating writer | Observation | Consequence |
 | --- | --- | --- |
-| Root combined controller | Active `/home/cbgpu/CBGPU/Daemon/daemon.py`; independent service-role assignment reads | New RLS alone cannot gate its raw reads. Do not flip school/account flags while this bypass and direct notebook/SSH paths remain. |
+| Root combined controller | Active `/home/cbgpu/CBGPU/Daemon/daemon.py`; independent service-role assignment reads | New RLS cannot gate its raw reads. This blocks scoped GPU handoff, GPU guest access and claims of immediate runtime revocation; it does not prohibit the separately tested non-GPU school onboarding boundary. Keep GPU execution/sharing deferred and do not run CBsh rollover against active GPU users before runtime enforcement is paired. |
 | AI | Active immutable Python release `59ffb2b3ab4ac013b0cb4055e517d661848ef191`, port 3550; native unit absent/inactive | Rust source and Python retirement in the current repository do not establish a live Rust cutover. Preserve the immutable release and delivery hold. |
 | Deployment control | Active immutable `deploy/server.mts` compatibility release | Native workers/proxy are not evidence that all control/business API writes have moved to PostgreSQL. |
 | Materials | Running Rust container `cbgpu/materials-rust:candidate`, image ID `sha256:406a45e5d79cf5496e9856bdf45922913b6fdfb41835ff0d1c54d28143805307`, loopback 8421 | Image/source parity and scoped-mode/schema activation remain unverified. Do not infer that recent guest-upload code is active. |
