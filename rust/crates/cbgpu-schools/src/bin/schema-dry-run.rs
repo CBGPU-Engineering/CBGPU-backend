@@ -317,6 +317,7 @@ fn main() -> Result<()> {
         "20261117035112_scoped_profile_projections.sql",
         "20261117040558_contest_identity_snapshot_consent.sql",
         "20261117043016_fresh_authenticated_resource_policies.sql",
+        "20261117045629_school_academic_rollover.sql",
     ];
     let sources = migrations
         .iter()
@@ -406,6 +407,23 @@ fn main() -> Result<()> {
         Some(&fs::read(
             repo.join("schema/tests/schools/read-boundaries.sql"),
         )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(repo.join("schema/tests/schools/academic.sql"))?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
     let directory_sql = format!(

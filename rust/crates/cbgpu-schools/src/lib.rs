@@ -171,6 +171,39 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         (["v1", "admin", "schools", school, "life-sources"], &Method::PATCH) => {
             Some(("life_configure", json!({"school_id":school})))
         }
+        (
+            [
+                "v1",
+                "admin",
+                "schools",
+                school,
+                "academic",
+                action @ ("preview" | "history"),
+            ],
+            &Method::GET,
+        ) => {
+            let mut fields = query_fields.clone();
+            for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+                if key == "school_year" {
+                    fields.insert(key.into_owned(), json!(value));
+                }
+            }
+            fields.insert("school_id".into(), json!(school));
+            Some((
+                if *action == "preview" {
+                    "academic_preview"
+                } else {
+                    "academic_history"
+                },
+                Value::Object(fields),
+            ))
+        }
+        (["v1", "admin", "schools", school, "academic", "execute"], &Method::POST) => {
+            Some(("academic_execute", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "academic", "reverify"], &Method::POST) => {
+            Some(("academic_reverify", json!({"school_id":school})))
+        }
         _ => None,
     };
     let Some((action, mut payload)) = route else {
@@ -281,6 +314,10 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
     let (rpc, rpc_action) = match action {
         "publication_list" => ("cbgpu_public_project_api", "list"),
         "publication_save" => ("cbgpu_public_project_api", "save"),
+        "academic_preview" => ("cbgpu_school_academic_api", "preview"),
+        "academic_history" => ("cbgpu_school_academic_api", "history"),
+        "academic_execute" => ("cbgpu_school_academic_api", "execute"),
+        "academic_reverify" => ("cbgpu_school_academic_api", "reverify"),
         "guest_list" => ("cbgpu_school_guest_api", "list"),
         "guest_create" => ("cbgpu_school_guest_api", "create"),
         "guest_review" => ("cbgpu_school_guest_api", "review"),
@@ -339,7 +376,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             } else {
                 let status = match value["code"].as_str() {
                     Some("42501") => StatusCode::FORBIDDEN,
-                    Some("23505") => StatusCode::CONFLICT,
+                    Some("23505" | "40001") => StatusCode::CONFLICT,
                     Some("P0002") => StatusCode::NOT_FOUND,
                     Some("P0429") => StatusCode::TOO_MANY_REQUESTS,
                     _ => StatusCode::BAD_REQUEST,

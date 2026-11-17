@@ -91,3 +91,59 @@ async fn public_projection_query_and_private_error_sanitization() {
     assert!(!result.to_string().contains("secret"));
     server.abort();
 }
+
+#[tokio::test]
+async fn academic_routes_bind_school_and_report_stale_preview() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|| async { Json(json!({"id":"trusted"})) }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_academic_api",
+            post(|headers: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer fixture");
+                assert_eq!(v["payload"]["school_id"], "cbsh");
+                if v["action"] == "preview" {
+                    assert_eq!(v["payload"]["school_year"], "2027");
+                    (StatusCode::OK, Json(json!({"supported":true,"items":[]})))
+                } else {
+                    assert_eq!(v["action"], "execute");
+                    assert_eq!(v["payload"]["confirmed"], true);
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"code":"40001","message":"ACADEMIC_PREVIEW_CHANGED"})),
+                    )
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let app = router(config(true, format!("http://{address}")));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/admin/schools/cbsh/academic/preview?school_year=2027")
+                .header("authorization", "Bearer fixture")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let response = app
+        .oneshot(
+            Request::post("/v1/admin/schools/cbsh/academic/execute")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(
+                    r#"{"school_year":2027,"preview_fingerprint":"stale","confirmed":true}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    assert_eq!(body(response).await["code"], "ACADEMIC_PREVIEW_CHANGED");
+    server.abort();
+}
