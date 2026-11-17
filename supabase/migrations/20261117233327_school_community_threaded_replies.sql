@@ -57,4 +57,13 @@ declare uid uuid:=auth.uid();p cbgpu_schools.messages;r cbgpu_schools.messages;c
  return jsonb_build_object('message',cbgpu_schools.message_json(r),'duplicate',false);
 end$$;
 revoke all on function public.cbgpu_school_messenger_api(text,jsonb)from public,anon,service_role;grant execute on function public.cbgpu_school_messenger_api(text,jsonb)to authenticated;
+-- Anonymous discovery is root-only as well: neither live nor orphaned public
+-- replies are standalone posts. No anonymous message detail endpoint is added.
+do $public_roots$declare d text;old_pred text:='where scope=''PUBLIC'' and deleted_at is null';new_pred text:='where scope=''PUBLIC'' and parent_id is null and deleted_at is null';begin
+ d:=pg_get_functiondef('public.cbgpu_public_content(text,jsonb)'::regprocedure);
+ if position(new_pred in d)=0 then
+  if(length(d)-length(replace(d,old_pred,'')))/length(old_pred)<>2 then raise exception 'PUBLIC_COMMUNITY_THREAD_SOURCE_MISMATCH';end if;
+  execute replace(d,old_pred,new_pred);
+ end if;
+end $public_roots$;
 commit;

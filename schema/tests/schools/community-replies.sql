@@ -38,6 +38,19 @@ select public.cbgpu_school_messenger_api('message_delete',jsonb_build_object('id
 reset role;delete from auth.sessions where id='fc820000-0000-4000-8000-000000000003';set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000003"}',true);
 do $$begin begin perform public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='national')));raise exception 'REVOKED_SESSION_READ';exception when insufficient_privilege then null;end;end$$;
+-- Trusted synthetic PUBLIC fixtures prove anonymous discovery cannot turn
+-- comments (including a deleted parent's comments) into independent posts.
+reset role;
+insert into cbgpu_schools.messages(id,user_id,scope,body)values('fc840000-0000-4000-8000-000000000001','fc810000-0000-4000-8000-000000000001','PUBLIC','public-thread-fixture root'),('fc840000-0000-4000-8000-000000000003','fc810000-0000-4000-8000-000000000001','PUBLIC','public-thread-fixture removed root');
+insert into cbgpu_schools.messages(id,user_id,scope,body,parent_id)values('fc840000-0000-4000-8000-000000000002','fc810000-0000-4000-8000-000000000001','PUBLIC','public-thread-fixture reply','fc840000-0000-4000-8000-000000000001'),('fc840000-0000-4000-8000-000000000004','fc810000-0000-4000-8000-000000000001','PUBLIC','public-thread-fixture orphan','fc840000-0000-4000-8000-000000000003');
+update cbgpu_schools.messages set deleted_at=clock_timestamp()where id='fc840000-0000-4000-8000-000000000003';
+set local role anon;
+do $$declare x jsonb;begin
+ x:=public.cbgpu_public_content('messages_list','{"q":"public-thread-fixture"}');
+ if x->>'total'<>'1'or jsonb_array_length(x->'items')<>1 or x#>>'{items,0,id}'<>'fc840000-0000-4000-8000-000000000001'then raise exception 'ANON_PUBLIC_REPLY_LEAK';end if;
+ begin perform public.cbgpu_public_content('message','{"id":"fc840000-0000-4000-8000-000000000004"}');raise exception 'ANON_REPLY_DETAIL_ADDED';exception when check_violation then null;end;
+ begin perform public.cbgpu_school_messenger_api('message','{"id":"fc840000-0000-4000-8000-000000000004"}');raise exception 'ANON_PRIVATE_THREAD_DETAIL';exception when insufficient_privilege then null;end;
+end$$;
 reset role;set local role anon;
 do $$begin begin perform public.cbgpu_school_messenger_api('replies','{}');raise exception 'ANON_THREAD';exception when insufficient_privilege then null;end;end$$;
 rollback;
