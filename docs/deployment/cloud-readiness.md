@@ -21,13 +21,36 @@ It does not certify that the whole system can already move to AWS.
 | External | Email provider, Firebase FCM, GitHub, school EduSet/NEIS/weather services | Preserve private credentials and exact callbacks; verify provider networking and delivery separately. No emails/pushes/school submissions were sent here. |
 | School GPU | Existing root GPU controller, approved reservations, Jupyter kernels and local volumes | Remain at the school. Optional signed inventory enrollment is separate, private by default and does not execute jobs or enable sharing. |
 
-The website also reads Android release metadata from the current absolute host
-path `/home/cbgpu/CBGPU-live/FrontEnd/cbgpu/public/downloads/android-release.json`;
-immutable releases link the APK to that canonical directory. A web container/CDN
-migration must explicitly preserve or refactor this path and verify the public
-APK hash/update manifest together. It is not already portable merely because the
-native API image builds. Preserve the trusted-host Storage response sandbox/CSP
-and tenant HTTP/WebSocket credential filtering in any replacement ingress.
+The web source now accepts `CBGPU_ANDROID_RELEASE_PATH` for Android release
+metadata, with a repository-relative `public/downloads` default. Existing host
+releases keep their canonical download directory through the delivery agent's
+runtime environment. Update that agent before deploying the changed web source;
+an older agent does not persist the new setting. Verify the APK hash and update
+manifest together. The container mounts completed downloads read-only.
+
+The web candidate has a digest-pinned multi-stage Next.js standalone image and a
+non-root distroless runtime. Its loopback-only Compose entry supplies runtime
+configuration, persistent cache and read-only published downloads. A baked,
+licensed Chromium bundle supports existing school connection automation without
+executable `/tmp` or inherited platform credentials. Browser subprocesses receive
+an allowlisted environment. No human-verification bypass is supplied.
+
+`CBGPU_BACKEND_PROXY_URL` switches the internal Auth/REST/Storage/Realtime/
+Functions upstream without rebuilding the public-domain artifact. Unknown
+services, path traversal and invalid internal addresses fail closed. Trusted-host
+Storage response sandbox/CSP and tenant HTTP/WebSocket credential filtering
+remain required. `CBGPU_SESSION_ORACLE_MODE=rpc` verifies the caller's fresh
+session with the existing self-only database RPC using the public API key; no
+Docker socket or service-role key is required for that session check. Do not
+activate it before installing and testing the corresponding schema. The legacy
+host compatibility mode is retained until the approved migration.
+
+An isolated same-image test has exercised two synthetic upstream configurations,
+HTTP, SSE, WebSocket upgrade, release metadata and completed APK delivery with a
+read-only filesystem, UID 65532 and no external network. Offline Chromium launch
+also passed with non-executable temporary storage. These checks do not certify
+all authenticated application journeys, browser vulnerability remediation or AWS
+network connectivity. Rebuild and rescan the final source artifact before release.
 
 The live database image was inspected read-only:
 
