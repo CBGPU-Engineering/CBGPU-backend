@@ -4,6 +4,7 @@ pub mod authority;
 pub mod config;
 pub mod crypto;
 pub mod importer;
+pub mod legacy_fence;
 pub mod log_proxy;
 pub mod queue;
 pub mod store;
