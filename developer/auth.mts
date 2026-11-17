@@ -8,10 +8,12 @@ export function developerAuth({db,settings,env,loadPrincipals,audit=((...args: a
  const pendingCookie=cookieName+'-pending';
  const hash=value=>crypto.createHmac('sha256',settings.sessionSecret).update(scope+':'+value).digest('hex');
  const encryption=crypto.createHash('sha256').update('portal-account-tokens:'+scope+':'+settings.sessionSecret).digest();
+ // Sliding sessions: every page load extends the idle window, capped by an absolute maximum age.
+ const IDLE=Math.max(1,Number(settings.sessionIdleHours)||24)*3600000,MAX_AGE=Math.max(1,Number(settings.sessionMaxDays)||14)*86400000;
  const allowed=new Map(settings.developers.map(d=>[d.email.toLowerCase(),d]));
  let principals=new Map(),healthy=false,refreshing=null;
  const columns=new Set(db.prepare('PRAGMA table_info(sessions)').all().map(r=>r.name));
- for(const [name,type] of [['user_id','TEXT'],['email','TEXT'],['auth_version','TEXT'],['auth_session_id','TEXT'],['auth_tokens','TEXT']])if(!columns.has(name))db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${type}`);
+ for(const [name,type] of [['user_id','TEXT'],['email','TEXT'],['auth_version','TEXT'],['auth_session_id','TEXT'],['auth_tokens','TEXT'],['issued','INTEGER']])if(!columns.has(name))db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${type}`);
  db.prepare('DELETE FROM sessions WHERE user_id IS NULL OR auth_version IS NULL OR auth_session_id IS NULL').run();
  db.exec('CREATE TABLE IF NOT EXISTS failures(key TEXT PRIMARY KEY,count INTEGER NOT NULL,expires INTEGER NOT NULL);CREATE TABLE IF NOT EXISTS pending_auth(token_hash TEXT PRIMARY KEY,csrf TEXT NOT NULL,payload TEXT NOT NULL,expires INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0);DELETE FROM pending_auth;');
  const version=member=>hash('account-only-v1:'+member.id);
@@ -39,12 +41,32 @@ export function developerAuth({db,settings,env,loadPrincipals,audit=((...args: a
   const claims=JSON.parse(Buffer.from(data.session.access_token.split('.')[1],'base64url').toString('utf8'));if(!claims.session_id)throw fault('Account sign-in could not be verified.',401);await refresh();if(!alive(member.id,claims.session_id))throw fault('Account sign-in could not be verified.',401);
   const previous=session(req);if(previous){db.prepare('DELETE FROM sessions WHERE token_hash=?').run(previous.token_hash);onRevoke(previous.token_hash)}
   const token=crypto.randomBytes(32).toString('hex'),csrf=crypto.randomBytes(32).toString('hex');
-  db.prepare('INSERT INTO sessions(token_hash,csrf,expires,user_id,email,auth_version,auth_session_id,auth_tokens) VALUES(?,?,?,?,?,?,?,?)').run(hash(token),csrf,Date.now()+8*3600000,member.id,email,version(member),claims.session_id,seal({access_token:data.session.access_token,refresh_token:data.session.refresh_token}));
-  limit(req,'account:'+email,true);limit(req,'account-global',true);res.setHeader('Set-Cookie',[cookie(cookieName,token,28800),cookie(pendingCookie,'',0)]);audit({user_id:member.id,email},'login.succeeded',scope+' portal','success');return info({headers:{cookie:cookieName+'='+token}});
+  db.prepare('INSERT INTO sessions(token_hash,csrf,expires,user_id,email,auth_version,auth_session_id,auth_tokens,issued) VALUES(?,?,?,?,?,?,?,?,?)').run(hash(token),csrf,Date.now()+IDLE,member.id,email,version(member),claims.session_id,seal({access_token:data.session.access_token,refresh_token:data.session.refresh_token}),Date.now());
+  limit(req,'account:'+email,true);limit(req,'account-global',true);res.setHeader('Set-Cookie',[cookie(cookieName,token,Math.floor(IDLE/1000)),cookie(pendingCookie,'',0)]);audit({user_id:member.id,email},'login.succeeded',scope+' portal','success');return info({headers:{cookie:cookieName+'='+token}});
  }
  function removed(..._args:unknown[]){throw fault('The additional password step has been removed. Sign in with your CBGPU account.',410)}
  function logout(s,res){db.prepare('DELETE FROM sessions WHERE token_hash=?').run(s.token_hash);onRevoke(s.token_hash);res.setHeader('Set-Cookie',[cookie(cookieName,'',0),cookie(pendingCookie,'',0)]);audit(s,'logout',s.user_id,'success');return{ok:true}}
  const timer=setInterval(()=>{void refresh();db.prepare('DELETE FROM failures WHERE expires<?').run(Date.now())},15000);timer.unref();
+ /** Called on page loads: push the expiry forward (at most hourly) and refresh the cookie lifetime. */
+ function renew(req,res,s){
+  const now=Date.now(),issued=s.issued||now,next=Math.min(now+IDLE,issued+MAX_AGE);
+  if(next-s.expires<3600000)return false;
+  const token=readCookie(req);if(!token)return false;
+  db.prepare('UPDATE sessions SET expires=?,issued=? WHERE token_hash=?').run(next,issued,s.token_hash);
+  res.appendHeader('Set-Cookie',cookie(cookieName,token,Math.max(1,Math.floor((next-now)/1000))));
+  return true;
+ }
+ /** The browser refreshes its Supabase tokens on its own; keep the sealed server copy current so a fresh WebView (app restart) can restore the session. */
+ async function rememberTokens(s,tokens){
+  if(!tokens||typeof tokens.access_token!=='string'||typeof tokens.refresh_token!=='string'||tokens.access_token.length>8192||tokens.refresh_token.length>512)throw fault('Invalid session',400);
+  let claims;try{claims=JSON.parse(Buffer.from(tokens.access_token.split('.')[1],'base64url').toString('utf8'))}catch{throw fault('Invalid session',400)}
+  if(claims.sub!==s.user_id||claims.session_id!==s.auth_session_id||!(claims.exp*1000>Date.now()))throw fault('Session mismatch',409);
+  const client=createClient('http://127.0.0.1:54321',env.ANON_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+  const {data,error}=await client.auth.getUser(tokens.access_token);
+  if(error||data.user?.id!==s.user_id)throw fault('Session mismatch',409);
+  db.prepare('UPDATE sessions SET auth_tokens=? WHERE token_hash=?').run(seal({access_token:tokens.access_token,refresh_token:tokens.refresh_token}),s.token_hash);
+  return{ok:true};
+ }
  function nativeSession(s){try{if(!s.auth_tokens)return null;const tokens=open(s.auth_tokens),claims=JSON.parse(Buffer.from(tokens.access_token.split('.')[1],'base64url').toString('utf8'));return claims.exp*1000>Date.now()+30000?tokens:null}catch{return null}}
- return{init:refresh,refresh,nativeSession,session,pending:()=>null,info,login,system:removed,cancel:removed,logout,close:()=>clearInterval(timer)};
+ return{init:refresh,refresh,nativeSession,rememberTokens,renew,session,pending:()=>null,info,login,system:removed,cancel:removed,logout,close:()=>clearInterval(timer)};
 }
