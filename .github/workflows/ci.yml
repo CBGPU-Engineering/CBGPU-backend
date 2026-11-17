@@ -25,7 +25,7 @@ jobs:
       - run: npm run check:source
       - run: npm run build:browser
       - run: sudo apt-get update -qq && sudo apt-get install -y tmux
-      - run: node --test developer/tests/*.test.mts operations/study-refresh/*.test.mts operations/study-monitor/*.test.mts rust/compat/*.test.mts
+      - run: node --test developer/tests/*.test.mts operations/study-refresh/*.test.mts operations/study-monitor/*.test.mts operations/worker.test.mts rust/compat/*.test.mts
       # Native AI parity is verified in the Rust job below; no legacy interpreter.
       - run: node scripts/verify-mail-queue.mts
       - run: node --check deploy/server.mts && node --check developer/server.mts
