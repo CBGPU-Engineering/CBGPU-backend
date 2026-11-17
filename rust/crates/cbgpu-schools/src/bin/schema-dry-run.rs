@@ -339,6 +339,7 @@ fn main() -> Result<()> {
         "20261117125257_contest_participant_school_policy.sql",
         "20261117125431_school_messenger_authority_continuity.sql",
         "20261117125825_school_direct_messaging_opt_in.sql",
+        "20261117130935_scoped_school_contest_authoring.sql",
     ];
     let sources = migrations
         .iter()
@@ -771,6 +772,25 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(
             repo.join("schema/tests/schools/contest-participants.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/contest-authoring.sql"),
         )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
