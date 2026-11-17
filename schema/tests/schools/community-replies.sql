@@ -17,6 +17,11 @@ do $$declare p text:=(select v#>>'{message,id}'from thread_test where k='post');
  r:=public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',p));if r->>'total'<>'1'or r#>>'{items,0,scope}'<>'SCHOOL'or r#>>'{items,0,school_id}'<>'fixture-thread-a'then raise exception 'COMMENT_SCOPE_INHERITANCE';end if;
  begin perform 1 from cbgpu_schools.messages;raise exception 'RAW_MESSAGE_ACCESS';exception when insufficient_privilege then null;end;
 end$$;
+-- Cached messenger clients keep their chronological response contract.
+reset role;update cbgpu_schools.messages set created_at=now()-interval'2 seconds'where id=(select(v#>>'{message,id}')::uuid from thread_test where k='post');set local role authenticated;
+insert into thread_test values('compat_root',public.cbgpu_school_messenger_api('message_create','{"scope":"SCHOOL","school_id":"fixture-thread-a","body":"Second chronological root"}'));
+do $$declare x jsonb;begin x:=public.cbgpu_school_messenger_api('messages','{"scope":"SCHOOL","school_id":"fixture-thread-a"}');if jsonb_array_length(x->'items')<>2 or x#>>'{items,0,id}'<>(select v#>>'{message,id}'from thread_test where k='post')or x#>>'{items,1,id}'<>(select v#>>'{message,id}'from thread_test where k='compat_root')then raise exception 'LEGACY_FEED_WIRE_ORDER_CHANGED';end if;end$$;
+select public.cbgpu_school_messenger_api('message_delete',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='compat_root')));
 select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000003"}',true);
 do $$begin begin perform public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='post')));raise exception 'OTHER_SCHOOL_COMMENTS';exception when no_data_found then null;end;end$$;
 -- Nationwide still requires verified membership; sharing a channel never grants school-private access.
