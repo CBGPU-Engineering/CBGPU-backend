@@ -54,3 +54,4 @@ input,select,textarea,.field select,.sql-editor,.editor-value textarea,.button,.
 .login-card .button{min-height:48px;border-radius:10px;font-size:15px}
 
 [data-theme="dark"] img[src*="assets/logo.png"]{content:url("/static/assets/symbol_white.svg");filter:none!important;opacity:1}
+.usage-group{font-size:12px;font-weight:600;color:var(--muted);margin:20px 0 10px;text-transform:none}#usage-content>.usage-group:first-child{margin-top:0}#usage-content .traffic-totals{grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:0;row-gap:18px}@media(max-width:620px){#usage-content .traffic-totals{grid-template-columns:repeat(2,minmax(0,1fr))}}

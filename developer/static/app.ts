@@ -22,6 +22,8 @@ interface PortalElements {
 "overview-updated":HTMLElement;
 "health-grid":HTMLElement;
 "traffic-content":HTMLElement;
+"usage-content":HTMLElement;
+"usage-meta":HTMLElement;
 "traffic-help":HTMLElement;
 "system-content":HTMLElement;
 "deployment-summary":HTMLElement;
@@ -171,7 +173,7 @@ interface PortalElements {
     window.dispatchEvent(new Event('cbgpu-terminal-logout'));
     message('login-message', text, !!text);
     message('account-name', ''); message('account-email', ''); message('header-account-label', 'Account');
-    for (const id of ['health-grid', 'traffic-content', 'system-content', 'deployment-summary', 'table-result', 'sql-result', 'deployment-jobs', 'row-editor-fields', 'release-details', 'table-list', 'schema-result', 'container-list', 'backup-list', 'email-status', 'audit-result', 'emails-result', 'email-summary', 'email-detail', 'security-identity', 'account-developers', 'offsite-status', 'monitor-status']) $(id).replaceChildren();
+    for (const id of ['health-grid', 'traffic-content', 'usage-content', 'system-content', 'deployment-summary', 'table-result', 'sql-result', 'deployment-jobs', 'row-editor-fields', 'release-details', 'table-list', 'schema-result', 'container-list', 'backup-list', 'email-status', 'audit-result', 'emails-result', 'email-summary', 'email-detail', 'security-identity', 'account-developers', 'offsite-status', 'monitor-status']) $(id).replaceChildren();
     $('service-log-output').textContent = 'Choose a service to inspect its recent logs.'; state.sqlRows=[];state.sqlColumns=[];state.search='';state.sort='';$('row-search').value='';$('table-search').value='';
     $('deployment-log').textContent = 'No deployment selected.'; $('sql-query').value = ''; $('audit-detail').textContent = '';
     $('audit-detail-surface').hidden = true; $('email-detail-surface').hidden = true; $('email-summary').hidden = true;
@@ -334,6 +336,50 @@ interface PortalElements {
     }
     root.append(chart);
   }
+  function renderUsage(usage: Record<string,any> | null | undefined) {
+    const root = $('usage-content'); root.replaceChildren();
+    if (!usage) { root.append(element('p', 'empty-state', 'Usage data is not available right now.')); return; }
+    const group = (title: string, stats: [unknown, string][]) => {
+      const heading = element('h3', 'usage-group', title); root.append(heading);
+      const totals = element('div', 'traffic-totals');
+      for (const [value, label] of stats) {
+        const stat = element('div', 'traffic-stat');
+        stat.append(element('p', 'stat-number', finite(value) ? number.format(value as number) : 'Unavailable'), element('p', 'stat-label', label));
+        totals.append(stat);
+      }
+      root.append(totals);
+    };
+    const a = usage.accounts, v = usage.visitors || {}, api = usage.api;
+    group('People', [
+      [a?.dau, 'Active accounts · 1 day'], [a?.wau, 'Active accounts · 7 days'], [a?.mau, 'Active accounts · 30 days (MAU)'],
+      [v.today?.visitors, 'Visitors today'], [v.week?.visitors, 'Visitors · 7 days'], [v.month?.visitors, 'Visitors · 30 days'],
+      [a?.total, 'Registered accounts'], [a?.new_today, 'New accounts · 1 day'],
+    ]);
+    group('Counts', [
+      [a?.logins_today, 'Sign-ins · 1 day'], [a?.logins_7d, 'Sign-ins · 7 days'], [a?.logins_30d, 'Sign-ins · 30 days'],
+      [v.today?.views, 'Page views today'], [v.week?.views, 'Page views · 7 days'], [v.month?.views, 'Page views · 30 days'],
+      [api?.client_requests_1h, 'API requests from browsers & apps · 1 hour'], [api?.client_requests_24h, 'API requests from browsers & apps · 24 hours'],
+      [api?.requests_24h, 'All gateway requests · 24 hours (incl. internal)'],
+      [api?.server_errors_24h, 'Server errors · 24 hours (5xx)'],
+    ]);
+    const hours = Array.isArray(api?.per_hour) ? api.per_hour : [];
+    if (hours.length) {
+      root.append(element('h3', 'usage-group', 'API requests per hour from browsers & apps (last 24 hours)'));
+      const chart = element('div', 'traffic-chart'); chart.setAttribute('role', 'list'); chart.setAttribute('aria-label', 'API requests per hour');
+      const max = Math.max(1, ...hours.map((h: any) => finite(h.client_requests) ? h.client_requests : 0));
+      for (const h of hours) {
+        const cell = element('div', 'chart-day'); cell.setAttribute('role', 'listitem');
+        const label = new Date(h.hour_start).getHours() + ':00';
+        cell.setAttribute('aria-label', `${label}: ${number.format(h.client_requests)} from browsers and apps, ${number.format(h.requests)} in total, ${number.format(h.errors)} server errors`);
+        const track = element('div', 'chart-bar-track'); track.setAttribute('aria-hidden', 'true');
+        const bar = element('div', 'chart-bar'); bar.style.height = Math.max(0, h.client_requests) / max * 100 + '%'; track.append(bar);
+        cell.append(element('span', 'chart-value', number.format(h.client_requests)), track, element('span', 'meta', label)); chart.append(cell);
+      }
+      root.append(chart);
+    }
+    const rate = finite(api?.error_rate) ? api.error_rate + '% server errors' : '';
+    message('usage-meta', ['People and counts', rate].filter(Boolean).join(' · '));
+  }
   function uptime(seconds) {
     if (!finite(seconds) || seconds < 0) return 'Unavailable';
     const days = Math.floor(seconds / 86400), hours = Math.floor(seconds % 86400 / 3600), minutes = Math.floor(seconds % 3600 / 60);
@@ -366,7 +412,7 @@ interface PortalElements {
     const request = ++overviewRequest;
     try {
       const data = await api('/overview'); if (!state.authenticated || request !== overviewRequest) return;
-      renderHealth(data.health); renderTraffic(data.traffic); renderSystem(data.system); renderDeploymentSummary(data.deployment);
+      renderHealth(data.health); renderTraffic(data.traffic); renderUsage(data.usage); renderSystem(data.system); renderDeploymentSummary(data.deployment);
       message('overview-updated', data.updated_at ? 'Updated ' + dateTime(data.updated_at) : 'Update time unavailable.');
     } catch (error) { if (state.authenticated) { notice(error.message, true); message('overview-updated', 'Refresh failed.', true); } }
   }
