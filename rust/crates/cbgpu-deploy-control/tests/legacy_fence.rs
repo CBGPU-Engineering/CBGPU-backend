@@ -188,6 +188,9 @@ async fn fence_blocks_all_new_launches_but_preserves_reads_settings_and_ready_wo
             .unwrap(),
         "ready"
     );
+    // The new supervisor performs additive SQLite startup columns while fenced.
+    // These must not erase or change the exact guard definitions/receipt contract.
+    sqlx::raw_sql("ALTER TABLE deployments ADD COLUMN requested_by TEXT;ALTER TABLE compose_states ADD COLUMN access_state TEXT;UPDATE compose_states SET access_state='ALLOW';").execute(&mut c).await.unwrap();
     let removed = legacy_fence::remove(&f.database, &f.key, &f.receipt)
         .await
         .unwrap();
@@ -202,7 +205,7 @@ async fn fence_blocks_all_new_launches_but_preserves_reads_settings_and_ready_wo
         .unwrap(),
         1
     );
-    sqlx::query("INSERT INTO deployments VALUES('after','project','queued')")
+    sqlx::query("INSERT INTO deployments(id,project_id,status) VALUES('after','project','queued')")
         .execute(&mut c)
         .await
         .unwrap();
