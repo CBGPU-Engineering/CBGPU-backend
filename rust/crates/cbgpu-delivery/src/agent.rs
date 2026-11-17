@@ -556,6 +556,14 @@ impl<R: Runtime> Agent<R> {
         env.insert("NEXT_BUILD_DIR".into(), ".next-production".into());
         env.insert("CBGPU_RELEASE_SHA".into(), sha.into());
         env.insert("NEXT_TELEMETRY_DISABLED".into(), "1".into());
+        env.entry("CBGPU_ANDROID_RELEASE_PATH".into())
+            .or_insert_with(|| {
+                self.config
+                    .legacy_web
+                    .join("public/downloads/android-release.json")
+                    .to_string_lossy()
+                    .into_owned()
+            });
         let apk = self.config.legacy_web.join("public/downloads/cbgpu.apk");
         let target = directory.join("public/downloads/cbgpu.apk");
         if apk.exists() && !target.exists() {
@@ -603,6 +611,8 @@ impl<R: Runtime> Agent<R> {
                         "CBGPU_MULTISCHOOL_V1",
                         "CBGPU_SCHOOLS_API_URL",
                         "CBGPU_PUBLIC_CONTENT_API_URL",
+                        "CBGPU_ANDROID_RELEASE_PATH",
+                        "CBGPU_BACKEND_PROXY_URL",
                         "CBGPU_INTERNAL_NETWORK_MODE",
                         "CBGPU_PUBLIC_BROWSING_V1",
                     ]
@@ -698,6 +708,19 @@ impl<R: Runtime> Agent<R> {
                 "DEFERRED: Infrastructure/schema changes require separate rollout",
             ));
         }
+        // AI has independent durable queues and GPU duties. A CI-passed commit or
+        // an ELF path is not proof that its old writer has been fenced/imported.
+        if previous.is_none()
+            || paths.iter().any(|path| {
+                path.starts_with("ai/")
+                    || path.starts_with("rust/crates/cbgpu-ai/")
+                    || path.starts_with("rust/crates/cbgpu-ai-")
+            })
+        {
+            return Err(error(
+                "DEFERRED: AI changes require a separately verified fenced data handoff; the active immutable AI release is preserved",
+            ));
+        }
         if busy_backend(&self.config.runtime_backend)? {
             return Err(error("DEFERRED: User deployment is running"));
         }
@@ -724,17 +747,6 @@ impl<R: Runtime> Agent<R> {
             || !careers_env.contains_key("CAREERS_FORM_KEY_PATH")
         {
             return Err(error("DEFERRED: Native careers data connection incomplete"));
-        }
-        if self.config.native_ai_binary.is_none()
-            && (previous.is_none() || paths.iter().any(|p| p.starts_with("ai/")))
-        {
-            let original = fs::read_to_string(self.settings.join("cbgpu-ai.service"))
-                .map_err(|_| error("Cannot read existing AI handoff"))?;
-            if !original.contains("ai/server.py") {
-                return Err(error(
-                    "DEFERRED: Preserve existing native AI unit; explicit adapter required",
-                ));
-            }
         }
         let directory = self.checkout("backend", repo, sha)?;
         let runtime = &self.config.runtime_backend;
@@ -910,21 +922,6 @@ impl<R: Runtime> Agent<R> {
                 format!("/usr/bin/node {}/deploy/server.mts", directory.display()),
                 3510,
             ),
-            (
-                "ai",
-                "cbgpu-ai.service",
-                self.config
-                    .native_ai_binary
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| {
-                        format!(
-                            "/usr/bin/python3 {}/ai/server.py --port 3550",
-                            directory.display()
-                        )
-                    }),
-                3550,
-            ),
         ];
         let mut units = BTreeMap::new();
         let mut checks = Vec::new();
@@ -951,14 +948,6 @@ impl<R: Runtime> Agent<R> {
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-            }
-            if prefix == "ai"
-                && self.config.native_ai_binary.is_none()
-                && !original.contains("ai/server.py")
-            {
-                return Err(error(
-                    "DEFERRED: Preserve existing native AI unit; configure explicit handoff adapter",
-                ));
             }
             let mut extra = BTreeMap::from([("CBGPU_RELEASE_SHA".into(), sha.into())]);
             if prefix == "developer" {
@@ -1872,7 +1861,9 @@ mod preservation_tests {
             legacy_repo: tmp.path().join("legacy"),
             native_ai_binary: None,
         };
-        struct GuardRuntime;
+        struct GuardRuntime {
+            ai_change: bool,
+        }
         impl Host for GuardRuntime {
             fn reload(&mut self) -> Result<()> {
                 panic!("must not reload")
@@ -1896,7 +1887,9 @@ mod preservation_tests {
                 panic!("must not checkout or mutate source")
             }
             fn api(&mut self, _: &str, _: &str, _: Option<&Value>) -> Result<Value> {
-                Ok(json!({"status":"ahead","files":[{"filename":"careers/roles.json"}]}))
+                Ok(
+                    json!({"status":"ahead","files":[{"filename":if self.ai_change {"ai/server.py"} else {"careers/roles.json"}}]}),
+                )
             }
             fn build(
                 &mut self,
@@ -1924,7 +1917,7 @@ mod preservation_tests {
             settings: settings.clone(),
             config,
             state: json!({"components":{}}),
-            runtime: GuardRuntime,
+            runtime: GuardRuntime { ai_change: false },
         };
         let result = agent.deploy_backend(
             &"a".repeat(40),
@@ -1941,6 +1934,26 @@ mod preservation_tests {
         assert_eq!(
             fs::read_to_string(settings.join("cbgpu-backup.service")).unwrap(),
             backup
+        );
+        let ai = "[Service]\nExecStart=/immutable/old/ai/server.py\n";
+        fs::write(settings.join("cbgpu-ai.service"), ai).unwrap();
+        agent.runtime.ai_change = true;
+        agent.config.native_ai_binary = Some(tmp.path().join("unreviewed-native-ai"));
+        let result = agent.deploy_backend(
+            &"c".repeat(40),
+            "CBGPU-Engineering/CBGPU-backend",
+            Some(&"b".repeat(40)),
+            &tmp.path().join("ai.log"),
+            true,
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .contains("separately verified fenced data handoff")
+        );
+        assert_eq!(
+            fs::read_to_string(settings.join("cbgpu-ai.service")).unwrap(),
+            ai
         );
     }
 }
