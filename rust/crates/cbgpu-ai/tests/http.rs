@@ -202,7 +202,10 @@ async fn native_routes_preserve_ownership_and_gate_only_execution() {
     let backend = tokio::spawn(async move {
         axum::serve(
             listener,
-            Router::new().route(
+            Router::new()
+                .route("/auth/v1/admin/users/{id}",get(|axum::extract::Path(id):axum::extract::Path<String>|async move{Json(json!({"id":id}))}))
+                .route("/rest/v1/profiles",get(|axum::extract::Query(q):axum::extract::Query<std::collections::HashMap<String,String>>|async move{Json(json!([{"id":q["id"].strip_prefix("eq.").unwrap(),"account_status":"ACTIVE","is_approved":false}]))}))
+                .route(
                 "/rest/v1/rpc/cbgpu_service_can_use_resource",
                 post(move || {
                     let s = signal.clone();
@@ -360,4 +363,30 @@ async fn native_routes_preserve_ownership_and_gate_only_execution() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
     backend.abort();
+}
+#[test]
+fn tenant_scope_mode_is_server_driven_and_bad_flags_never_fall_back() {
+    use cbgpu_ai::scoped_authorization_mode as mode;
+    for value in ["1", "true", "TRUE"] {
+        assert!(mode([Some("0".into()), Some(value.into())]).unwrap());
+    }
+    assert!(!mode([None, Some("false".into())]).unwrap());
+    for value in ["tru", "yes", "production"] {
+        assert!(mode([Some("true".into()), Some(value.into())]).is_err());
+    }
+}
+#[tokio::test]
+async fn owned_data_identity_is_fresh_without_requiring_school_resource_approval() {
+    let suspended = Arc::new(AtomicBool::new(false));
+    let flag = suspended.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener,Router::new().route("/auth/v1/admin/users/{id}",get(|axum::extract::Path(id):axum::extract::Path<String>|async move{Json(json!({"id":id}))})).route("/rest/v1/profiles",get(move||{let flag=flag.clone();async move{Json(json!([{"id":OWNER,"is_approved":false,"account_status":if flag.load(Ordering::SeqCst){"SUSPENDED"}else{"REVERIFICATION_REQUIRED"}}]))}}))).await.unwrap()
+    });
+    let a = auth(format!("http://{address}"), true);
+    a.identity(OWNER).await.unwrap();
+    suspended.store(true, Ordering::SeqCst);
+    assert_eq!(a.identity(OWNER).await.unwrap_err().status, 403);
+    server.abort();
 }

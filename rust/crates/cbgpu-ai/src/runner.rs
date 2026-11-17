@@ -28,6 +28,7 @@ pub struct NativeRunner {
     pub python_cpus: String,
     pub tool_dir: Option<PathBuf>,
     pub native_library_path: Option<String>,
+    pub scoped_authorization: bool,
 }
 impl NativeRunner {
     pub fn new(executable: PathBuf, python_image: String) -> Result<Self> {
@@ -75,6 +76,7 @@ impl NativeRunner {
             python_cpus: "16".into(),
             tool_dir: None,
             native_library_path,
+            scoped_authorization: crate::scoped_authorization_from_environment()?,
         })
     }
     fn tool(&self, name: &str) -> PathBuf {
@@ -293,12 +295,18 @@ impl Runner for NativeRunner {
                 "CBGPU_AI_MATERIALS_ROOT",
                 "CBGPU_AI_PAPER_ORIGIN",
                 "CBGPU_AI_CORPUS_OCR_IMAGE",
-                "CBGPU_ACCOUNT_V2",
             ] {
                 if let Some(value) = std::env::var_os(name) {
                     command.env(name, value);
                 }
             }
+        }
+        if !python {
+            // Canonical effective policy, rather than copying a stale raw flag.
+            command.env(
+                "CBGPU_ACCOUNT_V2",
+                if self.scoped_authorization { "1" } else { "0" },
+            );
         }
         if !python && let Ok(database) = std::env::var("CBGPU_AI_DATABASE_URL") {
             command.env("CBGPU_AI_DATABASE_URL", database);

@@ -57,10 +57,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         service_key: std::fs::read_to_string(std::env::var("CBGPU_AI_BACKEND_KEY_FILE")?)?
             .trim()
             .to_owned(),
-        account_v2: matches!(
-            std::env::var("CBGPU_ACCOUNT_V2").ok().as_deref(),
-            Some("1" | "true")
-        ),
+        account_v2: cbgpu_ai::scoped_authorization_from_environment()?,
         client: reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())

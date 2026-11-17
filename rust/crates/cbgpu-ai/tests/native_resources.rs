@@ -47,6 +47,8 @@ async fn reconciliation_and_runner_touch_only_owned_labelled_native_children() {
     let mut runner =
         NativeRunner::new(t.path().join("native-runner"), "synthetic-image".into()).unwrap();
     runner.tool_dir = Some(t.path().to_owned());
+    runner.scoped_authorization = true;
+    std::fs::write(t.path().join("expect-scoped"), "1").unwrap();
     runner.native_library_path = Some(t.path().to_string_lossy().into_owned());
     runner.recover_owned().await.unwrap();
     let calls = std::fs::read_to_string(t.path().join("calls")).unwrap();

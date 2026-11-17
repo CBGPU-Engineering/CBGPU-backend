@@ -166,3 +166,31 @@ ports, imports all twelve legacy core/robotics tables, checks original SQLite
 bytes, restores the private snapshot in a temporary directory, rejects queued
 work and repeat imports, and forbids rollback after a new native row. It never
 queries real systemd units or uses the production AI ports.
+
+## Scoped authorization and remaining operational gate
+
+`CBGPU_MULTISCHOOL_V1=1` or `CBGPU_ACCOUNT_V2=true` selects fresh school-resource
+oracles; `1` and `true` are equivalent. Malformed configured flags stop startup.
+The scheduler checks the owner's current GPU scope before claiming a job and
+again during execution. Trusted native subprocesses receive the canonical
+effective policy flag; customer-code containers receive no host policy/database
+credentials. Private owned records use fresh global identity checks, separately
+from GPU approval: pending affiliation and graduation preserve ownership, while
+suspension, deletion or a ban deny access.
+
+Jobs are personal owner-bound work; there is no project editor impersonation.
+Creator browser-session IDs are not persisted as an additional job lease. The
+trusted BFF must authenticate the real caller freshly before admission; runtime
+revocation uses current identity and scoped resource permission. A browser logout
+alone is not represented as cancellation of an already admitted background job.
+
+Production switching still requires a drained admission barrier, stopped/masked
+legacy writer, idle old/native listeners, a private immutable state/files backup,
+reviewed PostgreSQL provisioning, core plus robotics import and equality checks.
+A zero queued-job snapshot while the Python writer remains active is insufficient.
+`cbgpu-ai-handoff` implements the explicit import and rollback checks; rollback
+must refuse after any new native writes. Native API availability alone does not
+prove model, OCR, web-search or corpus worker readiness. Validate the configured
+native model executables, trusted CUDA libraries, OCR image and scoped corpus
+policy connection before a separately reviewed routing change. Private notes are
+not added to the shared corpus. These changes do not activate production.

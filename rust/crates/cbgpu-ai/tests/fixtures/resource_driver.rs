@@ -59,6 +59,11 @@ fn main() {
             std::process::exit(status.code().unwrap_or(1));
         }
         "native-runner" => {
+            if exe.parent().unwrap().join("expect-scoped").exists() {
+                assert_eq!(std::env::var("CBGPU_ACCOUNT_V2").unwrap(),"1");
+                assert!(std::env::var("SERVICE_ROLE_KEY").is_err());
+                assert!(std::env::var("CBGPU_AI_BACKEND_KEY_FILE").is_err());
+            }
             assert_eq!(std::env::var("CUDA_VISIBLE_DEVICES").unwrap(), "GPU-one");
             let libraries = std::env::var("CBGPU_AI_NATIVE_LIBRARY_PATH").unwrap();
             assert_eq!(std::env::var("LD_LIBRARY_PATH").unwrap(), libraries);
