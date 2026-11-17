@@ -119,3 +119,45 @@ the tooling is not shipped in the native runtime image. A tested older CDK pin
 introduced higher-severity findings and was not retained. Re-run the audit and
 resolve the upstream bundled dependency before an actual cloud deployment;
 configuration/container checks are not a clean security certification.
+
+## School activation is a separate cutover
+
+The multi-school/public-browsing and academic-year code is a staged candidate,
+not evidence that the running single-school services have been migrated. Keep
+its flags off until **all** actual resource consumers enforce the new authority.
+An authenticated PostgreSQL policy cannot restrict a legacy worker using a
+service-role direct table scan.
+
+The production-schema clone rehearsals exercise additive migrations twice,
+preserve historical Auth/session/password and business-table fingerprints, and
+verify tenant isolation, original contest/team/submission RPCs, teacher/student
+membership review, temporary-grant boundaries and academic rollover rollback.
+No operating academic rollover or membership migration was executed by those
+checks. The imported official directory contains 2,408 high schools; listing a
+school never verifies an applicant or enables its GPU sharing.
+
+Before activation, verify the exact running versions and configuration of:
+
+- The root GPU reservation controller: use fresh scope-filtered assignments,
+  including revocation during the next poll, without deleting reservation history.
+  Its old service-role `reservations?status=eq.approved` scan is a hard blocker.
+- Deployment admission **and workers**: retain request-actor provenance, recheck
+  that actor and the owner at dequeue/poll, and authorize before reinstating a
+  proxy. A browser-only check does not protect MCP/internal worker paths.
+- LaTeX, material/file readers and personal-project APIs: preserve owner/member
+  access independently of school approval; authorize physical compute separately.
+- Native and legacy configuration: do not assume enabling the web flag activates
+  backend enforcement. Treat unsupported or inconsistent enabled flags as denial.
+- Timetable widgets: publish the school-bound native app only with its matching
+  self-session oracle, scoped school API and Edge proxy. Do not label another
+  school's legacy timetable or meals as the selected school's information.
+
+School homepage addresses are metadata until reviewed. Website adapters must
+validate the exact approved host, resolve and pin public DNS addresses, reject
+redirects/private addresses, and bound duration/body size. Missing configurations
+must not fall back to Chungbuk Science High School.
+
+Perform one controlled cutover with private backups, a maintenance/rollback plan,
+explicit approval for operating migrations and final live smoke tests. Do not
+activate distributed GPU sharing, execute a real academic rollover, or publish
+old private content as part of this readiness work.
