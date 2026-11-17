@@ -26,7 +26,7 @@ pub mod web;
 pub fn scoped_authorization_mode(values: impl IntoIterator<Item = Option<String>>) -> Result<bool> {
     let mut enabled = false;
     for value in values.into_iter().flatten() {
-        match value.trim().to_ascii_lowercase().as_str() {
+        match value.as_str() {
             "" | "0" | "false" => {}
             "1" | "true" => enabled = true,
             _ => return Err(fail("Invalid school authorization configuration", 503)),

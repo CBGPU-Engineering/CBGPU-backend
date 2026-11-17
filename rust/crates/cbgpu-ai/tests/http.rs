@@ -391,11 +391,11 @@ async fn native_routes_preserve_ownership_and_gate_only_execution() {
 #[test]
 fn tenant_scope_mode_is_server_driven_and_bad_flags_never_fall_back() {
     use cbgpu_ai::scoped_authorization_mode as mode;
-    for value in ["1", "true", "TRUE"] {
+    for value in ["1", "true"] {
         assert!(mode([Some("0".into()), Some(value.into())]).unwrap());
     }
     assert!(!mode([None, Some("false".into())]).unwrap());
-    for value in ["tru", "yes", "production"] {
+    for value in ["tru", "yes", "production", "TRUE", "FALSE", " 1", "0 "] {
         assert!(mode([Some("true".into()), Some(value.into())]).is_err());
     }
 }

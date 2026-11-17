@@ -189,34 +189,52 @@ mod tests {
 }
 
 /// Explicitly disabled or absent is legacy; malformed enabled configuration fails closed.
-pub fn resource_enforced(account: Option<&str>, schools: Option<&str>) -> bool {
-    [account, schools].into_iter().flatten().any(|value| {
-        !matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "" | "0" | "false"
-        )
-    })
+pub fn resource_enforced(account: Option<&str>, schools: Option<&str>) -> Result<bool> {
+    let mut enabled = false;
+    for value in [account, schools].into_iter().flatten() {
+        match value {
+            "" | "0" | "false" => {}
+            "1" | "true" => enabled = true,
+            _ => return Err(fail("Invalid deployment authorization configuration", 503)),
+        }
+    }
+    Ok(enabled)
+}
+pub fn resource_enforced_from_environment() -> Result<bool> {
+    let values = ["CBGPU_ACCOUNT_V2", "CBGPU_MULTISCHOOL_V1"]
+        .into_iter()
+        .map(|key| match std::env::var(key) {
+            Ok(v) => Ok(Some(v)),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(_) => Err(fail("Invalid deployment authorization configuration", 503)),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    resource_enforced(values[0].as_deref(), values[1].as_deref())
 }
 #[cfg(test)]
 mod resource_flag_tests {
     use super::*;
     #[test]
     fn schools_and_malformed_flags_cannot_disable_scope_checks() {
+        for bad in ["typo", "TRUE", "FALSE", " 0", "1 "] {
+            assert!(resource_enforced(Some("1"), Some(bad)).is_err());
+            assert!(resource_enforced(Some(bad), Some("1")).is_err());
+        }
+
         for (account, schools) in [
             (Some("true"), None),
             (Some("1"), None),
             (None, Some("1")),
             (Some("false"), Some("true")),
-            (Some("typo"), None),
         ] {
-            assert!(resource_enforced(account, schools))
+            assert!(resource_enforced(account, schools).unwrap())
         }
         for (account, schools) in [
             (None, None),
             (Some("false"), None),
             (Some("0"), Some("false")),
         ] {
-            assert!(!resource_enforced(account, schools))
+            assert!(!resource_enforced(account, schools).unwrap())
         }
     }
 }

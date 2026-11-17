@@ -1,4 +1,18 @@
 use cbgpu_schools::{Config, router};
+fn enabled(value: Option<&str>) -> Result<bool, &'static str> {
+    match value {
+        None | Some("" | "0" | "false") => Ok(false),
+        Some("1" | "true") => Ok(true),
+        _ => Err("Invalid school API authorization configuration"),
+    }
+}
+fn enabled_from_environment() -> Result<bool, &'static str> {
+    match std::env::var("CBGPU_MULTISCHOOL_V1") {
+        Ok(v) => enabled(Some(&v)),
+        Err(std::env::VarError::NotPresent) => Ok(false),
+        Err(_) => Err("Invalid school API authorization configuration"),
+    }
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listen: std::net::SocketAddr = std::env::var("CBGPU_SCHOOLS_LISTEN")
@@ -9,10 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let listener = tokio::net::TcpListener::bind(listen).await?;
     let config = Config {
-        enabled: matches!(
-            std::env::var("CBGPU_MULTISCHOOL_V1").as_deref(),
-            Ok("1" | "true")
-        ),
+        enabled: enabled_from_environment()?,
         backend_url: std::env::var("CBGPU_SCHOOLS_BACKEND_URL")
             .unwrap_or("http://127.0.0.1:54321".into())
             .trim_end_matches('/')
@@ -47,4 +58,20 @@ async fn shutdown() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
     tokio::select! {_=interrupt=>{},_=terminate=>{}}
+}
+
+#[cfg(test)]
+mod flag_tests {
+    #[test]
+    fn canonical_feature_flag_only() {
+        for value in [None, Some(""), Some("0"), Some("false")] {
+            assert!(!super::enabled(value).unwrap());
+        }
+        for value in ["1", "true"] {
+            assert!(super::enabled(Some(value)).unwrap());
+        }
+        for value in ["TRUE", "FALSE", " 0", "1 ", "yes"] {
+            assert!(super::enabled(Some(value)).is_err());
+        }
+    }
 }

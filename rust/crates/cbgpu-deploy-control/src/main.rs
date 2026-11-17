@@ -204,10 +204,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         key: std::fs::read_to_string(std::env::var("CBGPU_DEPLOY_BACKEND_KEY_FILE")?)?
             .trim()
             .into(),
-        account_v2: cbgpu_deploy_control::config::resource_enforced(
-            std::env::var("CBGPU_ACCOUNT_V2").ok().as_deref(),
-            std::env::var("CBGPU_MULTISCHOOL_V1").ok().as_deref(),
-        ),
+        account_v2: cbgpu_deploy_control::config::resource_enforced_from_environment()
+            .map_err(|_| "Invalid deployment authorization configuration")?,
         client: reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
