@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 fn config(enabled: bool, origin: String) -> Config {
     Config {
+        central_cpu_enabled: false,
         enabled,
         backend_url: origin,
         anon_key: "fixture-anon".into(),
@@ -442,5 +443,91 @@ async fn affiliation_routes_delegate_fresh_caller_with_bound_school() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    server.abort();
+}
+
+#[tokio::test]
+async fn central_cpu_default_off_and_bound_platform_routes() {
+    let denied = router(config(true, "http://127.0.0.1:1".into()))
+        .oneshot(
+            Request::get("/v1/central-cpu-access?purpose=compose")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::NOT_FOUND);
+    let mock = Router::new()
+        .route("/auth/v1/user", get(|| async { Json(json!({"id":"trusted"})) }))
+        .route("/rest/v1/rpc/cbgpu_platform_cpu_api", post(|h: HeaderMap, Json(v): Json<Value>| async move {
+            assert_eq!(h["authorization"], "Bearer fixture");
+            if v["action"] == "self" {
+                assert_eq!(v["payload"], json!({"purpose":"compose"}));
+                Json(json!({"school_id":"saved-school","allowed":false,"reason":"NO_ALLOCATION"}))
+            } else {
+                assert_eq!(v["action"], "set");
+                assert_eq!(v["payload"]["school_id"], "school-b");
+                assert_eq!(v["payload"]["status"], "APPROVED");
+                assert_eq!(v["payload"]["confirmed"], true);
+                Json(json!({"school_id":"school-b","revision":1,"status":"APPROVED"}))
+            }
+        }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let mut cfg = config(true, format!("http://{address}"));
+    cfg.central_cpu_enabled = true;
+    let app = router(cfg);
+    let noauth = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/central-cpu-access?purpose=compose")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(noauth.status(), StatusCode::UNAUTHORIZED);
+    let own = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/central-cpu-access?purpose=compose&school_id=untrusted")
+                .header("authorization", "Bearer fixture")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(own.status(), StatusCode::OK);
+    assert_eq!(body(own).await["school_id"], "saved-school");
+    let set = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/v1/admin/schools/school-b/central-cpu")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(
+                    r#"{"revision":0,"status":"APPROVED","confirmed":true}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(set.status(), StatusCode::OK);
+    let spoof = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/v1/admin/schools/school-b/central-cpu")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(
+                    r#"{"school_id":"school-a","owner_id":"foreign"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(spoof.status(), StatusCode::BAD_REQUEST);
     server.abort();
 }

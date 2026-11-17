@@ -59,7 +59,7 @@ fn command(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
 fn snapshot(db: &str) -> Result<Vec<u8>> {
     let sql = r#"CREATE TEMP TABLE account_check(nsp text,tbl text,rows bigint,digest text);
 DO $$DECLARE r record;nr bigint;hash text;projection text;BEGIN FOR r IN SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND(n.nspname='public' OR(n.nspname='auth' AND c.relname IN('users','sessions'))) ORDER BY 1,2 LOOP
-projection:=CASE WHEN r.nspname='public' AND r.relname='profiles' THEN 'to_jsonb(t)-ARRAY[''account_type'',''account_status'',''school_id'',''affiliation_verified'',''verified_at'',''department'',''organization'',''required_school_year'',''required_grade'']' WHEN r.nspname='public' AND r.relname='contests' THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'',''participant_policy'']' WHEN r.nspname='public' AND r.relname IN('research_notes','shared_materials') THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'']' WHEN r.nspname='public' AND r.relname='contest_submissions' THEN 'to_jsonb(t)-ARRAY[''student_id_consent'',''student_id_consented_at'']' WHEN r.nspname='public' AND r.relname='study_posts' THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'']' WHEN r.nspname='public' AND r.relname='cpu_projects' THEN 'to_jsonb(t)-ARRAY[''school_id'',''deploy_requested_by'']' ELSE 'to_jsonb(t)' END;
+projection:=CASE WHEN r.nspname='public' AND r.relname='profiles' THEN 'to_jsonb(t)-ARRAY[''account_type'',''account_status'',''school_id'',''affiliation_verified'',''verified_at'',''department'',''organization'',''required_school_year'',''required_grade'']' WHEN r.nspname='public' AND r.relname='contests' THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'',''participant_policy'']' WHEN r.nspname='public' AND r.relname IN('research_notes','shared_materials') THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'']' WHEN r.nspname='public' AND r.relname='contest_submissions' THEN 'to_jsonb(t)-ARRAY[''student_id_consent'',''student_id_consented_at'']' WHEN r.nspname='public' AND r.relname='study_posts' THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'']' WHEN r.nspname='public' AND r.relname='cpu_projects' THEN 'to_jsonb(t)-ARRAY[''school_id'',''deploy_requested_by'',''allocation_school_id'',''deploy_actor_session_id'',''execution_mode'']' ELSE 'to_jsonb(t)' END;
 EXECUTE format('SELECT count(*),md5(coalesce(string_agg(v::text,E''\n'' ORDER BY v::text),''''))FROM(SELECT %s v FROM %I.%I t)x',projection,r.nspname,r.relname) INTO nr,hash;
 INSERT INTO account_check VALUES(r.nspname,r.relname,nr,hash);END LOOP;END$$;
 COPY(SELECT * FROM account_check ORDER BY nsp,tbl)TO STDOUT WITH CSV;"#;
@@ -348,6 +348,7 @@ fn main() -> Result<()> {
         "20261117143208_school_affiliation_change_requests.sql",
         "20261117143941_school_message_report_moderation.sql",
         "20261117144545_legacy_school_account_preference.sql",
+        "20261117154700_platform_school_central_cpu_allocations.sql",
     ];
     let sources = migrations
         .iter()
@@ -932,6 +933,44 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(
             repo.join("schema/tests/schools/legacy-preference.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/central-cpu-defaults.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/central-cpu.sql"),
         )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;

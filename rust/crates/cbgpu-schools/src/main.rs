@@ -6,8 +6,8 @@ fn enabled(value: Option<&str>) -> Result<bool, &'static str> {
         _ => Err("Invalid school API authorization configuration"),
     }
 }
-fn enabled_from_environment() -> Result<bool, &'static str> {
-    match std::env::var("CBGPU_MULTISCHOOL_V1") {
+fn enabled_from_environment(name: &str) -> Result<bool, &'static str> {
+    match std::env::var(name) {
         Ok(v) => enabled(Some(&v)),
         Err(std::env::VarError::NotPresent) => Ok(false),
         Err(_) => Err("Invalid school API authorization configuration"),
@@ -23,7 +23,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let listener = tokio::net::TcpListener::bind(listen).await?;
     let config = Config {
-        enabled: enabled_from_environment()?,
+        enabled: enabled_from_environment("CBGPU_MULTISCHOOL_V1")?,
+        central_cpu_enabled: enabled_from_environment("CBGPU_CENTRAL_CPU_V1")?,
         backend_url: std::env::var("CBGPU_SCHOOLS_BACKEND_URL")
             .unwrap_or("http://127.0.0.1:54321".into())
             .trim_end_matches('/')

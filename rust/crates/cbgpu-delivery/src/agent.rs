@@ -614,7 +614,6 @@ impl<R: Runtime> Agent<R> {
                         "CBGPU_ACCOUNTS_API_URL",
                         "CBGPU_MULTISCHOOL_V1",
                         "CBGPU_CENTRAL_CPU_V1",
-                        "CBGPU_CENTRAL_CPU_V1",
                         "CBGPU_SCHOOLS_API_URL",
                         "CBGPU_TIMETABLE_WARM_SECRET_FILE",
                         "CBGPU_PUBLIC_CONTENT_API_URL",
@@ -1694,7 +1693,6 @@ mod tests {
             saved.contains("CBGPU_TIMETABLE_WARM_SECRET_FILE=/private/timetable-warm-secret\n")
         );
         assert!(!saved.contains("NEXT_PUBLIC_CBGPU_TIMETABLE_WARM"));
-        assert!(saved.contains("CBGPU_CENTRAL_CPU_V1=0\n"));
         assert!(saved.contains("NEXT_PUBLIC_CBGPU_CENTRAL_CPU_V1=0\n"));
     }
     #[test]

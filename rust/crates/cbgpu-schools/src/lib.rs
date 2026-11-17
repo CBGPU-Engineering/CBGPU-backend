@@ -21,6 +21,7 @@ pub const FEATURES: &[&str] = &[
 ];
 pub struct Config {
     pub enabled: bool,
+    pub central_cpu_enabled: bool,
     pub backend_url: String,
     pub anon_key: String,
     pub client: reqwest::Client,
@@ -66,6 +67,19 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         .split('/')
         .collect::<Vec<_>>();
     let method = request.method().clone();
+    if path.iter().any(|part| {
+        matches!(
+            *part,
+            "central-cpu" | "central-cpu-access" | "central-cpu-pool"
+        )
+    }) && !config.central_cpu_enabled
+    {
+        return failure(
+            StatusCode::NOT_FOUND,
+            "Central CPU is not enabled",
+            "FEATURE_DISABLED",
+        );
+    }
     let public = (method == Method::GET && path.as_slice() == ["v1", "features"])
         || method == Method::GET
             && path.first() == Some(&"v1")
@@ -83,11 +97,27 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
     let query_fields: serde_json::Map<String, Value> =
         url::form_urlencoded::parse(query.as_bytes())
             .filter(|(key, _)| {
-                ["q", "limit", "offset", "status", "school_id"].contains(&key.as_ref())
+                ["q", "limit", "offset", "status", "school_id", "purpose"].contains(&key.as_ref())
             })
             .map(|(key, value)| (key.into_owned(), Value::String(value.into_owned())))
             .collect();
     let route = match (path.as_slice(), &method) {
+        (["v1", "admin", "central-cpu-pool"], &Method::GET) => {
+            Some(("central_cpu_pool_get", json!({})))
+        }
+        (["v1", "admin", "central-cpu-pool"], &Method::PATCH) => {
+            Some(("central_cpu_pool_set", json!({})))
+        }
+        (["v1", "central-cpu-access"], &Method::GET) => Some((
+            "central_cpu_self",
+            json!({"purpose":query_fields.get("purpose")}),
+        )),
+        (["v1", "admin", "schools", school, "central-cpu"], &Method::GET) => {
+            Some(("central_cpu_get", json!({"school_id":school})))
+        }
+        (["v1", "admin", "schools", school, "central-cpu"], &Method::PATCH) => {
+            Some(("central_cpu_set", json!({"school_id":school})))
+        }
         (["v1", "schools", school, "affiliation-requests"], &Method::GET) => {
             Some(("affiliation_own", json!({"school_id":school})))
         }
@@ -323,6 +353,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             ]
             .contains(&k.as_str())
                 && !(action == "review_member" && k == "school_roles")
+                && !(["central_cpu_set", "central_cpu_pool_set"].contains(&action) && k == "status")
         }) {
             return failure(
                 StatusCode::BAD_REQUEST,
@@ -383,6 +414,11 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         "cbgpu_school_api"
     };
     let (rpc, rpc_action) = match action {
+        "central_cpu_pool_get" => ("cbgpu_platform_cpu_api", "pool_get"),
+        "central_cpu_pool_set" => ("cbgpu_platform_cpu_api", "pool_set"),
+        "central_cpu_self" => ("cbgpu_platform_cpu_api", "self"),
+        "central_cpu_get" => ("cbgpu_platform_cpu_api", "get"),
+        "central_cpu_set" => ("cbgpu_platform_cpu_api", "set"),
         "affiliation_own"
         | "affiliation_create"
         | "affiliation_withdraw"
