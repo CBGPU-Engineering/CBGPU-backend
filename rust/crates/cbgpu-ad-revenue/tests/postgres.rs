@@ -116,11 +116,26 @@ fn actual_import_atomic_overlap_idempotency_concurrency_privacy_and_experiments(
         .nth(3)
         .unwrap()
         .join("supabase/migrations/20261117103045_official_ad_revenue_reporting.sql");
-    let source = std::fs::read_to_string(schema).unwrap();
+    let source = std::fs::read_to_string(&schema).unwrap();
     db.sql(&source).unwrap();
     db.sql(&source).unwrap();
+    let attribution = std::fs::read_to_string(
+        schema
+            .parent()
+            .unwrap()
+            .join("20261117113827_ad_revenue_unit_format_attribution.sql"),
+    )
+    .unwrap();
+    db.sql(&attribution).unwrap();
+    db.sql(&attribution).unwrap();
     let p = report("2026-10-01", "1.25", "ESTIMATED");
     let preview = db.call("preview", &p).unwrap();
+    assert_eq!(preview["device_basis"], "AD_UNIT_FORMAT");
+    assert!(preview["physical_device_revenue"].is_null());
+    assert_eq!(
+        preview["devices"][0]["physical_device_reason"],
+        "NO_OFFICIAL_DEVICE_DIMENSION"
+    );
     assert_eq!(preview["devices"][0]["revenue_krw"], "1.25");
     assert_eq!(preview["devices"][0]["ecpm_krw"], "12.5");
     assert!(preview["devices"][0]["rpuv_krw"].is_null());

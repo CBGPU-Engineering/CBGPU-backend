@@ -27,8 +27,11 @@ Daily unique visitors are never summed into monthly visitors. RPUV/RPS are N/A
 without aligned aggregate denominators. Fill rate is N/A because request and
 impression semantics have not been verified. eCPM/CTR use only supplied official
 counts. The desktop `DAN-kVpBmlPRbOvGb6oi` and mobile
-`DAN-vpZNfcj3tj0jMkhV` units are shared across pages, so per-placement revenue is
-N/A.
+`DAN-vpZNfcj3tj0jMkhV` units identify mobile/desktop banner formats, not physical visitor devices. A
+narrow desktop window can use the mobile-format unit. DTOs explicitly return
+`device_basis: AD_UNIT_FORMAT`; physical-device revenue is N/A with reason
+`NO_OFFICIAL_DEVICE_DIMENSION`. The units are shared across pages, so
+per-placement revenue is N/A.
 
 `/experiments` records planned 60/120-second console settings and explicit
 administrator attestations with optimistic revisions. It changes no advertising

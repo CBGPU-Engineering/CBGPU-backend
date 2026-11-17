@@ -331,6 +331,7 @@ fn main() -> Result<()> {
         "20261117093022_equipment_operator_school_authority.sql",
         "20261117095936_manufacturing_file_self_authority.sql",
         "20261117103045_official_ad_revenue_reporting.sql",
+        "20261117113827_ad_revenue_unit_format_attribution.sql",
     ];
     let sources = migrations
         .iter()
