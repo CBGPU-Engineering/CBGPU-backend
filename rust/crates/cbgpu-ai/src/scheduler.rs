@@ -346,6 +346,9 @@ impl Scheduler {
                         "Task failed. See the task log for details.".into(),
                     ));
                 }
+                // A fast worker can finish between periodic checks. Revalidate
+                // the effective module/resource policy before publishing success.
+                self.api.authorization.execution(owner).await?;
                 if job["kind"] == "python" {
                     atomic_json(
                         &folder.join("result.json"),

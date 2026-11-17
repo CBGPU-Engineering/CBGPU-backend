@@ -166,7 +166,7 @@ impl Authorization {
                     "{}/rest/v1/rpc/cbgpu_service_can_use_resource",
                     self.backend_url
                 ))
-                .json(&json!({"user_id":owner,"resource":"gpu","target_school":"cbsh"}))
+                .json(&json!({"user_id":owner,"resource":"ai","target_school":"cbsh"}))
         } else {
             self.client
                 .get(format!("{}/rest/v1/profiles", self.backend_url))
@@ -197,7 +197,7 @@ impl Authorization {
             })
         };
         if !allowed {
-            return Err(fail("Verified school GPU permission is required", 403));
+            return Err(fail("Verified school AI permission is required", 403));
         }
         Ok(())
     }
@@ -453,6 +453,9 @@ async fn handle(api: Arc<Api>, request: Request) -> Result<Response> {
         ));
     }
     if p == ["web", "search"] && method == Method::POST {
+        if api.authorization.account_v2 {
+            api.authorization.execution(&owner).await?;
+        }
         return Ok(json_response(
             200,
             api.web.search(&owner, text("query"), false).await?,
@@ -723,6 +726,9 @@ async fn handle(api: Arc<Api>, request: Request) -> Result<Response> {
             }
         }
         if p == ["uploads", id, "prepare"] && method == Method::POST {
+            if api.authorization.account_v2 {
+                api.authorization.execution(&owner).await?;
+            }
             return Ok(json_response(
                 202,
                 json!({"file":api.preparation.start(&owner,id).await?}),

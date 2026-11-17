@@ -125,7 +125,7 @@ async fn school_oracle_rechecked_and_revocation_is_immediate() {
                     let signal = signal.clone();
                     async move {
                         assert_eq!(value["user_id"], OWNER);
-                        assert_eq!(value["resource"], "gpu");
+                        assert_eq!(value["resource"], "ai");
                         Json(json!(signal.load(Ordering::SeqCst)))
                     }
                 }),
@@ -305,6 +305,29 @@ async fn native_routes_preserve_ownership_and_gate_only_execution() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::CREATED);
     let upload = body(r).await["id"].as_str().unwrap().to_owned();
+    let denied = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            &format!("/uploads/{upload}/prepare"),
+            Some(OWNER),
+            Body::from("{}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let denied = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/web/search",
+            Some(OWNER),
+            Body::from(r#"{"query":"must not send an external request"}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    allowed.store(true, Ordering::SeqCst);
     let r = app
         .clone()
         .oneshot(request(
@@ -335,6 +358,7 @@ async fn native_routes_preserve_ownership_and_gate_only_execution() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     assert!(ready);
+    allowed.store(false, Ordering::SeqCst);
     let r = app
         .clone()
         .oneshot(request(

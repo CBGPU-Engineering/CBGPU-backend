@@ -194,3 +194,12 @@ prove model, OCR, web-search or corpus worker readiness. Validate the configured
 native model executables, trusted CUDA libraries, OCR image and scoped corpus
 policy connection before a separately reviewed routing change. Private notes are
 not added to the shared corpus. These changes do not activate production.
+
+Scoped execution uses the derived `ai` permission: current GPU permission **and**
+the school's effective AI module policy (global enabled state, allowed-school
+restriction, local configuration). Disabling AI cancels admitted AI workers and
+blocks new jobs, web search and document preparation without revoking notebook
+GPU access. Successful workers recheck policy before publishing completion.
+Existing owned files, extracted text, settings and history remain readable with
+a valid global identity. Guest requests still grant the underlying `gpu` scope;
+`ai` is a derived capability rather than a new guest-request approval scope.

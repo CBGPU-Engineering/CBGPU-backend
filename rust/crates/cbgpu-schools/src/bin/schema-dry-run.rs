@@ -322,6 +322,7 @@ fn main() -> Result<()> {
         "20261117050640_cpu_deployment_request_actor.sql",
         "20261117051453_gpu_scoped_assignment_snapshot.sql",
         "20261117063714_school_resource_contexts.sql",
+        "20261117065015_effective_school_feature_policy.sql",
     ];
     let sources = migrations
         .iter()
@@ -482,6 +483,25 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(
             repo.join("schema/tests/schools/resource-contexts.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/effective-features.sql"),
         )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
