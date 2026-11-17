@@ -602,6 +602,9 @@ impl<R: Runtime> Agent<R> {
                         "CBGPU_ACCOUNTS_API_URL",
                         "CBGPU_MULTISCHOOL_V1",
                         "CBGPU_SCHOOLS_API_URL",
+                        "CBGPU_PUBLIC_CONTENT_API_URL",
+                        "CBGPU_INTERNAL_NETWORK_MODE",
+                        "CBGPU_PUBLIC_BROWSING_V1",
                     ]
                     .contains(&k.as_str())
             })
