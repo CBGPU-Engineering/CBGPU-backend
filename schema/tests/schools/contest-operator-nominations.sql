@@ -47,5 +47,11 @@ select set_config('request.jwt.claims','{"sub":"fca10000-0000-4000-8000-00000000
 do $$begin begin perform public.cbgpu_contest_school_operators('approve',jsonb_build_object('id',(select value#>>'{nomination,id}'from operator_nomination),'confirmed',true,'revision',7));raise exception 'REVOKED_NOMINATION_SESSION_GRANTED';exception when insufficient_privilege then null;end;end$$;
 reset role;
 do $$begin if exists(select 1 from public.event_hosts where contest_id='fca30000-0000-4000-8000-000000000001')then raise exception 'FAILED_GRANT_PARTIAL_SIDE_EFFECT';end if;if exists(select 1 from public.profiles where id='fca10000-0000-4000-8000-000000000002'and is_admin)then raise exception 'GLOBAL_ADMIN_PROMOTION';end if;end$$;
+reset role;insert into auth.sessions(id,user_id)values('fca20000-0000-4000-8000-000000000004','fca10000-0000-4000-8000-000000000002');
+select set_config('request.jwt.claims','{"sub":"fca10000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fca20000-0000-4000-8000-000000000004"}',true);set local role authenticated;
+select public.cbgpu_contest_school_operators('nominate',jsonb_build_object('invitation_id',(select value#>>'{invitation,id}'from cohost_invite),'confirmed',true,'revision',7));
+select set_config('request.jwt.claims','{"sub":"fca10000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fca20000-0000-4000-8000-000000000001"}',true);
+select public.cbgpu_contest_school_operators('approve',jsonb_build_object('id',(select value#>>'{nomination,id}'from operator_nomination),'confirmed',true,'revision',8));
+reset role;do $$begin if not exists(select 1 from public.event_hosts where contest_id='fca30000-0000-4000-8000-000000000001'and role='manager')then raise exception 'FRESH_EXPLICIT_CONSENT_CANNOT_RENEW';end if;end$$;
 rollback;
 select 'CONTEST_OPERATOR_NOMINATION_TESTS_PASSED';
