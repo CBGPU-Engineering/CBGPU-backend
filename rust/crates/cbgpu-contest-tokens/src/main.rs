@@ -78,6 +78,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             std::env::var("CBGPU_ACCOUNT_V2").as_deref(),
             Ok("1" | "true")
         ),
+        multischool: matches!(
+            std::env::var("CBGPU_MULTISCHOOL_V1").as_deref(),
+            Ok("1" | "true")
+        ),
     });
     let api = Api::new(identity, Arc::new(Store { pool: exec_pool }), key)?;
     axum::serve(tokio::net::TcpListener::bind(address).await?, router(api))
