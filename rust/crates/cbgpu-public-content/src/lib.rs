@@ -1,4 +1,5 @@
-//! Anonymous-only DTO boundary. Never forwards browser cookies or user credentials.
+pub mod assets;
+// Anonymous-only DTO boundary. Never forwards browser cookies or user credentials.
 use axum::{
     Json, Router,
     extract::{Request, State},
@@ -14,6 +15,7 @@ pub struct Config {
     pub backend_url: String,
     pub anon_key: String,
     pub client: reqwest::Client,
+    pub assets: Option<assets::Assets>,
 }
 struct PublicState {
     config: Config,
@@ -156,6 +158,23 @@ async fn handle(State(state): State<Arc<PublicState>>, request: Request) -> Resp
         .trim_start_matches('/')
         .split('/')
         .collect::<Vec<_>>();
+    if parts.len() == 5
+        && parts[0] == "v1"
+        && parts[1] == "assets"
+        && parts[2] == "contests"
+        && parts[4] == "banner"
+    {
+        if request.uri().query().is_some() {
+            return assets::failure(StatusCode::NOT_FOUND);
+        }
+        let Ok(id) = uuid::Uuid::parse_str(parts[3]) else {
+            return assets::failure(StatusCode::NOT_FOUND);
+        };
+        return match &state.config.assets {
+            Some(store) => store.get(id).await,
+            None => assets::failure(StatusCode::NOT_FOUND),
+        };
+    }
     if parts.len() < 2 || parts.len() > 3 || parts[0] != "v1" {
         return error(StatusCode::NOT_FOUND, "NOT_FOUND");
     }
@@ -248,7 +267,7 @@ async fn handle(State(state): State<Arc<PublicState>>, request: Request) -> Resp
             Err(_) => return error(StatusCode::BAD_GATEWAY, "INVALID_PUBLIC_RESPONSE"),
         }
     }
-    let value = match serde_json::from_slice(&bytes)
+    let mut value = match serde_json::from_slice(&bytes)
         .ok()
         .and_then(|v| clean_response(v, fields, detail))
     {
@@ -257,6 +276,46 @@ async fn handle(State(state): State<Arc<PublicState>>, request: Request) -> Resp
     };
     if detail && value["item"].is_null() {
         return error(StatusCode::NOT_FOUND, "NOT_FOUND");
+    }
+    if parts[1] == "contests"
+        && let Some(store) = &config.assets
+    {
+        let ids = if detail {
+            vec![
+                value["item"]["id"]
+                    .as_str()
+                    .and_then(|v| uuid::Uuid::parse_str(v).ok()),
+            ]
+        } else {
+            value["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|row| {
+                    row["id"]
+                        .as_str()
+                        .and_then(|v| uuid::Uuid::parse_str(v).ok())
+                })
+                .collect()
+        };
+        let ids = ids.into_iter().flatten().collect::<Vec<_>>();
+        let available = store.available(&ids).await;
+        let attach = |row: &mut Value| {
+            if let Some(id) = row["id"]
+                .as_str()
+                .and_then(|v| uuid::Uuid::parse_str(v).ok())
+                && available.contains(&id)
+            {
+                row["banner_url"] = json!(assets::alias(id));
+            }
+        };
+        if detail {
+            attach(&mut value["item"])
+        } else if let Some(rows) = value["items"].as_array_mut() {
+            for row in rows {
+                attach(row)
+            }
+        }
     }
     let mut response = Json(value).into_response();
     response
@@ -303,6 +362,7 @@ mod tests {
             backend_url: "http://127.0.0.1:1".into(),
             anon_key: "synthetic".into(),
             client,
+            assets: None,
         });
         for (method, path, status) in [
             ("POST", "/v1/projects", 405),
@@ -342,6 +402,7 @@ mod tests {
             backend_url: format!("http://{address}"),
             anon_key: "synthetic-anon".into(),
             client: reqwest::Client::builder().no_proxy().build().unwrap(),
+            assets: None,
         });
         let response = app
             .oneshot(
