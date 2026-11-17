@@ -22,6 +22,8 @@ create or replace function public.cbgpu_contest_visible(contest uuid) returns bo
 revoke all on function public.cbgpu_school_scope_read(text,text,text[]),public.cbgpu_school_scope_valid(text,text,text[]),public.cbgpu_contest_visible(uuid) from public;
 grant execute on function public.cbgpu_school_scope_read(text,text,text[]),public.cbgpu_contest_visible(uuid) to anon,authenticated;
 grant execute on function public.cbgpu_school_scope_valid(text,text,text[]) to authenticated;
+create or replace function public.cbgpu_personal_project_identity() returns boolean language sql stable security definer set search_path='' as $$select cbgpu_accounts.current_session_valid() and exists(select 1 from public.profiles p join auth.users u on u.id=p.id where p.id=auth.uid() and p.account_status<>'SUSPENDED' and u.deleted_at is null and(u.banned_until is null or u.banned_until<=now()))$$;
+revoke all on function public.cbgpu_personal_project_identity() from public,anon;grant execute on function public.cbgpu_personal_project_identity() to authenticated;
 -- Restrictive policies intersect existing owner/member/host rules, never replace them.
 drop policy if exists multischool_contest_read on public.contests;
 create policy multischool_contest_read on public.contests as restrictive for select to anon,authenticated using(public.cbgpu_contest_visible(id));
@@ -34,22 +36,40 @@ create policy multischool_material_insert on public.shared_materials as restrict
 drop policy if exists multischool_notes_read on public.research_notes;
 create policy multischool_notes_read on public.research_notes as restrictive for select to anon,authenticated using(user_id=auth.uid() or public.cbgpu_school_scope_read(school_id,access_scope,allowed_school_ids));
 drop policy if exists multischool_notes_insert on public.research_notes;
-create policy multischool_notes_insert on public.research_notes as restrictive for insert to authenticated with check(user_id=auth.uid() and public.cbgpu_school_scope_valid(school_id,access_scope,allowed_school_ids));
+create policy multischool_notes_insert on public.research_notes as restrictive for insert to authenticated with check(user_id=auth.uid() and public.cbgpu_personal_project_identity() and(not is_shared or public.cbgpu_school_scope_valid(school_id,access_scope,allowed_school_ids)));
 -- Changing sharing or school requires a fresh verified source-school membership.
 -- Ordinary owner edits remain valid after graduation or a membership expires.
 create or replace function cbgpu_schools.guard_scope_change() returns trigger language plpgsql security definer set search_path='' as $$begin
  if auth.uid() is null then return new;end if;
  if not cbgpu_accounts.current_session_valid() then raise exception 'AUTHENTICATION_REQUIRED' using errcode='42501';end if;
+ if tg_table_name='research_notes' then if new.is_shared and not old.is_shared and not cbgpu_schools.scope_valid(auth.uid(),new.school_id,new.access_scope,new.allowed_school_ids) then raise exception 'SCHOOL_SCOPE_PERMISSION_REQUIRED' using errcode='42501';end if;end if;
  if(new.school_id,new.access_scope,new.allowed_school_ids) is distinct from(old.school_id,old.access_scope,old.allowed_school_ids) and not cbgpu_schools.scope_valid(auth.uid(),new.school_id,new.access_scope,new.allowed_school_ids) then raise exception 'SCHOOL_SCOPE_PERMISSION_REQUIRED' using errcode='42501';end if;return new;end$$;
 drop trigger if exists zz_multischool_contest_scope on public.contests;create trigger zz_multischool_contest_scope before update on public.contests for each row execute function cbgpu_schools.guard_scope_change();
 drop trigger if exists zz_multischool_material_scope on public.shared_materials;create trigger zz_multischool_material_scope before update on public.shared_materials for each row execute function cbgpu_schools.guard_scope_change();
 drop trigger if exists zz_multischool_note_scope on public.research_notes;create trigger zz_multischool_note_scope before update on public.research_notes for each row execute function cbgpu_schools.guard_scope_change();
 create or replace function cbgpu_accounts.guard_contest_execution() returns trigger language plpgsql security definer set search_path='' as $$begin
  if auth.uid() is not null and not cbgpu_accounts.current_session_valid() then raise exception 'AUTHENTICATION_REQUIRED' using errcode='42501';end if;
- if tg_table_name='event_registrations' and new.status in('cancelled','declined') then return new;end if;
+ if tg_table_name='event_registrations' then if new.status in('cancelled','declined') then return new;end if;end if;
  if not cbgpu_schools.contest_register(new.contest_id,case when tg_table_name='event_registrations' then new.user_id else auth.uid() end) then raise exception 'CONTEST_RESOURCE_PERMISSION_REQUIRED' using errcode='42501';end if;return new;end$$;
 create or replace function public.promote_event_waitlist() returns trigger language plpgsql security definer set search_path='' as $$declare next_id uuid;begin
  if old.status='confirmed' and new.status<>'confirmed' then perform pg_advisory_xact_lock(hashtextextended(new.contest_id::text,0));select r.id into next_id from public.event_registrations r where r.contest_id=new.contest_id and r.status='waitlisted' and cbgpu_schools.contest_register(r.contest_id,r.user_id) order by r.created_at,r.id limit 1 for update skip locked;if next_id is not null then update public.event_registrations set status='confirmed' where id=next_id;end if;end if;return null;end$$;
+-- Votes use the same fresh contest scope as registrations; old confirmed
+-- entries alone do not retain school-only voting after affiliation/grant expiry.
+create or replace function cbgpu_schools.guard_award_ballot() returns trigger language plpgsql security definer set search_path='' as $$begin
+ if auth.uid() is null then return new;end if;
+ if new.voter_id<>auth.uid() or not public.cbgpu_personal_project_identity() or not cbgpu_schools.contest_register(new.contest_id,auth.uid()) then raise exception 'CONTEST_VOTING_PERMISSION_REQUIRED' using errcode='42501';end if;return new;end$$;
+drop trigger if exists zz_multischool_ballot_scope on public.contest_award_ballots;
+create trigger zz_multischool_ballot_scope before insert or update on public.contest_award_ballots for each row execute function cbgpu_schools.guard_award_ballot();
+-- Preserve the existing reviewed awards business logic; require a fresh identity
+-- before its SECURITY DEFINER body can read or mutate any contest state.
+do $$declare definition text;updated text;begin
+ if to_regprocedure('public.contest_awards_api(uuid,text,jsonb)') is not null then
+ definition:=pg_get_functiondef('public.contest_awards_api(uuid,text,jsonb)'::regprocedure);
+ if position('public.cbgpu_personal_project_identity()' in definition)=0 then
+ updated:=replace(definition,' if actor is null then',E' if not public.cbgpu_personal_project_identity() then raise exception ''AUTHENTICATION_REQUIRED'' using errcode=''42501'';end if;\n if actor is null then');
+ if updated=definition then raise exception 'CONTEST_AWARDS_VERSION_MISMATCH';end if;execute updated;
+ end if;end if;
+end$$;
 -- Existing scoped tokens retain their same owner/session/hash/allowed IDs. Only
 -- registration permission changes to each real contest's tenant; read/cancel do
 -- not require a school grant and remain protected by their existing RLS reader.
@@ -71,6 +91,10 @@ create policy account_v2_contest_upload on storage.objects as restrictive for in
 );
 -- RLS can invoke only these narrow predicates; private contacts/state remain inaccessible.
 revoke usage on schema cbgpu_schools from anon,authenticated;
+-- The existing waitlist SECURITY DEFINER function is owned by the legacy
+-- database role; grant only its required fresh predicate, never private tables.
+grant usage on schema cbgpu_schools to postgres;
+grant execute on function cbgpu_schools.contest_register(uuid,uuid) to postgres;
 revoke all on all functions in schema cbgpu_schools from public,anon,authenticated;
 
 commit;

@@ -308,6 +308,7 @@ fn main() -> Result<()> {
         "20261117013206_multi_school_features_messaging.sql",
         "20261117015504_explicit_public_school_content.sql",
         "20261117020000_school_gpu_enrollment.sql",
+        "20261117023150_school_scoped_guest_access.sql",
     ];
     for _ in 0..2 {
         for file in migrations {
@@ -349,6 +350,23 @@ fn main() -> Result<()> {
             "ON_ERROR_STOP=1",
         ],
         Some(&fs::read(repo.join("schema/tests/schools/signup.sql"))?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(repo.join("schema/tests/schools/business.sql"))?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
     let directory_sql = format!(

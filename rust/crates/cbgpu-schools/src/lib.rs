@@ -156,13 +156,22 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         (["v1", "message-mutes"], &Method::POST) => Some(("message_mute", json!({}))),
         (["v1", "publications"], &Method::GET) => Some(("publication_list", json!({}))),
         (["v1", "publications"], &Method::POST) => Some(("publication_save", json!({}))),
+        (["v1", "schools", school, "guest-requests"], &Method::GET) => {
+            Some(("guest_list", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "guest-requests"], &Method::POST) => {
+            Some(("guest_create", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "guest-requests", id, "review"], &Method::POST) => {
+            Some(("guest_review", json!({"school_id":school,"id":id})))
+        }
         _ => None,
     };
     let Some((action, mut payload)) = route else {
         return failure(StatusCode::NOT_FOUND, "School route not found", "NOT_FOUND");
     };
     if method != Method::GET {
-        let bytes = match to_bytes(request.into_body(), 65536).await {
+        let bytes = match to_bytes(request.into_body(), 262144).await {
             Ok(v) => v,
             Err(_) => {
                 return failure(
@@ -266,6 +275,9 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
     let (rpc, rpc_action) = match action {
         "publication_list" => ("cbgpu_public_project_api", "list"),
         "publication_save" => ("cbgpu_public_project_api", "save"),
+        "guest_list" => ("cbgpu_school_guest_api", "list"),
+        "guest_create" => ("cbgpu_school_guest_api", "create"),
+        "guest_review" => ("cbgpu_school_guest_api", "review"),
         _ => (rpc, action),
     };
     let mut call = config
@@ -308,6 +320,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
                     Some("42501") => StatusCode::FORBIDDEN,
                     Some("23505") => StatusCode::CONFLICT,
                     Some("P0002") => StatusCode::NOT_FOUND,
+                    Some("P0429") => StatusCode::TOO_MANY_REQUESTS,
                     _ => StatusCode::BAD_REQUEST,
                 };
                 {

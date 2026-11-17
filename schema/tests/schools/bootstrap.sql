@@ -32,3 +32,5 @@ create policy materials_read on public.shared_materials for select to authentica
 create policy materials_own on public.shared_materials for insert to authenticated with check(uploader_id=auth.uid());
 create policy cpu_own on public.cpu_projects to authenticated using(user_id=auth.uid());
 create function public.cbgpu_can_use_resource(resource text,target_school text default 'cbsh') returns boolean language sql security definer as $$select false$$;
+
+create table public.contest_award_ballots(contest_id uuid,voter_id uuid);

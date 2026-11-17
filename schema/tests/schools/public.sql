@@ -15,3 +15,8 @@ select public.assert_true(not((public.cbgpu_public_content('messages_list')->'it
 do $$begin begin perform public.cbgpu_public_project_api('save','{}');raise exception 'anonymous publication allowed';exception when insufficient_privilege then null;end;end$$;
 reset role;
 select 'EXPLICIT_PUBLIC_CONTENT_TESTS_PASSED';
+
+update public.contests set lifecycle_status='archived' where id='20000000-0000-4000-8000-000000000002';
+set role anon;
+select public.assert_true(public.cbgpu_public_content('contest','{"id":"20000000-0000-4000-8000-000000000002"}')->'item'='null'::jsonb,'unpublished contest immediately hidden');
+reset role;

@@ -104,6 +104,7 @@ fn tenant_onboarding_resources_and_message_scopes() {
         "20261117012655_multi_school_resource_boundaries.sql",
         "20261117013206_multi_school_features_messaging.sql",
         "20261117015504_explicit_public_school_content.sql",
+        "20261117023150_school_scoped_guest_access.sql",
     ] {
         let text =
             std::fs::read_to_string(root.join("supabase/migrations").join(migration)).unwrap();
