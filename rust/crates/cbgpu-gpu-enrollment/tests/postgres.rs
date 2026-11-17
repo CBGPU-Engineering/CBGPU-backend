@@ -208,4 +208,48 @@ fn gpu_inventory_enrollment_scoped_and_revocable() {
         1,
         "SQL exclusion permits exactly one overlapping concurrent reservation"
     );
+    let diagnostic_migration = std::fs::read_to_string(
+        root.join("supabase/migrations/20261117123516_school_gpu_signed_diagnostic_leases.sql"),
+    )
+    .unwrap();
+    db.sql(&diagnostic_migration);
+    db.sql(&diagnostic_migration);
+    db.sql(&format!("insert into cbgpu_schools.gpu_diagnostic_commands(node_id,requested_by,requester_session_id,idempotency_key)values('{node}','00000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000004',gen_random_uuid());"));
+    let mut claims = vec![];
+    for sequence in [1, 2] {
+        let sql = format!(
+            "begin;select set_config('request.jwt.claims','{{\"role\":\"service_role\"}}',true);select public.school_gpu_diagnostic_device('{node}',1,{sequence},extract(epoch from clock_timestamp())::bigint,'claim','{{\"action\":\"claim\",\"agent_protocol\":2}}');select pg_sleep(0.2);commit;"
+        );
+        claims.push(
+            Command::new("docker")
+                .args([
+                    "exec",
+                    "-i",
+                    &db.0,
+                    "psql",
+                    "-h",
+                    "127.0.0.1",
+                    "-U",
+                    "postgres",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-At",
+                    "-c",
+                    &sql,
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+    }
+    for mut child in claims {
+        let _ = child.wait().unwrap();
+    }
+    assert_eq!(db.sql("select count(*) from cbgpu_schools.gpu_diagnostic_commands where status='LEASED' and attempts=1;").trim(),"1");
+    assert_eq!(
+        db.sql("select count(*) from cbgpu_schools.gpu_diagnostic_audit where event='CLAIMED';")
+            .trim(),
+        "1"
+    );
 }

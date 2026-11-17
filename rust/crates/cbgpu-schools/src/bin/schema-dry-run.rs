@@ -334,6 +334,7 @@ fn main() -> Result<()> {
         "20261117113827_ad_revenue_unit_format_attribution.sql",
         "20261117120343_school_feature_request_operator_processing.sql",
         "20261117121721_school_node_gpu_resources_reservations.sql",
+        "20261117123516_school_gpu_signed_diagnostic_leases.sql",
     ];
     let sources = migrations
         .iter()
@@ -667,6 +668,26 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(
             repo.join("schema/tests/schools/gpu-resources.sql"),
+        )?),
+    )?;
+
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/gpu-diagnostics.sql"),
         )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;

@@ -1,4 +1,5 @@
 //! Optional school GPU inventory. No scheduling, commands, execution or sharing endpoints.
+pub mod commands;
 use axum::{
     Json, Router,
     body::to_bytes,
@@ -14,6 +15,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct Config {
     pub enabled: bool,
+    pub diagnostics: Option<Arc<ed25519_dalek::SigningKey>>,
     pub backend_url: String,
     pub anon_key: String,
     pub service_key: String,
@@ -133,7 +135,12 @@ pub fn verify_report(r: &Report, signature: &str, public_key: &str) -> bool {
         .is_ok()
 }
 fn fail(status: StatusCode, code: &str) -> Response {
-    (status, Json(json!({"error":code}))).into_response()
+    (
+        status,
+        [("Cache-Control", "private, no-store")],
+        Json(json!({"error":code})),
+    )
+        .into_response()
 }
 fn bearer(request: &Request) -> Option<String> {
     if request.headers().get_all("authorization").iter().count() != 1 {
@@ -159,7 +166,7 @@ async fn rpc(
     } else {
         &c.anon_key
     };
-    let response = c
+    let mut response = c
         .client
         .post(format!("{}/rest/v1/rpc/{name}", c.backend_url))
         .header("apikey", key)
@@ -179,12 +186,19 @@ async fn rpc(
             StatusCode::FORBIDDEN
         });
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    if bytes.len() > 256 * 1024 {
+    if response.content_length().is_some_and(|n| n > 256 * 1024) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+    {
+        if bytes.len() + chunk.len() > 256 * 1024 {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        bytes.extend_from_slice(&chunk);
     }
     serde_json::from_slice(&bytes).map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
 }
@@ -193,7 +207,7 @@ pub fn router(config: Config) -> Router {
 }
 async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     if request.uri().path() == "/health" {
-        return Json(json!({"ok":true,"enabled":c.enabled,"implementation":"native-rust","execution":false,"sharing":false})).into_response();
+        return Json(json!({"ok":true,"enabled":c.enabled,"implementation":"native-rust","execution":false,"sharing":false,"diagnostics_enabled":c.diagnostics.is_some(),"execution_ready":false})).into_response();
     }
     if !c.enabled {
         return fail(StatusCode::NOT_FOUND, "FEATURE_DISABLED");
@@ -204,6 +218,9 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     let auth = bearer(&request);
     if request.uri().query().is_some() {
         return fail(StatusCode::BAD_REQUEST, "QUERY_NOT_SUPPORTED");
+    }
+    if path.starts_with("/v1/gpu/commands/") {
+        return commands::device(&c, request).await;
     }
     let bytes = match to_bytes(request.into_body(), 16 * 1024).await {
         Ok(b) => b,
@@ -285,6 +302,24 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
             {
                 ("revoke", json!({"node_id":id}), false)
             }
+            (&Method::POST, [_, _, _, _, "nodes", id, "diagnostics"])
+                if uuid(id) && c.diagnostics.is_some() =>
+            {
+                let Some(fields) = payload.as_object() else {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                };
+                if fields.len() != 1 || !fields.contains_key("idempotency_key") {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                }
+                let mut data = payload.clone();
+                data["node_id"] = json!(id);
+                ("diagnostic_create", data, false)
+            }
+            (&Method::GET, [_, _, _, _, "nodes", id, "diagnostics"])
+                if uuid(id) && c.diagnostics.is_some() =>
+            {
+                ("diagnostic_list", json!({"node_id":id}), false)
+            }
             (&Method::GET, [_, _, _, _, "resources"]) => ("list", json!({}), true),
             (&Method::GET, [_, _, _, _, "reservations"]) => ("own", json!({}), true),
             (&Method::POST, [_, _, _, _, "resources", id, "reservations"]) if uuid(id) => {
@@ -323,12 +358,12 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
         }
         rpc(
             &c,
-            if resource {
+            if action.starts_with("diagnostic_"){ "school_gpu_diagnostic_admin" } else if resource {
                 "school_gpu_resource_api"
             } else {
                 "school_gpu_admin"
             },
-            json!({"p_school_id":parts[2],"p_action":action,"p_payload":data}),
+            json!({"p_school_id":parts[2],"p_action":action.strip_prefix("diagnostic_").unwrap_or(action),"p_payload":data}),
             Some(&auth),
             false,
         )
@@ -336,6 +371,16 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     } else {
         return fail(StatusCode::NOT_FOUND, "NOT_FOUND");
     };
+    let result = result.map(|mut v| {
+        if path.ends_with("/diagnostics")
+            && let Some(key) = c.diagnostics.as_ref()
+        {
+            v["central_signing_public_key"] = json!(hex(key.verifying_key().as_bytes()));
+            v["capability"] = json!("DIAGNOSTICS_ONLY");
+            v["execution_ready"] = json!(false);
+        }
+        v
+    });
     match result {
         Ok(v) => (
             [
@@ -411,6 +456,7 @@ mod tests {
         use tower::ServiceExt;
         let app = router(Config {
             enabled: false,
+            diagnostics: None,
             backend_url: "http://127.0.0.1:1".into(),
             anon_key: "not-a-secret".into(),
             service_key: "not-a-secret".into(),
