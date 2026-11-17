@@ -1,0 +1,29 @@
+{
+  "legacy": {
+    "full_name": "Synthetic Legacy",
+    "student_id": "2309"
+  },
+  "other": {
+    "full_name": "Synthetic Student",
+    "account_type_request": "EXTERNAL",
+    "school_join_request": {
+      "school_id": "fixture-other-school",
+      "type": "STUDENT",
+      "student_number": "AB-2026-100"
+    }
+  },
+  "teacher": {
+    "full_name": "Synthetic Teacher",
+    "account_type_request": "EXTERNAL",
+    "school_join_request": {
+      "school_id": "cbsh",
+      "type": "TEACHER",
+      "department": "Science"
+    }
+  },
+  "applicant": {
+    "full_name": "Synthetic Applicant",
+    "account_type_request": "EXTERNAL",
+    "school_setup_request": true
+  }
+}

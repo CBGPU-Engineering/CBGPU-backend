@@ -54,6 +54,14 @@ pub struct Principal {
 #[async_trait::async_trait]
 pub trait Identity: Send + Sync {
     async fn authenticate(&self, token: &str) -> Result<Principal>;
+    async fn may_register_contest(
+        &self,
+        _token: &str,
+        _contest: uuid::Uuid,
+        principal: &Principal,
+    ) -> Result<bool> {
+        Ok(principal.may_register)
+    }
 }
 #[async_trait::async_trait]
 pub trait ContestBackend: Send + Sync {
@@ -485,7 +493,11 @@ async fn register_value(
     id: uuid::Uuid,
     value: Value,
 ) -> Result<Response> {
-    if !principal.may_register {
+    if !api
+        .identity
+        .may_register_contest(token, id, principal)
+        .await?
+    {
         return Err(fail(
             403,
             "school_permission_required",

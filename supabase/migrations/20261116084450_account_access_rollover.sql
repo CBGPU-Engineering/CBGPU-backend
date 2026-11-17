@@ -243,4 +243,13 @@ begin
 end$$;
 revoke all on function public.cbgpu_notebook_grant(integer) from public,anon;
 grant execute on function public.cbgpu_notebook_grant(integer) to authenticated;
+-- Pending signup deliberately writes is_approved=false. The legacy privilege
+-- guard must reject granting approval, not reject explicitly withholding it.
+-- Browser profile creation is still denied by guard_account_fields_v2 above.
+do $$declare definition text;begin
+ if to_regprocedure('public.guard_profile_privileged_columns()') is not null then
+ definition:=pg_get_functiondef('public.guard_profile_privileged_columns()'::regprocedure);
+ definition:=replace(definition,'new.is_approved is not null','new.is_approved is true');execute definition;
+ end if;
+end$$;
 commit;

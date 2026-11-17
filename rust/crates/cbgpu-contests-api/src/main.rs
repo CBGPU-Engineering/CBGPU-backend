@@ -57,6 +57,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         anon_key: anon.clone(),
         sessions: Arc::new(PgSessions { pool }),
         client: client.clone(),
+        multischool: matches!(
+            std::env::var("CBGPU_MULTISCHOOL_V1").as_deref(),
+            Ok("1" | "true")
+        ),
         account_v2: matches!(
             std::env::var("CBGPU_ACCOUNT_V2").as_deref(),
             Ok("1" | "true")

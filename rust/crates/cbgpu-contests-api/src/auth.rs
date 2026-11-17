@@ -59,6 +59,7 @@ pub struct Auth {
     pub sessions: std::sync::Arc<dyn Sessions>,
     pub client: reqwest::Client,
     pub account_v2: bool,
+    pub multischool: bool,
 }
 #[async_trait::async_trait]
 impl Identity for Auth {
@@ -133,46 +134,65 @@ impl Identity for Auth {
                     "Session expired, signed out, or account is unavailable",
                 )
             })?;
-        let may_register = if self.account_v2 {
-            let response = self
-                .client
-                .post(format!(
-                    "{}/rest/v1/rpc/cbgpu_can_use_resource",
-                    self.origin
-                ))
-                .header("apikey", &self.anon_key)
-                .bearer_auth(token)
-                .json(&serde_json::json!({"resource":"contests","target_school":"cbsh"}))
-                .send()
-                .await
-                .map_err(|_| {
-                    fail(
-                        503,
-                        "authorization_unavailable",
-                        "Contest permission unavailable",
-                    )
-                })?;
-            if !response.status().is_success() {
-                return Err(fail(
-                    503,
-                    "authorization_unavailable",
-                    "Contest permission unavailable",
-                ));
-            }
-            response.json::<Value>().await.map_err(|_| {
+        // School resource decisions require the actual contest, not the user's
+        // primary affiliation. Reads/cancellation remain available after expiry.
+        let may_register = self.account_v2 || legacy_permission;
+        Ok(Principal {
+            subject,
+            may_register,
+        })
+    }
+    async fn may_register_contest(
+        &self,
+        token: &str,
+        contest: uuid::Uuid,
+        principal: &Principal,
+    ) -> Result<bool> {
+        if !self.account_v2 {
+            return Ok(principal.may_register);
+        }
+        let multischool = self.multischool;
+        let (rpc, payload) = if multischool {
+            (
+                "cbgpu_can_register_contest",
+                serde_json::json!({"p_contest":contest}),
+            )
+        } else {
+            (
+                "cbgpu_can_use_resource",
+                serde_json::json!({"resource":"contests","target_school":"cbsh"}),
+            )
+        };
+        let response = self
+            .client
+            .post(format!("{}/rest/v1/rpc/{rpc}", self.origin))
+            .header("apikey", &self.anon_key)
+            .bearer_auth(token)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|_| {
                 fail(
                     503,
                     "authorization_unavailable",
                     "Contest permission unavailable",
                 )
-            })? == true
-        } else {
-            legacy_permission
-        };
-        Ok(Principal {
-            subject,
-            may_register,
-        })
+            })?;
+        if !response.status().is_success() {
+            return Err(fail(
+                503,
+                "authorization_unavailable",
+                "Contest permission unavailable",
+            ));
+        }
+        let allowed: bool = response.json().await.map_err(|_| {
+            fail(
+                503,
+                "authorization_unavailable",
+                "Contest permission unavailable",
+            )
+        })?;
+        Ok(allowed)
     }
 }
 fn now() -> f64 {

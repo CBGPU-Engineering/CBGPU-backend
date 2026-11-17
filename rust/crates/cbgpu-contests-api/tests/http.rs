@@ -82,6 +82,7 @@ async fn fixture() -> (
             sessions: sessions.clone(),
             client: client.clone(),
             account_v2: false,
+            multischool: false,
         }),
         Arc::new(Backend {
             origin,
@@ -338,4 +339,49 @@ fn database_errors_preserve_business_status_without_private_sql_details() {
     );
     assert_eq!(error.status, 503);
     assert!(!error.message.contains("private/path"));
+}
+#[tokio::test]
+async fn school_registration_permission_is_bound_to_the_actual_contest() {
+    use cbgpu_contests_api::Identity;
+    let server = Router::new()
+        .route("/auth/v1/user", get(|| async { Json(json!({"id":OWNER})) }))
+        .route(
+            "/rest/v1/rpc/cbgpu_can_register_contest",
+            post(|Json(payload): Json<Value>| async move {
+                assert_eq!(payload.as_object().unwrap().len(), 1);
+                assert!(payload.get("target_school").is_none());
+                Json(payload["p_contest"] == CONTEST)
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let running = tokio::spawn(async move { axum::serve(listener, server).await.unwrap() });
+    let auth = Auth {
+        origin,
+        anon_key: "fixture".into(),
+        sessions: Arc::new(Session {
+            active: AtomicBool::new(true),
+            approved: AtomicBool::new(false),
+        }),
+        client: reqwest::Client::builder().no_proxy().build().unwrap(),
+        account_v2: true,
+        multischool: true,
+    };
+    let principal = auth.authenticate(&token()).await.unwrap();
+    assert!(
+        auth.may_register_contest(&token(), CONTEST.parse().unwrap(), &principal)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !auth
+            .may_register_contest(
+                &token(),
+                "60000000-0000-4000-8000-000000000002".parse().unwrap(),
+                &principal
+            )
+            .await
+            .unwrap()
+    );
+    running.abort();
 }
