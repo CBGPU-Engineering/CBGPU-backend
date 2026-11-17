@@ -168,6 +168,9 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         (["v1", "schools", school, "life-sources"], &Method::GET) => {
             Some(("life_sources", json!({"school_id":school})))
         }
+        (["v1", "admin", "schools", school, "life-sources"], &Method::GET) => {
+            Some(("life_sources", json!({"school_id":school})))
+        }
         (["v1", "admin", "schools", school, "life-sources"], &Method::PATCH) => {
             Some(("life_configure", json!({"school_id":school})))
         }

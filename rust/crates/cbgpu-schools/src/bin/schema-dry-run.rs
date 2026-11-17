@@ -445,6 +445,25 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(repo.join("schema/tests/schools/cpu-actor.sql"))?),
     )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/life-platform.sql"),
+        )?),
+    )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
     let directory_sql = format!(
         "BEGIN; SELECT cbgpu_schools.import_official_directory('{}'::jsonb); SELECT cbgpu_schools.import_official_directory('{}'::jsonb); DO $$BEGIN IF (SELECT count(*) FROM cbgpu_schools.schools)<>2408 OR (SELECT count(*) FROM cbgpu_schools.schools WHERE official_id='8000075' AND id='cbsh' AND status='APPROVED')<>1 OR EXISTS(SELECT 1 FROM cbgpu_schools.schools WHERE id<>'cbsh' AND(status<>'LISTED' OR cardinality(features)>0 OR verified_at IS NOT NULL)) THEN RAISE EXCEPTION 'OFFICIAL_DIRECTORY_PRIVILEGE_OR_IDENTITY_CHANGE'; END IF; END$$; ROLLBACK;",
