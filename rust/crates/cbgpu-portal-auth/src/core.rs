@@ -52,6 +52,11 @@ pub struct Authenticated {
     pub user: User,
 }
 impl Core {
+    async fn invalidate(&self, row: &SessionRow) -> Result<Option<Authenticated>> {
+        self.store.invalidate(row).await?;
+        let _ = self.revoked.send(row.token_hash.clone());
+        Ok(None)
+    }
     pub async fn authenticate_hash(&self, hash: &str) -> Result<Option<Authenticated>> {
         if !token(hash) {
             return Ok(None);
@@ -60,27 +65,27 @@ impl Core {
             return Ok(None);
         };
         if row.expires <= now_ms() {
-            return Ok(None);
+            return self.invalidate(&row).await;
         }
         if self.crypto.row_tokens(&row).is_err() || !token(&row.csrf) {
             return Ok(None);
         }
         let roster = self.roster.read()?;
         let Some(member) = roster_member(&roster, &row.email) else {
-            return Ok(None);
+            return self.invalidate(&row).await;
         };
         if member.id != row.user_id {
-            return Ok(None);
+            return self.invalidate(&row).await;
         }
         let Some(principal) = self
             .oracle
             .principal(row.user_id, row.auth_session_id)
             .await?
         else {
-            return Ok(None);
+            return self.invalidate(&row).await;
         };
         if !eligible(&principal, member, self.scoped) {
-            return Ok(None);
+            return self.invalidate(&row).await;
         }
         Ok(Some(Authenticated {
             user: User {

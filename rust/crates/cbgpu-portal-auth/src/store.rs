@@ -69,23 +69,34 @@ impl Store {
             .map_err(|_| fail("PORTAL_STORE_UNAVAILABLE", 503))
     }
     pub async fn revoke(&self, row: &SessionRow) -> Result<()> {
+        self.revoke_for(row, "logout").await
+    }
+    pub async fn invalidate(&self, row: &SessionRow) -> Result<()> {
+        self.revoke_for(row, "session.revoked").await
+    }
+    async fn revoke_for(&self, row: &SessionRow, action: &str) -> Result<()> {
         let mut tx = self
             .pool
             .begin()
             .await
             .map_err(|_| fail("PORTAL_STORE_UNAVAILABLE", 503))?;
-        sqlx::query("DELETE FROM portal_auth.sessions WHERE scope='developer' AND token_hash=$1")
-            .bind(&row.token_hash)
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| fail("PORTAL_STORE_UNAVAILABLE", 503))?;
-        sqlx::query(
-            "INSERT INTO portal_auth.audit(actor_id,action,outcome) VALUES($1,'logout','success')",
+        let removed = sqlx::query(
+            "DELETE FROM portal_auth.sessions WHERE scope='developer' AND token_hash=$1",
         )
-        .bind(row.user_id)
+        .bind(&row.token_hash)
         .execute(&mut *tx)
         .await
-        .map_err(|_| fail("PORTAL_AUDIT_UNAVAILABLE", 503))?;
+        .map_err(|_| fail("PORTAL_STORE_UNAVAILABLE", 503))?;
+        if removed.rows_affected() > 0 {
+            sqlx::query(
+                "INSERT INTO portal_auth.audit(actor_id,action,outcome) VALUES($1,$2,'success')",
+            )
+            .bind(row.user_id)
+            .bind(action)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| fail("PORTAL_AUDIT_UNAVAILABLE", 503))?;
+        }
         tx.commit()
             .await
             .map_err(|_| fail("PORTAL_STORE_UNAVAILABLE", 503))

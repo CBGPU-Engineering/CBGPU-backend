@@ -270,7 +270,7 @@ async fn real_pg_cookie_lifecycle_fresh_role_guard_and_readonly_import() {
         .to_string();
     let logged = json_response(login).await;
     assert_eq!(logged["user"]["id"], UID);
-    let csrf = logged["csrf_token"].as_str().unwrap();
+    assert_eq!(logged["csrf_token"].as_str().unwrap().len(), 64);
     assert!(
         logged.get("session").is_none(),
         "ordinary info must never expose GoTrue tokens"
@@ -333,6 +333,24 @@ async fn real_pg_cookie_lifecycle_fresh_role_guard_and_readonly_import() {
         .execute(&owner)
         .await
         .unwrap();
+    sqlx::query(
+        "ALTER FUNCTION cbgpu_portal_auth.principal(uuid,uuid) RENAME TO principal_outage_fixture",
+    )
+    .execute(&authority_owner)
+    .await
+    .unwrap();
+    assert!(core.authenticate(&cookie).await.is_err());
+    assert!(
+        store.get(&current.row.token_hash).await.unwrap().is_some(),
+        "authority outage must not erase a valid private session"
+    );
+    sqlx::query(
+        "ALTER FUNCTION cbgpu_portal_auth.principal_outage_fixture(uuid,uuid) RENAME TO principal",
+    )
+    .execute(&authority_owner)
+    .await
+    .unwrap();
+    assert!(core.authenticate(&cookie).await.unwrap().is_some());
     let (tx, mut rx) = tokio::sync::watch::channel(false);
     let hash = core
         .authenticate(&cookie)
@@ -358,7 +376,33 @@ async fn real_pg_cookie_lifecycle_fresh_role_guard_and_readonly_import() {
         .execute(&authority_owner)
         .await
         .unwrap();
-    assert!(core.authenticate(&cookie).await.unwrap().is_some());
+    assert!(
+        core.authenticate(&cookie).await.unwrap().is_none(),
+        "regrant cannot resurrect a definitively revoked portal cookie"
+    );
+    let relogin = request(
+        app.clone(),
+        "/api/login",
+        "POST",
+        "",
+        None,
+        "{\"email\":\"dev@example.invalid\",\"password\":\"fixture-only\"}",
+    )
+    .await;
+    assert_eq!(relogin.status(), 200);
+    let cookie = relogin
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap())
+        .find(|v| v.starts_with(&format!("{COOKIE}=")))
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let relogged = json_response(relogin).await;
+    let csrf = relogged["csrf_token"].as_str().unwrap();
     assert_eq!(
         request(
             app.clone(),
@@ -375,7 +419,7 @@ async fn real_pg_cookie_lifecycle_fresh_role_guard_and_readonly_import() {
     assert!(core.authenticate(&cookie).await.unwrap().is_none());
     assert_eq!(
         api_calls.load(Ordering::SeqCst),
-        1,
+        2,
         "cookie requests never refresh GoTrue"
     );
     let imported_owner = db.pool("imported", None).await.unwrap();
