@@ -1,0 +1,20 @@
+-- Candidate only. Private operational database, never public browser/PostgREST grants.
+CREATE SCHEMA deploy_store;
+REVOKE ALL ON SCHEMA deploy_store FROM PUBLIC;
+CREATE TABLE deploy_store.projects(id text PRIMARY KEY,owner text NOT NULL,slug text UNIQUE NOT NULL,config jsonb NOT NULL,secrets text NOT NULL,production text,created_at text NOT NULL,deleted integer NOT NULL DEFAULT 0 CHECK(deleted IN(0,1)));
+CREATE TABLE deploy_store.deployments(id text PRIMARY KEY,project_id text NOT NULL REFERENCES deploy_store.projects(id),status text NOT NULL,logs text NOT NULL DEFAULT'',result jsonb,error text,created_at text NOT NULL,finished_at text);
+CREATE INDEX deployments_project ON deploy_store.deployments(project_id,created_at DESC);
+CREATE UNIQUE INDEX deployments_one_active ON deploy_store.deployments(project_id) WHERE status IN('queued','building');
+CREATE TABLE deploy_store.custom_domains(id text PRIMARY KEY,hostname text NOT NULL,resource_type text NOT NULL CHECK(resource_type IN('frontend','server')),project_id text NOT NULL,owner text NOT NULL,verification_token text NOT NULL,dns_verified integer NOT NULL DEFAULT 0 CHECK(dns_verified IN(0,1)),tls_status text DEFAULT'pending_dns',provider_id text,provider_records jsonb NOT NULL DEFAULT'[]',last_check text,created_at text NOT NULL);
+CREATE UNIQUE INDEX custom_domains_active_host ON deploy_store.custom_domains(hostname) WHERE dns_verified=1;
+CREATE TABLE deploy_store.project_members(resource_type text NOT NULL CHECK(resource_type IN('frontend','server')),project_id text NOT NULL,user_id text NOT NULL,role text NOT NULL CHECK(role IN('editor','viewer')),email text NOT NULL,name text NOT NULL,created_at text NOT NULL,PRIMARY KEY(resource_type,project_id,user_id));
+CREATE INDEX project_members_user ON deploy_store.project_members(user_id,resource_type);
+CREATE TABLE deploy_store.server_domains(project_id text PRIMARY KEY,owner text NOT NULL,slug text UNIQUE NOT NULL);
+CREATE TABLE deploy_store.compose_states(project_id text PRIMARY KEY,requested_at text,status text NOT NULL,logs text DEFAULT'',error text,result jsonb,updated_at text NOT NULL,storage_gb bigint DEFAULT 40,storage_used_bytes bigint,diagnostics jsonb,attempt_result jsonb);
+CREATE TABLE deploy_store.work_items(id text PRIMARY KEY,kind text NOT NULL CHECK(kind IN('front_build','front_cleanup','compose_build','compose_stop','domain_ensure','domain_remove')),resource_type text NOT NULL,project_id text NOT NULL,owner text NOT NULL,deployment_id text,state text NOT NULL DEFAULT'queued' CHECK(state IN('queued','running','succeeded','failed','cancelled')),payload jsonb NOT NULL,created_at text NOT NULL,updated_at text NOT NULL,lease text,attempts integer NOT NULL DEFAULT 0,error text,cancel_requested boolean NOT NULL DEFAULT false);
+CREATE INDEX work_items_queue ON deploy_store.work_items(state,created_at,id);
+DO $$BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='cbgpu_deploy_control')THEN CREATE ROLE cbgpu_deploy_control NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;END IF;END$$;
+GRANT USAGE ON SCHEMA deploy_store TO cbgpu_deploy_control;
+GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA deploy_store TO cbgpu_deploy_control;
+DO $$DECLARE item text;BEGIN FOREACH item IN ARRAY ARRAY['projects','deployments','custom_domains','project_members','server_domains','compose_states','work_items'] LOOP EXECUTE format('ALTER TABLE deploy_store.%I ENABLE ROW LEVEL SECURITY',item);EXECUTE format('CREATE POLICY deployment_private_service ON deploy_store.%I TO cbgpu_deploy_control USING(true) WITH CHECK(true)',item);END LOOP;END$$;
+REVOKE ALL ON ALL TABLES IN SCHEMA deploy_store FROM PUBLIC;
