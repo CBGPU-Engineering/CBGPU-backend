@@ -26,6 +26,8 @@ pub struct Settings {
     pub web_origin: url::Url,
     pub cron_secret_file: PathBuf,
     pub admin_key_file: PathBuf,
+    pub timetable_secret_file: PathBuf,
+    pub timetable_school_id: String,
     pub release: String,
 }
 impl Settings {
@@ -50,6 +52,13 @@ impl Settings {
             cron_secret_file: std::env::var_os("CBGPU_STUDY_SECRET_FILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(&home).join(".config/cbgpu/study-auto-secret")),
+            timetable_secret_file: std::env::var_os("CBGPU_TIMETABLE_WARM_SECRET_FILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    PathBuf::from(&home).join(".config/cbgpu/timetable-warm-secret")
+                }),
+            timetable_school_id: std::env::var("CBGPU_TIMETABLE_SCHOOL_ID")
+                .unwrap_or_else(|_| "cbsh".into()),
             admin_key_file: std::env::var_os("CBGPU_RUST_ADMIN_KEY_FILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(home).join(".config/cbgpu/rust-core-admin-key")),
@@ -195,19 +204,14 @@ pub fn summarize(operation: &str, data: &Value) -> Result<Value, &'static str> {
             json!({"ok":true,"processed":data.get("processed").and_then(Value::as_u64).unwrap_or(0),"skipped":data.get("skipped").and_then(Value::as_bool)}),
         )
     } else {
-        if !data.get("grid").is_some_and(|grid| match grid {
-            Value::Array(a) => !a.is_empty(),
-            Value::Object(o) => !o.is_empty(),
-            _ => false,
-        }) {
-            return Err("Timetable grid is empty");
+        if data.get("ok").and_then(Value::as_bool) != Some(true)
+            || data.get("stale").and_then(Value::as_bool) != Some(false)
+            || data.get("cells").and_then(Value::as_u64).unwrap_or(0) == 0
+            || data.get("days").and_then(Value::as_u64).unwrap_or(0) == 0
+        {
+            return Err("Fresh timetable warm was not confirmed");
         }
-        if data.get("stale").and_then(Value::as_bool) == Some(true) {
-            return Err("Only a stale timetable was available");
-        }
-        Ok(
-            json!({"ok":true,"stale":false,"fetchedAt":data.get("fetchedAt").and_then(Value::as_str).filter(|s|s.len()<=100),"weekStart":data.get("weekStart").and_then(Value::as_str).filter(|s|s.len()<=100)}),
-        )
+        Ok(json!({"ok":true,"stale":false,"days":data["days"],"cells":data["cells"]}))
     }
 }
 pub async fn invoke(
@@ -218,7 +222,7 @@ pub async fn invoke(
     let path = if operation == "study-auto" {
         "/api/cron/study-auto"
     } else {
-        "/api/timetable?grade=1&class=1&refresh=1"
+        "/api/cron/timetable-warm"
     };
     let url = settings
         .web_origin
@@ -227,7 +231,22 @@ pub async fn invoke(
     let mut request = if operation == "study-auto" {
         client.post(url).json(&json!({}))
     } else {
-        client.get(url)
+        if settings.timetable_school_id.is_empty()
+            || settings.timetable_school_id.len() > 100
+            || !settings
+                .timetable_school_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err("Invalid operator timetable school");
+        }
+        client
+            .post(url)
+            .json(&json!({"school_id":settings.timetable_school_id,"grade":1,"class":1}))
+            .header(
+                "x-cbgpu-timetable-warm",
+                private_file(&settings.timetable_secret_file).await?,
+            )
     };
     request = request
         .header("host", "cbgpu.com")
@@ -416,13 +435,19 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
     #[tokio::test]
-    async fn http_contract_rejects_redirects_and_malformed_responses() {
+    async fn timetable_warm_uses_dedicated_secret_and_never_records_payload() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let key = dir.path().join("warm-key");
+        std::fs::write(&key, "a".repeat(64)).unwrap();
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = Router::new().route(
-            "/api/timetable",
-            get(|| async { axum::response::Redirect::temporary("https://example.invalid/") }),
-        );
+        let app=Router::new().route("/api/cron/timetable-warm",axum::routing::post(|headers:HeaderMap,Json(body):Json<Value>|async move {
+            assert_eq!(headers.get("x-cbgpu-timetable-warm").unwrap(),"a".repeat(64).as_str());assert!(headers.get("authorization").is_none());
+            assert_eq!(body,json!({"school_id":"school-b","grade":1,"class":1}));
+            Json(json!({"ok":true,"stale":false,"days":5,"cells":35,"grid":{"private":"not recorded"}}))
+        }));
         let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let settings = Settings {
             database_url: String::new(),
@@ -430,6 +455,47 @@ mod tests {
             web_origin: parse_web_origin(&format!("http://{addr}")).unwrap(),
             cron_secret_file: PathBuf::new(),
             admin_key_file: PathBuf::new(),
+            timetable_secret_file: key,
+            timetable_school_id: "school-b".into(),
+            release: String::new(),
+        };
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let result = invoke(&client, &settings, "timetable-refresh")
+            .await
+            .unwrap();
+        assert_eq!(result, json!({"ok":true,"stale":false,"days":5,"cells":35}));
+        task.abort();
+    }
+    #[tokio::test]
+    async fn http_contract_rejects_redirects_and_malformed_responses() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new().route(
+            "/api/cron/timetable-warm",
+            axum::routing::post(|| async {
+                axum::response::Redirect::temporary("https://example.invalid/")
+            }),
+        );
+        let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let secret = dir.path().join("secret");
+        std::fs::write(&secret, "a".repeat(64)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let settings = Settings {
+            database_url: String::new(),
+            listen: addr,
+            web_origin: parse_web_origin(&format!("http://{addr}")).unwrap(),
+            cron_secret_file: PathBuf::new(),
+            admin_key_file: PathBuf::new(),
+            timetable_secret_file: secret,
+            timetable_school_id: "cbsh".into(),
             release: String::new(),
         };
         let client = reqwest::Client::builder()
