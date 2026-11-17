@@ -115,7 +115,7 @@ fn endpoint(value: &str) -> Result<String, Box<dyn std::error::Error>> {
 fn collect() -> Result<Health, Box<dyn std::error::Error>> {
     let output = std::process::Command::new("/usr/bin/nvidia-smi")
         .args([
-            "--query-gpu=index,name,memory.total,memory.used,utilization.gpu",
+            "--query-gpu=index,name,memory.total,memory.used,utilization.gpu,uuid",
             "--format=csv,noheader,nounits",
         ])
         .output()?;
@@ -126,11 +126,12 @@ fn collect() -> Result<Health, Box<dyn std::error::Error>> {
     let mut gpus = vec![];
     for line in text.lines() {
         let p = line.split(',').map(str::trim).collect::<Vec<_>>();
-        if p.len() != 5 {
+        if p.len() != 6 {
             return Err("Unsupported NVIDIA inventory response".into());
         }
         gpus.push(GpuHealth {
             index: p[0].parse()?,
+            hardware_uuid: Some(p[5].into()),
             name: p[1].into(),
             memory_total_mib: p[2].parse()?,
             memory_used_mib: p[3].parse()?,

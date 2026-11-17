@@ -23,6 +23,8 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct GpuHealth {
     pub index: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware_uuid: Option<String>,
     pub name: String,
     pub memory_total_mib: u64,
     pub memory_used_mib: u64,
@@ -80,6 +82,9 @@ fn uuid(value: &str) -> bool {
             }
         })
 }
+pub fn valid_hardware_uuid(value: &str) -> bool {
+    value.len() == 40 && value.starts_with("GPU-") && uuid(&value[4..])
+}
 pub fn validate_report(r: &Report) -> bool {
     uuid(&r.node_id)
         && r.credential_version > 0
@@ -92,6 +97,7 @@ pub fn validate_report(r: &Report) -> bool {
             !g.name.is_empty()
                 && g.name.len() <= 120
                 && !g.name.chars().any(char::is_control)
+                && g.hardware_uuid.as_deref().is_none_or(valid_hardware_uuid)
                 && g.index < 256
                 && g.memory_total_mib > 0
                 && g.memory_total_mib <= 16_777_216
@@ -99,9 +105,15 @@ pub fn validate_report(r: &Report) -> bool {
                 && g.utilization_percent <= 100
         })
         && r.health.gpus.iter().enumerate().all(|(i, g)| {
-            !r.health.gpus[..i]
-                .iter()
-                .any(|other| other.index == g.index)
+            !r.health.gpus[..i].iter().any(|other| {
+                other.index == g.index
+                    || (g.hardware_uuid.is_some()
+                        && other
+                            .hardware_uuid
+                            .as_ref()
+                            .zip(g.hardware_uuid.as_ref())
+                            .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b)))
+            })
         })
 }
 pub fn verify_report(r: &Report, signature: &str, public_key: &str) -> bool {
@@ -252,7 +264,7 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
         {
             return fail(StatusCode::FORBIDDEN, "INVALID_NODE_PROOF");
         }
-        rpc(&c,"school_gpu_store_report",json!({"p_node_id":s.report.node_id,"p_version":s.report.credential_version,"p_sequence":s.report.sequence,"p_reported_at":s.report.reported_at,"p_health":s.report.health}),None,true).await
+        rpc(&c,"school_gpu_store_resource_report",json!({"p_node_id":s.report.node_id,"p_version":s.report.credential_version,"p_sequence":s.report.sequence,"p_reported_at":s.report.reported_at,"p_health":s.report.health}),None,true).await
     } else if parts.len() >= 5 && parts[0] == "v1" && parts[1] == "schools" && parts[3] == "gpu" {
         let Some(auth) = auth else {
             return fail(StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED");
@@ -265,13 +277,34 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
         {
             return fail(StatusCode::BAD_REQUEST, "INVALID_SCHOOL");
         }
-        let (action, data) = match (&method, parts.as_slice()) {
-            (&Method::POST, [_, _, _, _, "enrollments"]) => ("mint", payload),
-            (&Method::GET, [_, _, _, _, "nodes"]) => ("list", json!({})),
+        let (action, data, resource) = match (&method, parts.as_slice()) {
+            (&Method::POST, [_, _, _, _, "enrollments"]) => ("mint", payload, false),
+            (&Method::GET, [_, _, _, _, "nodes"]) => ("list", json!({}), false),
             (&Method::POST, [_, _, _, _, "nodes", id, "revoke"])
                 if uuid(id) && payload.as_object().is_some_and(|o| o.is_empty()) =>
             {
-                ("revoke", json!({"node_id":id}))
+                ("revoke", json!({"node_id":id}), false)
+            }
+            (&Method::GET, [_, _, _, _, "resources"]) => ("list", json!({}), true),
+            (&Method::GET, [_, _, _, _, "reservations"]) => ("own", json!({}), true),
+            (&Method::POST, [_, _, _, _, "resources", id, "reservations"]) if uuid(id) => {
+                let Some(fields) = payload.as_object() else {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                };
+                if fields
+                    .keys()
+                    .any(|k| !["starts_at", "ends_at"].contains(&k.as_str()))
+                {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                }
+                let mut data = payload.clone();
+                data["resource_id"] = json!(id);
+                ("reserve", data, true)
+            }
+            (&Method::DELETE, [_, _, _, _, "reservations", id])
+                if uuid(id) && payload.as_object().is_some_and(|o| o.is_empty()) =>
+            {
+                ("cancel", json!({"reservation_id":id}), true)
             }
             _ => return fail(StatusCode::NOT_FOUND, "NOT_FOUND"),
         };
@@ -290,7 +323,11 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
         }
         rpc(
             &c,
-            "school_gpu_admin",
+            if resource {
+                "school_gpu_resource_api"
+            } else {
+                "school_gpu_admin"
+            },
             json!({"p_school_id":parts[2],"p_action":action,"p_payload":data}),
             Some(&auth),
             false,
@@ -327,6 +364,7 @@ mod tests {
                 os: "ubuntu".into(),
                 gpus: vec![GpuHealth {
                     index: 0,
+                    hardware_uuid: None,
                     name: "GPU".into(),
                     memory_total_mib: 100,
                     memory_used_mib: 50,

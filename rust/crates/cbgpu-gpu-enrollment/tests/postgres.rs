@@ -102,7 +102,7 @@ fn gpu_inventory_enrollment_scoped_and_revocable() {
     }
     assert!(ready);
     db.sql(&std::fs::read_to_string(root.join("schema/tests/schools/bootstrap.sql")).unwrap());
-    db.sql("create role service_role nologin;create schema extensions;create extension pgcrypto with schema extensions;create function auth.jwt() returns jsonb language sql stable as $$select nullif(current_setting('request.jwt.claims',true),'')::jsonb$$;create function auth.role() returns text language sql stable as $$select auth.jwt()->>'role'$$;");
+    db.sql("create role service_role nologin;create schema extensions;create extension pgcrypto with schema extensions;create or replace function auth.jwt() returns jsonb language sql stable as $$select nullif(current_setting('request.jwt.claims',true),'')::jsonb$$;create or replace function auth.role() returns text language sql stable as $$select auth.jwt()->>'role'$$;");
     for migration in [
         "20261117011230_multi_school_identity_onboarding.sql",
         "20261117020000_school_gpu_enrollment.sql",
@@ -158,5 +158,54 @@ fn gpu_inventory_enrollment_scoped_and_revocable() {
     assert_eq!(
         accepted, 1,
         "exactly one concurrent enrollment may consume the capability"
+    );
+    db.sql("create function cbgpu_schools.feature_enabled(school text,feature text)returns boolean language sql as $$select false$$;create function public.cbgpu_personal_project_identity()returns boolean language sql as $$select false$$;");
+    let resource_migration = std::fs::read_to_string(
+        root.join("supabase/migrations/20261117121721_school_node_gpu_resources_reservations.sql"),
+    )
+    .unwrap();
+    db.sql(&resource_migration);
+    db.sql(&resource_migration);
+    let node = value["node_id"].as_str().unwrap();
+    db.sql(&format!("insert into cbgpu_schools.gpu_resources(id,node_id,hardware_uuid,gpu_index,name,memory_total_mib,last_seen_at,reported_sequence,credential_version)values('fb440000-0000-4000-8000-000000000001','{node}','GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',0,'Synthetic',100,now(),1,1);"));
+    let mut races = vec![];
+    for owner in [
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+    ] {
+        let sql = format!(
+            "begin;insert into cbgpu_schools.gpu_resource_reservations(resource_id,owner_id,starts_at,ends_at)values('fb440000-0000-4000-8000-000000000001','{owner}','2030-01-01T01:00:00Z','2030-01-01T02:00:00Z');select pg_sleep(0.2);commit;"
+        );
+        races.push(
+            Command::new("docker")
+                .args([
+                    "exec",
+                    "-i",
+                    &db.0,
+                    "psql",
+                    "-h",
+                    "127.0.0.1",
+                    "-U",
+                    "postgres",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-At",
+                    "-c",
+                    &sql,
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        races
+            .into_iter()
+            .map(|mut child| child.wait().unwrap().success())
+            .filter(|ok| *ok)
+            .count(),
+        1,
+        "SQL exclusion permits exactly one overlapping concurrent reservation"
     );
 }
