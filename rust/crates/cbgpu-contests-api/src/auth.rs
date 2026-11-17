@@ -53,6 +53,52 @@ impl Sessions for PgSessions {
         Ok(row.and_then(|(valid, approved)| valid.then_some(approved)))
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AuthorizationMode {
+    pub account_v2: bool,
+    pub multischool: bool,
+}
+pub fn authorization_mode(
+    account: Option<&str>,
+    school: Option<&str>,
+) -> Result<AuthorizationMode> {
+    fn flag(value: Option<&str>) -> Result<bool> {
+        match value {
+            None | Some("" | "0" | "false") => Ok(false),
+            Some("1" | "true") => Ok(true),
+            _ => Err(fail(
+                503,
+                "invalid_authorization_configuration",
+                "Invalid contest authorization configuration",
+            )),
+        }
+    }
+    let multischool = flag(school)?;
+    Ok(AuthorizationMode {
+        account_v2: flag(account)? || multischool,
+        multischool,
+    })
+}
+pub fn authorization_mode_from_env() -> Result<AuthorizationMode> {
+    fn value(key: &str) -> Result<Option<String>> {
+        std::env::var_os(key)
+            .map(|v| {
+                v.into_string().map_err(|_| {
+                    fail(
+                        503,
+                        "invalid_authorization_configuration",
+                        "Invalid contest authorization configuration",
+                    )
+                })
+            })
+            .transpose()
+    }
+    authorization_mode(
+        value("CBGPU_ACCOUNT_V2")?.as_deref(),
+        value("CBGPU_MULTISCHOOL_V1")?.as_deref(),
+    )
+}
+
 pub struct Auth {
     pub origin: String,
     pub anon_key: String,
@@ -210,4 +256,34 @@ fn claims(token: &str) -> Result<Value> {
         .decode(pieces[1])
         .map_err(|_| fail(401, "unauthorized", "Invalid access JWT"))?;
     serde_json::from_slice(&bytes).map_err(|_| fail(401, "unauthorized", "Invalid access JWT"))
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::*;
+    #[test]
+    fn multischool_always_enforces_contest_specific_policy() {
+        for active in ["1", "true"] {
+            let mode = authorization_mode(Some("0"), Some(active)).unwrap();
+            assert!(mode.account_v2 && mode.multischool);
+        }
+        assert_eq!(
+            authorization_mode(None, None).unwrap(),
+            AuthorizationMode {
+                account_v2: false,
+                multischool: false
+            }
+        );
+        assert_eq!(
+            authorization_mode(Some("true"), None).unwrap(),
+            AuthorizationMode {
+                account_v2: true,
+                multischool: false
+            }
+        );
+        for bad in ["TRUE", "yes", "1 ", "falsex"] {
+            assert!(authorization_mode(Some(bad), None).is_err());
+            assert!(authorization_mode(None, Some(bad)).is_err());
+        }
+    }
 }

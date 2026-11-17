@@ -613,6 +613,7 @@ impl<R: Runtime> Agent<R> {
                         "CBGPU_PUBLIC_CONTENT_API_URL",
                         "CBGPU_ANDROID_RELEASE_PATH",
                         "CBGPU_BACKEND_PROXY_URL",
+                        "CBGPU_SESSION_ORACLE_MODE",
                         "CBGPU_INTERNAL_NETWORK_MODE",
                         "CBGPU_PUBLIC_BROWSING_V1",
                     ]

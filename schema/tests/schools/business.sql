@@ -82,4 +82,28 @@ set local role authenticated;
 select public.cbgpu_school_guest_api('review',jsonb_build_object('school_id','fixture-business-school','id',(select value from business_values where name='guest_request'),'decision','REVOKE'));
 reset role;
 do $$begin if(select account_type from public.profiles where id='f1000000-0000-4000-8000-000000000004')<>'EXTERNAL' or exists(select 1 from cbgpu_schools.memberships where user_id='f1000000-0000-4000-8000-000000000004') then raise exception 'GUEST_IDENTITY_OR_ROLE_CHANGED';end if;end$$;
+-- Real scoped-token path for an EXTERNAL user with no school membership.
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000004","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000004"}',true);
+set local role cbgpu_contest_tokens_backend;
+select contest_api.mint(decode(repeat('04',32),'hex'),'Public external fixture',array['contests:read','contests:register','contests:cancel'],array['f3000000-0000-4000-8000-000000000001'::uuid],1);
+select contest_api.register_allowed(decode(repeat('04',32),'hex'),'f3000000-0000-4000-8000-000000000001','Synthetic no-school participant','{}','individual',null,null);
+select contest_api.read_allowed(decode(repeat('04',32),'hex'),'f3000000-0000-4000-8000-000000000001',true);
+do $$begin
+ begin
+  perform contest_api.mint(decode(repeat('05',32),'hex'),'Forbidden school fixture',array['contests:register'],array['f3000000-0000-4000-8000-000000000003'::uuid],1);
+  raise exception 'TOKEN_SCHOOL_RESOURCE_BYPASS';
+ exception when sqlstate 'PT403' then null;end;
+end$$;
+select contest_api.cancel_allowed(decode(repeat('04',32),'hex'),'f3000000-0000-4000-8000-000000000001');
+reset role;
+do $$begin
+ if not exists(select 1 from public.event_registrations where contest_id='f3000000-0000-4000-8000-000000000001' and user_id='f1000000-0000-4000-8000-000000000004' and status='cancelled') then raise exception 'TOKEN_OWNER_CANCELLATION_FAILED';end if;
+ if exists(select 1 from cbgpu_schools.memberships where user_id='f1000000-0000-4000-8000-000000000004') or(select is_approved from public.profiles where id='f1000000-0000-4000-8000-000000000004') then raise exception 'TOKEN_GRANTED_BLANKET_AFFILIATION';end if;
+end$$;
+delete from auth.sessions where id='f2000000-0000-4000-8000-000000000004';
+set local role cbgpu_contest_tokens_backend;
+do $$begin
+ begin perform contest_api.read_allowed(decode(repeat('04',32),'hex'),'f3000000-0000-4000-8000-000000000001',true);raise exception 'TOKEN_REVOKED_PARENT_SESSION_ACCEPTED';exception when sqlstate 'PT401' then null;end;
+end$$;
+reset role;
 rollback;
