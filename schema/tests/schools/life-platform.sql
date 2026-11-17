@@ -8,6 +8,12 @@ insert into cbgpu_schools.memberships(user_id,school_id,membership_type,status,v
 select set_config('request.jwt.claims','{"sub":"fc100000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fc200000-0000-4000-8000-000000000001"}',true);
 set local role authenticated;
 do $$declare result jsonb;begin result:=public.cbgpu_school_life_sources('fixture-life-b');if result->>'school_id'<>'fixture-life-b' or result->>'school_name'<>'Synthetic B' or result?'user_id' or result?'contact_email' then raise exception 'ADMIN_SOURCE_DTO';end if;end$$;
+do $$declare result jsonb;begin
+ result:=public.cbgpu_school_life_configure('fixture-life-b','{"expected_version":0,"confirmed":true,"allowed_hosts":["school.cbe.go.kr"],"homepage_url":"https://school.cbe.go.kr/cbs-h"}');
+ if result->>'version'<>'1' then raise exception 'SOURCE_CONFIRMED_VERSION';end if;
+ begin perform public.cbgpu_school_life_configure('fixture-life-b','{"expected_version":0,"confirmed":true,"allowed_hosts":["school.cbe.go.kr"],"homepage_url":"https://school.cbe.go.kr/overwritten"}');raise exception 'STALE_SOURCE_OVERWRITE';exception when serialization_failure then null;end;
+ if public.cbgpu_school_life_sources('fixture-life-b')->>'homepage_url'<>'https://school.cbe.go.kr/cbs-h' then raise exception 'STALE_SOURCE_NOT_ROLLED_BACK';end if;
+end$$;
 reset role;
 do $$begin if exists(select 1 from cbgpu_schools.memberships where user_id='fc100000-0000-4000-8000-000000000001') then raise exception 'ADMIN_MEMBERSHIP_FABRICATED';end if;end$$;
 select set_config('request.jwt.claims','{"sub":"fc100000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fc200000-0000-4000-8000-000000000002"}',true);
