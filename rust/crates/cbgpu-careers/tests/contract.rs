@@ -89,6 +89,16 @@ async fn static_pages_stay_identical_and_public_routes_never_list_applicants() {
             .as_ref(),
         expected
     );
+    // The theme's exact brand assets must be served without opening a directory listing.
+    for path in ["/symbol_black.svg", "/symbol_white.svg"] {
+        let response = service
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["content-type"], "image/svg+xml");
+    }
     for path in [
         "/api/applications",
         "/applications.sqlite",

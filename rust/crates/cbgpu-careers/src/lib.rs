@@ -388,6 +388,8 @@ async fn handle(State(app): State<App>, request: Request) -> Response {
         "/app.js" => Some(("app.js", "text/javascript; charset=utf-8")),
         "/onboarding.js" => Some(("onboarding.js", "text/javascript; charset=utf-8")),
         "/logo.png" => Some(("logo.png", "image/png")),
+        "/symbol_black.svg" => Some(("symbol_black.svg", "image/svg+xml")),
+        "/symbol_white.svg" => Some(("symbol_white.svg", "image/svg+xml")),
         _ => None,
     };
     if let Some((file, kind)) = asset {
