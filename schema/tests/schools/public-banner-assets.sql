@@ -20,9 +20,9 @@ update public.contests set access_scope='SCHOOL' where id='fa870000-0000-4000-80
 set local role cbgpu_public_asset_reader;
 do $$begin if cbgpu_schools.public_contest_banner('fa870000-0000-4000-8000-000000000001') is not null then raise exception 'PRIVATE_SCOPE_ASSET_LEAK';end if;end$$;
 reset role;
-update public.contests set access_scope='PUBLIC',lifecycle_status='draft' where id='fa870000-0000-4000-8000-000000000001';
+update public.contests set access_scope='PUBLIC',lifecycle_status='archived' where id='fa870000-0000-4000-8000-000000000001';
 set local role cbgpu_public_asset_reader;
-do $$begin if cbgpu_schools.public_contest_banner('fa870000-0000-4000-8000-000000000001') is not null then raise exception 'DRAFT_ASSET_LEAK';end if;end$$;
+do $$begin if cbgpu_schools.public_contest_banner('fa870000-0000-4000-8000-000000000001') is not null then raise exception 'ARCHIVED_ASSET_LEAK';end if;end$$;
 reset role;
 update public.contests set lifecycle_status='published' where id='fa870000-0000-4000-8000-000000000001';
 update cbgpu_schools.schools set status='SUSPENDED' where id='fixture-public-assets';
