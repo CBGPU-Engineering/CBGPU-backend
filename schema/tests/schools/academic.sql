@@ -12,7 +12,7 @@ set local role authenticated;
 do $$begin if not public.get_is_approved(auth.uid()) then raise exception 'VERIFIED_MEMBER_CANNOT_USE_LEGACY_ADAPTER';end if;end$$;
 reset role;
 set local role service_role;
-do $$begin if not exists(select 1 from public.cbgpu_service_gpu_assignments() where id='fa300000-0000-4000-8000-000000000001') then raise exception 'FRESH_ASSIGNMENT_NOT_VISIBLE';end if;end$$;
+do $$begin if (public.cbgpu_service_gpu_snapshot()->>'count')::int<>jsonb_array_length(public.cbgpu_service_gpu_snapshot()->'reservations') or not exists(select 1 from jsonb_array_elements(public.cbgpu_service_gpu_snapshot()->'reservations')r where r->>'id'='fa300000-0000-4000-8000-000000000001') then raise exception 'SNAPSHOT_NOT_ATOMIC_COMPLETE';end if; if not exists(select 1 from public.cbgpu_service_gpu_assignments() where id='fa300000-0000-4000-8000-000000000001') then raise exception 'FRESH_ASSIGNMENT_NOT_VISIBLE';end if;end$$;
 reset role;
 create temp table academic_before as select id,account_type,account_status,student_id,student_id_school_year from public.profiles where id::text like 'fa100000%';
 create temp table academic_fixture(k text,v jsonb);grant all on academic_fixture to authenticated;
@@ -66,7 +66,7 @@ do $$begin
 end$$;
 reset role;
 set local role service_role;
-do $$begin if exists(select 1 from public.cbgpu_service_gpu_assignments() where id='fa300000-0000-4000-8000-000000000001') then raise exception 'ROLLOVER_ASSIGNMENT_NOT_REVOKED';end if;end$$;
+do $$begin if exists(select 1 from jsonb_array_elements(public.cbgpu_service_gpu_snapshot()->'reservations')r where r->>'id'='fa300000-0000-4000-8000-000000000001') then raise exception 'SNAPSHOT_RETAINED_REVOKED_ASSIGNMENT';end if; if exists(select 1 from public.cbgpu_service_gpu_assignments() where id='fa300000-0000-4000-8000-000000000001') then raise exception 'ROLLOVER_ASSIGNMENT_NOT_REVOKED';end if;end$$;
 reset role;
 do $$begin if not exists(select 1 from public.reservations where id='fa300000-0000-4000-8000-000000000001' and status='approved') then raise exception 'RESERVATION_HISTORY_MUTATED';end if;end$$;
 update auth.sessions set not_after=now()-interval '1 second' where id='fa200000-0000-4000-8000-000000000005';

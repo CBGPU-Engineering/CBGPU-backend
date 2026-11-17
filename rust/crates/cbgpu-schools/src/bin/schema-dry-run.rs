@@ -320,6 +320,7 @@ fn main() -> Result<()> {
         "20261117045629_school_academic_rollover.sql",
         "20261117050216_legacy_school_resource_adapter.sql",
         "20261117050640_cpu_deployment_request_actor.sql",
+        "20261117051453_gpu_scoped_assignment_snapshot.sql",
     ];
     let sources = migrations
         .iter()
