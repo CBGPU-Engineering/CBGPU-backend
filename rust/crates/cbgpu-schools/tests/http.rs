@@ -396,3 +396,51 @@ async fn direct_messaging_and_mute_routes_use_caller_jwt_and_bound_thread() {
     assert_eq!(r.status(), 400);
     task.abort();
 }
+
+#[tokio::test]
+async fn affiliation_routes_delegate_fresh_caller_with_bound_school() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|| async { Json(json!({"id":"trusted"})) }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_affiliation_api",
+            post(|h: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(h["authorization"], "Bearer fixture");
+                assert_eq!(v["action"], "create");
+                assert_eq!(v["payload"]["school_id"], "school-b");
+                assert_eq!(v["payload"]["membership_type"], "TEACHER");
+                Json(json!({"request":{"status":"PENDING"}}))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let app = router(config(true, format!("http://{address}")));
+    let r = app
+        .clone()
+        .oneshot(
+            Request::post("/v1/schools/school-b/affiliation-requests")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(
+                    r#"{"membership_type":"TEACHER","consent":true}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(body(r).await["request"]["status"], "PENDING");
+    let r = app
+        .oneshot(
+            Request::post("/v1/schools/school-b/affiliation-requests")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(r#"{"school_roles":["SCHOOL_OWNER"]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    server.abort();
+}

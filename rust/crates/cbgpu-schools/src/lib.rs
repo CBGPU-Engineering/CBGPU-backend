@@ -88,6 +88,32 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             .map(|(key, value)| (key.into_owned(), Value::String(value.into_owned())))
             .collect();
     let route = match (path.as_slice(), &method) {
+        (["v1", "schools", school, "affiliation-requests"], &Method::GET) => {
+            Some(("affiliation_own", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "affiliation-requests"], &Method::POST) => {
+            Some(("affiliation_create", json!({"school_id":school})))
+        }
+        (
+            [
+                "v1",
+                "schools",
+                school,
+                "affiliation-requests",
+                id,
+                "withdraw",
+            ],
+            &Method::POST,
+        ) => Some(("affiliation_withdraw", json!({"school_id":school,"id":id}))),
+        (["v1", "admin", "schools", school, "affiliation-requests"], &Method::GET) => {
+            Some(("affiliation_inbox", json!({"school_id":school})))
+        }
+        (["v1", "admin", "affiliation-requests"], &Method::GET) => {
+            Some(("affiliation_platform_inbox", json!({})))
+        }
+        (["v1", "admin", "affiliation-requests", id, "review"], &Method::POST) => {
+            Some(("affiliation_review", json!({"id":id})))
+        }
         (["v1", "features"], &Method::GET) => Some(("feature_catalog", {
             let fields = url::form_urlencoded::parse(query.as_bytes())
                 .filter(|(key, _)| key == "school_id")
@@ -357,6 +383,15 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         "cbgpu_school_api"
     };
     let (rpc, rpc_action) = match action {
+        "affiliation_own"
+        | "affiliation_create"
+        | "affiliation_withdraw"
+        | "affiliation_inbox"
+        | "affiliation_platform_inbox"
+        | "affiliation_review" => (
+            "cbgpu_school_affiliation_api",
+            action.strip_prefix("affiliation_").unwrap(),
+        ),
         "dm_preferences"
         | "dm_preferences_save"
         | "dm_recipients"
