@@ -7,19 +7,19 @@ projects, school memberships, notebook kernels, routes, containers or services.
 
 ## Core schema atomic rehearsal — 2026-11-17
 
-The newer private review pack is `core-activation-review-20261117-44` under
+The newer private review pack is `core-activation-review-20261117-47` under
 `~/.local/share/cbgpu-rust/`. It supersedes the older 27-migration evidence below.
-It is **interim**: the independently reviewed affiliation-change migration must
-be added and the complete final inventory rehearsed before operating execution.
+The final inventory includes affiliation-change review, report moderation and
+one-time historical account preferences. Operator review is still required before execution.
 No schema or service activation was performed by this rehearsal.
 
-The 44 source hashes match `school-schema-clone-20261117-092-shared-settings`.
+The 47 source hashes match `school-schema-clone-20261117-096-final47` (all migrations replayed twice with their actual SQL fixtures).
 The 2,408-school NEIS manifest byte-matches source commit `99dc7e0`. The bundle
-SHA-256 is `14166c90dff89e055721575e65b6b566953f332cb1f9178b676c6752651eea61`.
+SHA-256 is `a7edbbf2ce793e3513644d13aa5fa182b94071d126822db9dc9a7aafdfcf8a4f`.
 The same production PostgreSQL image, with network disabled, accepted the entire
 bundle as the actual login/session user `supabase_admin`, not a bootstrap login
 using SET ROLE. A deliberate exception immediately before commit rolled back
-all new namespaces; the successful transaction took 648 ms. A second execution
+all new namespaces; the successful transaction took 694 ms. A second execution
 was refused. Original identity, password, session, profile and business-row
 fingerprints matched. Operating read-only counts remained 175 identities,
 167 profiles and two contests; account/school namespaces remained absent.
@@ -39,8 +39,9 @@ is run. Public catalog rows remain listed/unverified with no enabled features.
 
 1. Freeze the complete final inventory, rerun actual-role injected-failure and
    success rehearsals, review all protected-row fingerprints, and create the
-   final private operator-review marker. The interim pack deliberately lacks
-   this marker and its apply helper refuses execution.
+   final private operator-review marker. The pack deliberately lacks
+   this marker and its apply helper refuses execution until the marker contains
+   the exact final bundle SHA.
 2. Use the reviewed helper with its exact final bundle SHA. It validates source
    hashes, creates a new mode-0600 dump/globals snapshot for every attempt, and
    sends the SQL through `docker exec -i cbgpu-supabase-db psql -w -U supabase_admin
