@@ -135,7 +135,7 @@ async fn lock(tx: &mut Transaction<'_, Postgres>, exclusive: bool) -> Result<()>
     } else {
         "SHARE"
     };
-    sqlx::query(&format!("LOCK TABLE deploy_store.projects,deploy_store.deployments,deploy_store.custom_domains,deploy_store.project_members,deploy_store.server_domains,deploy_store.compose_states,deploy_store.work_items IN {mode} MODE")).execute(&mut**tx).await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!("LOCK TABLE deploy_store.projects,deploy_store.deployments,deploy_store.custom_domains,deploy_store.project_members,deploy_store.server_domains,deploy_store.compose_states,deploy_store.work_items IN {mode} MODE"))).execute(&mut**tx).await?;
     Ok(())
 }
 async fn drained(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
@@ -320,7 +320,7 @@ pub async fn export_legacy(store: &Store, destination: &Path, options: &Options)
     let mut fingerprint = Sha256::new();
     for table in TABLES {
         if table != "work_items" {
-            sqlx::query(&sqlite_ddl(table, &columns[table]))
+            sqlx::query(sqlx::AssertSqlSafe(sqlite_ddl(table, &columns[table])))
                 .execute(&mut *out)
                 .await?;
         }
@@ -328,7 +328,8 @@ pub async fn export_legacy(store: &Store, destination: &Path, options: &Options)
         let mut count = 0u64;
         let query =
             format!("SELECT to_jsonb(t) FROM deploy_store.{table} t ORDER BY to_jsonb(t)::text");
-        let mut rows = sqlx::query_scalar::<_, Value>(&query).fetch(&mut *tx);
+        let mut rows =
+            sqlx::query_scalar::<_, Value>(sqlx::AssertSqlSafe(query.as_str())).fetch(&mut *tx);
         while let Some(row) = rows.try_next().await? {
             let encoded = serde_json::to_vec(&row)?;
             total_rows += 1;
@@ -511,7 +512,8 @@ async fn tx_fingerprint(tx: &mut Transaction<'_, Postgres>) -> Result<String> {
         digest.update(table.as_bytes());
         let query =
             format!("SELECT to_jsonb(t) FROM deploy_store.{table} t ORDER BY to_jsonb(t)::text");
-        let mut rows = sqlx::query_scalar::<_, Value>(&query).fetch(&mut **tx);
+        let mut rows =
+            sqlx::query_scalar::<_, Value>(sqlx::AssertSqlSafe(query.as_str())).fetch(&mut **tx);
         while let Some(row) = rows.try_next().await? {
             digest.update(serde_json::to_vec(&row)?);
             digest.update(b"\n");
@@ -548,9 +550,11 @@ pub async fn import_bundle(store: &Store, source: &Path, options: &Options) -> R
         return Err(fail("Reverse source/target schema proof differs", 409));
     }
     for table in TABLES {
-        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM deploy_store.{table}"))
-            .fetch_one(&mut *tx)
-            .await?;
+        let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM deploy_store.{table}"
+        )))
+        .fetch_one(&mut *tx)
+        .await?;
         if count != 0 {
             return Err(fail(
                 "Reverse restore refuses to overwrite existing native state",
@@ -579,18 +583,19 @@ pub async fn import_bundle(store: &Store, source: &Path, options: &Options) -> R
                 count += 1;
             }
         } else {
-            let actual: Vec<String> = sqlx::query(&format!("PRAGMA table_info({table})"))
-                .fetch_all(&mut *read)
-                .await?
-                .iter()
-                .map(|r| r.get("name"))
-                .collect();
+            let actual: Vec<String> =
+                sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA table_info({table})")))
+                    .fetch_all(&mut *read)
+                    .await?
+                    .iter()
+                    .map(|r| r.get("name"))
+                    .collect();
             let expected: Vec<_> = columns[table].iter().map(|c| c.name.clone()).collect();
             if actual != expected {
                 return Err(fail("Reverse SQLite column proof differs", 409));
             }
             let query = format!("SELECT * FROM {table}");
-            let mut rows = sqlx::query(&query).fetch(&mut *read);
+            let mut rows = sqlx::query(sqlx::AssertSqlSafe(query.as_str())).fetch(&mut *read);
             while let Some(row) = rows.try_next().await? {
                 let mut value = json!({});
                 for col in &columns[table] {
@@ -630,7 +635,7 @@ pub async fn import_bundle(store: &Store, source: &Path, options: &Options) -> R
                 if total_rows > options.max_rows || total_bytes > options.max_bytes {
                     return Err(fail("Reverse restore exceeds reviewed bounds", 413));
                 }
-                sqlx::query(&format!("INSERT INTO deploy_store.{table} SELECT(jsonb_populate_record(NULL::deploy_store.{table},$1)).*")).bind(&value).execute(&mut*tx).await?;
+                sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO deploy_store.{table} SELECT(jsonb_populate_record(NULL::deploy_store.{table},$1)).*"))).bind(&value).execute(&mut*tx).await?;
                 count += 1;
             }
         }

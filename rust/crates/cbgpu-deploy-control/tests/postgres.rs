@@ -80,10 +80,12 @@ async fn ownership_encrypted_queue_failure_recovery_and_project_continuity() {
         "compose_states",
         "projects",
     ] {
-        sqlx::query(&format!("DELETE FROM deploy_store.{table}"))
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM deploy_store.{table}"
+        )))
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     let source = temp.path().join("legacy.sqlite");
     let sqlite = sqlx::SqlitePool::connect_with(

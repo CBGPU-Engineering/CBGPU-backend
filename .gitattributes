@@ -15,3 +15,6 @@
 *.tpl eol=lf
 Caddyfile eol=lf
 Dockerfile* eol=lf
+
+# Preserve the official driver bytes checked by the offline provenance guard.
+rust/vendor/** text eol=lf linguist-vendored=true

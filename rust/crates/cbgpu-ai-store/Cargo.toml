@@ -8,7 +8,7 @@ rust-version = "1.88"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite", "json", "macros", "migrate"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite", "json", "macros", "migrate"] }
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 rand = "0.8"

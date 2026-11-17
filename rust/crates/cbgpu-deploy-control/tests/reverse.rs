@@ -140,10 +140,12 @@ async fn new_native_writes_reverse_without_overwriting_original_and_reimport_all
         .await
         .unwrap();
     let target_name = format!("cbgpu_reverse_{}_test", uuid::Uuid::new_v4().simple());
-    sqlx::query(&format!("CREATE DATABASE {target_name}"))
-        .execute(&admin)
-        .await
-        .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE DATABASE {target_name}"
+    )))
+    .execute(&admin)
+    .await
+    .unwrap();
     let mut target_url = parsed.clone();
     target_url.set_path(&format!("/{target_name}"));
     let target_pool = sqlx::postgres::PgPoolOptions::new()
@@ -356,7 +358,7 @@ async fn new_native_writes_reverse_without_overwriting_original_and_reimport_all
             .starts_with(".cbgpu-reverse-")
     }));
     target_pool.close().await;
-    sqlx::query(&format!("DROP DATABASE {target_name}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {target_name}")))
         .execute(&admin)
         .await
         .unwrap();

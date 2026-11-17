@@ -14,6 +14,6 @@ regex = "1"
 sha2 = "0.10"
 walkdir = "2"
 chrono = {version="0.4",default-features=false,features=["clock"]}
-sqlx = { version="0.8",default-features=false,features=["runtime-tokio","sqlite"] }
+sqlx = { version="0.9",default-features=false,features=["runtime-tokio","sqlite"] }
 [dev-dependencies]
 tempfile = "3"

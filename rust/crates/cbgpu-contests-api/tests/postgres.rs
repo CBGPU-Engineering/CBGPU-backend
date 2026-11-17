@@ -22,21 +22,24 @@ async fn real_pg17_oracle_observes_rls_revocation_and_existing_registration_rule
     )
     .unwrap();
     for _ in 0..2 {
-        sqlx::raw_sql(&migration).execute(&pool).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(migration.as_str()))
+            .execute(&pool)
+            .await
+            .unwrap();
     }
     let resource_oracle = std::fs::read_to_string(
         repo.join("supabase/migrations/20261116235440_contest_account_resource_oracle.sql"),
     )
     .unwrap();
     for _ in 0..2 {
-        sqlx::raw_sql(&resource_oracle)
+        sqlx::raw_sql(sqlx::AssertSqlSafe(resource_oracle.as_str()))
             .execute(&pool)
             .await
             .unwrap();
     }
     for role in ["anon", "authenticated"] {
         let mut tx = pool.begin().await.unwrap();
-        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {role}")))
             .execute(&mut *tx)
             .await
             .unwrap();
@@ -197,7 +200,10 @@ async fn real_pg17_oracle_observes_rls_revocation_and_existing_registration_rule
         "create schema storage;{}",
         bootstrap.split_once("create schema storage;").unwrap().1
     );
-    sqlx::raw_sql(&storage).execute(&pool).await.unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(storage.as_str()))
+        .execute(&pool)
+        .await
+        .unwrap();
     for file in [
         "schema/legacy/web-supabase/migrations/20261018051657_contest_submissions.sql",
         "schema/legacy/web-supabase/migrations/20261018052904_contest_logos.sql",
@@ -216,7 +222,7 @@ async fn real_pg17_oracle_observes_rls_revocation_and_existing_registration_rule
             .filter(|line| !line.starts_with('\\'))
             .collect::<Vec<_>>()
             .join("\n");
-        sqlx::raw_sql(&sql)
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql.as_str()))
             .execute(&pool)
             .await
             .unwrap_or_else(|error| panic!("Reviewed SQL contract {file}: {error}"));

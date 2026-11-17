@@ -1,14 +1,19 @@
 [workspace]
 members = ["crates/cbgpu-core", "crates/cbgpu-gateway", "crates/cbgpu-front-worker", "crates/cbgpu-cutover", "crates/cbgpu-careers", "crates/cbgpu-compose-worker", "crates/cbgpu-contest-teams", "crates/cbgpu-backup", "crates/cbgpu-ops", "crates/cbgpu-domains", "crates/cbgpu-delivery", "crates/cbgpu-ai-documents", "crates/cbgpu-ai-store", "crates/cbgpu-routing", "crates/cbgpu-admin-ops", "crates/cbgpu-robotics", "crates/cbgpu-ai", "crates/cbgpu-ai-inference", "crates/cbgpu-ai-models", "crates/cbgpu-edge-policy", "crates/cbgpu-gpu-gateway", "crates/cbgpu-ai-handoff", "crates/cbgpu-contests-api", "crates/cbgpu-contest-tokens", "crates/cbgpu-accounts", "crates/cbgpu-ai-corpus", "crates/cbgpu-ai-search", "crates/cbgpu-schools", "crates/cbgpu-public-content", "crates/cbgpu-gpu-enrollment", "crates/cbgpu-deploy-control", "crates/cbgpu-portal-auth", "crates/cbgpu-ad-revenue"]
+exclude = ["vendor/sqlx-sqlite-0.9.0"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-rust-version = "1.88"
+rust-version = "1.94"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+# Use SQLx0.9 while using patched bundled SQLite3.54.1.
+[patch.crates-io]
+sqlx-sqlite = { path = "vendor/sqlx-sqlite-0.9.0" }

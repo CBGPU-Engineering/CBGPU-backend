@@ -14,7 +14,7 @@ csv="1"
 encoding_rs="0.8"
 sha2="0.10"
 uuid={version="1",features=["v4"]}
-sqlx={version="0.8",default-features=false,features=["runtime-tokio-rustls","postgres","json","uuid"]}
+sqlx={version="0.9",default-features=false,features=["runtime-tokio", "tls-rustls-ring","postgres","json","uuid"]}
 reqwest={version="0.12",default-features=false,features=["json","rustls-tls"]}
 [dev-dependencies]
 tower={version="0.5",features=["util"]}

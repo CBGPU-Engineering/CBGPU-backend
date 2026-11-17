@@ -63,10 +63,11 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
         ("compose_states", "status='building'"),
     ] {
         if existing.iter().any(|name| name == table) {
-            let active: i64 =
-                sqlx::query_scalar(&format!("SELECT count(*)FROM {table} WHERE {condition}"))
-                    .fetch_one(&mut *read)
-                    .await?;
+            let active: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT count(*)FROM {table} WHERE {condition}"
+            )))
+            .fetch_one(&mut *read)
+            .await?;
             if active > 0 {
                 return Err(fail(
                     "Drain and stop all legacy deployment writers before importing",
@@ -82,9 +83,11 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
     // Fence every native table for the entire import transaction, not just cooperative writers.
     sqlx::query("LOCK TABLE deploy_store.projects,deploy_store.deployments,deploy_store.custom_domains,deploy_store.project_members,deploy_store.server_domains,deploy_store.compose_states,deploy_store.work_items IN ACCESS EXCLUSIVE MODE").execute(&mut *tx).await?;
     for table in TABLES.iter().copied().chain(std::iter::once("work_items")) {
-        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*)FROM deploy_store.{table}"))
-            .fetch_one(&mut *tx)
-            .await?;
+        let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*)FROM deploy_store.{table}"
+        )))
+        .fetch_one(&mut *tx)
+        .await?;
         if count != 0 {
             return Err(fail(
                 "Native deployment target is not empty; overwrite refused",
@@ -98,9 +101,11 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
         let mut count = 0usize;
         if existing.iter().any(|name| name == table) {
             let columns:Vec<String>=sqlx::query_scalar("SELECT column_name FROM information_schema.columns WHERE table_schema='deploy_store'AND table_name=$1").bind(table).fetch_all(&mut*tx).await?;
-            for row in sqlx::query(&format!("SELECT * FROM {table} ORDER BY rowid"))
-                .fetch_all(&mut *read)
-                .await?
+            for row in sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT * FROM {table} ORDER BY rowid"
+            )))
+            .fetch_all(&mut *read)
+            .await?
             {
                 let mut value = defaults(table);
                 for column in row.columns() {
@@ -144,7 +149,7 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
                         return Err(fail("Legacy project config is invalid", 400));
                     }
                 }
-                sqlx::query(&format!("INSERT INTO deploy_store.{table} SELECT(jsonb_populate_record(NULL::deploy_store.{table},$1)).*")).bind(&value).execute(&mut*tx).await?;
+                sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO deploy_store.{table} SELECT(jsonb_populate_record(NULL::deploy_store.{table},$1)).*"))).bind(&value).execute(&mut*tx).await?;
                 let predicate = match *table {
                     "project_members" => "resource_type=$2 AND project_id=$3 AND user_id=$4",
                     "server_domains" | "compose_states" => "project_id=$2",
@@ -152,7 +157,8 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
                 };
                 let sql =
                     format!("SELECT to_jsonb(t)=$1 FROM deploy_store.{table} t WHERE {predicate}");
-                let mut query = sqlx::query_scalar::<_, bool>(&sql).bind(&value);
+                let mut query =
+                    sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(sql.as_str())).bind(&value);
                 query = if *table == "project_members" {
                     query
                         .bind(value["resource_type"].as_str())
@@ -193,9 +199,9 @@ pub async fn target_fingerprint(store: &Store) -> Result<String> {
         .await?;
     let mut digest = Sha256::new();
     for table in TABLES.iter().copied().chain(std::iter::once("work_items")) {
-        let rows: Vec<Value> = sqlx::query_scalar(&format!(
+        let rows: Vec<Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT to_jsonb(t) FROM deploy_store.{table} t ORDER BY to_jsonb(t)::text"
-        ))
+        )))
         .fetch_all(&mut *tx)
         .await?;
         digest.update(table.as_bytes());
@@ -233,9 +239,10 @@ pub async fn inspect_read_only(source: &Path) -> Result<Value> {
     let mut active = 0i64;
     for table in TABLES {
         if existing.iter().any(|t| t == table) {
-            let count: i64 = sqlx::query_scalar(&format!("SELECT count(*)FROM {table}"))
-                .fetch_one(&mut *tx)
-                .await?;
+            let count: i64 =
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*)FROM {table}")))
+                    .fetch_one(&mut *tx)
+                    .await?;
             counts.insert(*table, count);
         }
     }
@@ -244,9 +251,9 @@ pub async fn inspect_read_only(source: &Path) -> Result<Value> {
         ("compose_states", "status='building'"),
     ] {
         if existing.iter().any(|t| t == table) {
-            active += sqlx::query_scalar::<_, i64>(&format!(
+            active += sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
                 "SELECT count(*)FROM {table} WHERE {predicate}"
-            ))
+            )))
             .fetch_one(&mut *tx)
             .await?;
         }

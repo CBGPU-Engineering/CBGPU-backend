@@ -281,7 +281,9 @@ pub async fn apply(database: &Path, key: &Path, receipt: &Path) -> Result<Value>
     let owned = triggers(&id)?;
     let mut output = NewReceipt::reserve(receipt)?;
     for trigger in &owned {
-        sqlx::query(&trigger.sql).execute(&mut *tx).await?;
+        sqlx::query(sqlx::AssertSqlSafe(trigger.sql.as_str()))
+            .execute(&mut *tx)
+            .await?;
         let actual: String =
             sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?")
                 .bind(&trigger.name)
@@ -336,9 +338,12 @@ pub async fn remove(database: &Path, key: &Path, receipt: &Path) -> Result<Value
     }
     for trigger in &m.triggers {
         if found > 0 {
-            sqlx::query(&format!("DROP TRIGGER {}", trigger.name))
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DROP TRIGGER {}",
+                trigger.name
+            )))
+            .execute(&mut *tx)
+            .await?;
         }
     }
     tx.commit().await?;

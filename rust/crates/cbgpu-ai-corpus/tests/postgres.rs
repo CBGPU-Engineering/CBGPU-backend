@@ -394,7 +394,7 @@ async fn fresh_rls_owner_member_public_revocation_forgery_and_legacy_import() {
         .unwrap();
     for role in ["anon", "authenticated", "cbgpu_corpus_backend"] {
         let mut tx = admin.begin().await.unwrap();
-        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {role}")))
             .execute(&mut *tx)
             .await
             .unwrap();
@@ -422,7 +422,7 @@ async fn fresh_rls_owner_member_public_revocation_forgery_and_legacy_import() {
     }
     for role in ["anon", "authenticated"] {
         let mut tx = admin.begin().await.unwrap();
-        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {role}")))
             .execute(&mut *tx)
             .await
             .unwrap();

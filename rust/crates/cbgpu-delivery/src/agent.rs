@@ -368,8 +368,12 @@ pub fn backup_sqlite(root: &Path, runtime: &Path, sha: &str) -> Result<()> {
             .map_err(|_| error("Cannot create snapshot directory"))?;
         let db = Connection::open_with_flags(src, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|_| error("Cannot open source database"))?;
-        db.backup(rusqlite::DatabaseName::Main, &dst, None)
-            .map_err(|_| error("Cannot snapshot SQLite data"))?;
+        db.backup(
+            rusqlite::MAIN_DB,
+            &dst,
+            None::<fn(rusqlite::backup::Progress)>,
+        )
+        .map_err(|_| error("Cannot snapshot SQLite data"))?;
     }
     Ok(())
 }

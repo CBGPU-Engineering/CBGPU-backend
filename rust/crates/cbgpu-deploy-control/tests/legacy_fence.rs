@@ -264,11 +264,11 @@ async fn modified_own_trigger_refuses_all_drops_and_preserves_third_party_ddl() 
         .unwrap()
         .to_owned();
     let mut c = f.db().await;
-    sqlx::query(&format!("DROP TRIGGER {name}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {name}")))
         .execute(&mut c)
         .await
         .unwrap();
-    sqlx::query(&format!("CREATE TRIGGER {name} BEFORE INSERT ON deployments BEGIN SELECT RAISE(ABORT,'manual replacement'); END")).execute(&mut c).await.unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE TRIGGER {name} BEFORE INSERT ON deployments BEGIN SELECT RAISE(ABORT,'manual replacement'); END"))).execute(&mut c).await.unwrap();
     assert!(
         legacy_fence::remove(&f.database, &f.key, &f.receipt)
             .await

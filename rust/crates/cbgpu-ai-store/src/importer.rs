@@ -37,9 +37,11 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
         "chat_messages",
     ];
     for table in tables {
-        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM ai_store.{table}"))
-            .fetch_one(&mut *tx)
-            .await?;
+        let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM ai_store.{table}"
+        )))
+        .fetch_one(&mut *tx)
+        .await?;
         if count != 0 {
             return Err(fail(
                 "AI import target is not empty; refusing overwrite",
@@ -64,9 +66,11 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
             counts.insert(table, 0usize);
             continue;
         }
-        let rows = sqlx::query(&format!("SELECT * FROM {table} ORDER BY rowid"))
-            .fetch_all(&mut *read)
-            .await?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {table} ORDER BY rowid"
+        )))
+        .fetch_all(&mut *read)
+        .await?;
         let allowed:Vec<String>=sqlx::query_scalar("SELECT column_name FROM information_schema.columns WHERE table_schema='ai_store' AND table_name=$1").bind(table).fetch_all(&mut *tx).await?;
         for row in &rows {
             let mut data = defaults(table);
@@ -115,15 +119,15 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
             // Explicit destination composite forbids accidentally importing unknown columns.
             digest.update(table.as_bytes());
             digest.update(serde_json::to_vec(&data)?);
-            sqlx::query(&format!("INSERT INTO ai_store.{table} SELECT (jsonb_populate_record(NULL::ai_store.{table},$1)).*")).bind(&data).execute(&mut *tx).await?;
+            sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO ai_store.{table} SELECT (jsonb_populate_record(NULL::ai_store.{table},$1)).*"))).bind(&data).execute(&mut *tx).await?;
             let key = match table {
                 "vectors" => "hash",
                 "ai_project_files" => "upload",
                 _ => "id",
             };
-            let preserved: bool = sqlx::query_scalar(&format!(
+            let preserved: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT to_jsonb(t)=$1 FROM ai_store.{table} t WHERE {key}=$2"
-            ))
+            )))
             .bind(&data)
             .bind(
                 data[key]
@@ -139,9 +143,11 @@ pub async fn import_read_only(store: &Store, source: &Path) -> Result<Value> {
                 ));
             }
         }
-        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM ai_store.{table}"))
-            .fetch_one(&mut *tx)
-            .await?;
+        let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM ai_store.{table}"
+        )))
+        .fetch_one(&mut *tx)
+        .await?;
         if count != rows.len() as i64 {
             return Err(fail("AI import row verification failed", 503));
         }

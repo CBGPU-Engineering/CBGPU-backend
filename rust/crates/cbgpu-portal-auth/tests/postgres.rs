@@ -122,7 +122,7 @@ impl Db {
             .after_connect(move |c, _| {
                 Box::pin(async move {
                     if let Some(role) = role {
-                        sqlx::query(&format!("SET ROLE {role}"))
+                        sqlx::query(sqlx::AssertSqlSafe(format!("SET ROLE {role}")))
                             .execute(&mut *c)
                             .await?;
                     }
