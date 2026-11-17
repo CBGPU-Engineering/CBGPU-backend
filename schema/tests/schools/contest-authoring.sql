@@ -14,7 +14,7 @@ select pg_temp.assert_true(not public.cbgpu_can_create_school_contest('cbsh'),'o
 select pg_temp.assert_true(not cbgpu_accounts.can_user_use_resource(auth.uid(),'gpu','cbsh'),'school owner cannot borrow legacy GPU');
 set local role authenticated;
 insert into public.contests(id,host_id,title,fields,school_id,access_scope)
-values('f7300000-0000-4000-8000-000000000001',auth.uid(),'Synthetic owner event','[{"id":"f7400000-0000-4000-8000-000000000001","type":"text","label":"Fixture answer","description":"","required":false}]','fixture-contest-author','SCHOOL');
+values('f7300000-0000-4000-8000-000000000001',auth.uid(),'Synthetic owner event','[{"id":"f7400000-0000-4000-8000-000000000001","type":"text","label":"Fixture answer","description":"","required":false}]','fixture-contest-author','SCHOOL') returning id;
 reset role;
 update cbgpu_schools.schools set features='{}' where id='fixture-contest-author';
 select pg_temp.assert_true(not public.cbgpu_can_create_school_contest('fixture-contest-author'),'disabled feature cannot be used for authoring');
