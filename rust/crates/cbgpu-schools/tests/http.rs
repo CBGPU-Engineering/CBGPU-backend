@@ -147,3 +147,64 @@ async fn academic_routes_bind_school_and_report_stale_preview() {
     assert_eq!(body(response).await["code"], "ACADEMIC_PREVIEW_CHANGED");
     server.abort();
 }
+#[tokio::test]
+async fn resource_contexts_are_self_only_and_resource_target_is_path_bound() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|| async { Json(json!({"id":"trusted"})) }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_resource_contexts",
+            post(|headers: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer fixture");
+                assert_eq!(v, json!({}));
+                Json(json!({"items":[],"current_school_id":null,"server_time":"fixture"}))
+            }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_self_resource_access",
+            post(|Json(v): Json<Value>| async move {
+                assert_eq!(v, json!({"target_school":"school-b"}));
+                Json(json!({"school_id":"school-b","resources":{"gpu":false}}))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let app = router(config(true, format!("http://{address}")));
+    let r = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/resource-contexts")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    let r = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/resource-contexts?user_id=foreign")
+                .header("authorization", "Bearer fixture")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(body(r).await["items"], json!([]));
+    let r = app
+        .oneshot(
+            Request::get("/v1/schools/school-b/resource-access?target_school=school-a")
+                .header("authorization", "Bearer fixture")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(body(r).await["school_id"], "school-b");
+    server.abort();
+}

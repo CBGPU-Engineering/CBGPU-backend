@@ -98,6 +98,10 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         }
         (["v1", "schools", school], &Method::GET) => Some(("school", json!({"school_id":school}))),
         (["v1", "memberships"], &Method::GET) => Some(("memberships", json!({}))),
+        (["v1", "resource-contexts"], &Method::GET) => Some(("resource_contexts", json!({}))),
+        (["v1", "schools", school, "resource-access"], &Method::GET) => {
+            Some(("resource_access", json!({"school_id":school})))
+        }
         (["v1", "current-school"], &Method::POST) => Some(("select_school", json!({}))),
         (["v1", "schools", school, "memberships"], &Method::POST) => {
             Some(("join", json!({"school_id":school})))
@@ -317,6 +321,8 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
     let (rpc, rpc_action) = match action {
         "publication_list" => ("cbgpu_public_project_api", "list"),
         "publication_save" => ("cbgpu_public_project_api", "save"),
+        "resource_contexts" => ("cbgpu_school_resource_contexts", action),
+        "resource_access" => ("cbgpu_self_resource_access", action),
         "academic_preview" => ("cbgpu_school_academic_api", "preview"),
         "academic_history" => ("cbgpu_school_academic_api", "history"),
         "academic_execute" => ("cbgpu_school_academic_api", "execute"),
@@ -329,6 +335,8 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         _ => (rpc, action),
     };
     let rpc_body = match action {
+        "resource_contexts" => json!({}),
+        "resource_access" => json!({"target_school":payload["school_id"]}),
         "life_sources" => json!({"p_school_id":payload["school_id"]}),
         "life_configure" => {
             let school = payload["school_id"].clone();
