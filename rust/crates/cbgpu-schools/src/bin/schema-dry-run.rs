@@ -349,6 +349,7 @@ fn main() -> Result<()> {
         "20261117143941_school_message_report_moderation.sql",
         "20261117144545_legacy_school_account_preference.sql",
         "20261117154700_platform_school_central_cpu_allocations.sql",
+        "20261117233327_school_community_threaded_replies.sql",
     ];
     let sources = migrations
         .iter()
@@ -971,6 +972,25 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(
             repo.join("schema/tests/schools/central-cpu.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/community-replies.sql"),
         )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;

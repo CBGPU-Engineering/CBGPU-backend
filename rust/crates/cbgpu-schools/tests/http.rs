@@ -531,3 +531,73 @@ async fn central_cpu_default_off_and_bound_platform_routes() {
     assert_eq!(spoof.status(), StatusCode::BAD_REQUEST);
     server.abort();
 }
+
+#[tokio::test]
+async fn community_replies_bind_parent_and_keep_scope_server_owned() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|| async { Json(json!({"id":"caller"})) }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_messenger_api",
+            post(|headers: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer fixture");
+                assert_eq!(v["payload"]["id"], "00000000-0000-4000-8000-000000000001");
+                match v["action"].as_str().unwrap() {
+                    "message" => {
+                        Json(json!({"message":{"id":"post","parent_id":null,"reply_count":1}}))
+                    }
+                    "replies" => {
+                        assert_eq!(v["payload"]["limit"], "50");
+                        Json(json!({"items":[],"total":0}))
+                    }
+                    "reply_create" => {
+                        assert!(v["payload"].get("school_id").is_none());
+                        assert_eq!(v["payload"]["body"], "Real reply");
+                        Json(json!({"message":{"id":"reply","parent_id":"post"},"duplicate":false}))
+                    }
+                    other => panic!("unexpected {other}"),
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let app = router(config(true, format!("http://{address}")));
+    for suffix in ["", "/replies?limit=50&offset=0"] {
+        let r = app
+            .clone()
+            .oneshot(
+                Request::get(format!(
+                    "/v1/messages/00000000-0000-4000-8000-000000000001{suffix}"
+                ))
+                .header("authorization", "Bearer fixture")
+                .body(Body::empty())
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+    }
+    let path = "/v1/messages/00000000-0000-4000-8000-000000000001/replies";
+    let r=app.clone().oneshot(Request::post(path).header("authorization","Bearer fixture").body(Body::from(r#"{"body":"Real reply","client_message_id":"00000000-0000-4000-8000-000000000002"}"#)).unwrap()).await.unwrap();
+    assert_eq!(r.status(), 200);
+    let r = app
+        .clone()
+        .oneshot(
+            Request::post(path)
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(r#"{"id":"spoof","body":"Attempt"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let r = app
+        .oneshot(Request::get(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    task.abort();
+}

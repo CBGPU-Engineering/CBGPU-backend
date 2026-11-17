@@ -1,0 +1,43 @@
+begin;
+insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data,aud,role,encrypted_password,email_confirmed_at,created_at,updated_at)select('fc810000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,'community-thread-'||x||'@fixture.invalid','{"full_name":"Community synthetic","account_type_request":"EXTERNAL"}','{}','authenticated','authenticated','fixture-no-password',now(),now(),now()from generate_series(1,4)x;
+insert into auth.sessions(id,user_id)select('fc820000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,('fc810000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid from generate_series(1,4)x;
+insert into cbgpu_schools.schools(id,official_name,normalized_name,display_name,type,configuration,features,status)values('fixture-thread-a','Thread A','thread a','Thread A','HIGH_SCHOOL','{}',array['community'],'APPROVED'),('fixture-thread-b','Thread B','thread b','Thread B','HIGH_SCHOOL','{}',array['community'],'APPROVED');
+insert into cbgpu_schools.memberships(user_id,school_id,membership_type,status,verified,school_roles)values('fc810000-0000-4000-8000-000000000001','fixture-thread-a','STUDENT','ACTIVE',true,'{}'),('fc810000-0000-4000-8000-000000000002','fixture-thread-a','TEACHER','ACTIVE',true,array['COMMUNITY_MODERATOR']),('fc810000-0000-4000-8000-000000000003','fixture-thread-b','STUDENT','ACTIVE',true,'{}'),('fc810000-0000-4000-8000-000000000004','fixture-thread-a','STUDENT','ACTIVE',true,'{}');
+create temp table thread_test(k text primary key,v jsonb);grant all on thread_test to authenticated;
+select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000001"}',true);set local role authenticated;
+insert into thread_test values('post',public.cbgpu_school_messenger_api('message_create','{"scope":"SCHOOL","school_id":"fixture-thread-a","body":"Original retained post","client_message_id":"fc830000-0000-4000-8000-000000000001"}'));
+select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000002"}',true);
+insert into thread_test values('reply',public.cbgpu_school_messenger_api('reply_create',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='post'),'body','First real comment','client_message_id','fc830000-0000-4000-8000-000000000002')));
+do $$declare p text:=(select v#>>'{message,id}'from thread_test where k='post');r jsonb;begin
+ r:=public.cbgpu_school_messenger_api('reply_create',jsonb_build_object('id',p,'body','First real comment','client_message_id','fc830000-0000-4000-8000-000000000002'));if r->>'duplicate'<>'true'or r#>>'{message,parent_id}'<>p then raise exception 'REPLY_RETRY_FAILED';end if;
+ begin perform public.cbgpu_school_messenger_api('reply_create',jsonb_build_object('id',p,'body','Changed comment','client_message_id','fc830000-0000-4000-8000-000000000002'));raise exception 'REPLY_BODY_DRIFT';exception when unique_violation then null;end;
+ begin perform public.cbgpu_school_messenger_api('reply_create',jsonb_build_object('id',p,'body','Spoof scope','client_message_id',gen_random_uuid(),'scope','NATIONWIDE'));raise exception 'REPLY_SCOPE_SPOOF';exception when invalid_parameter_value then null;end;
+ begin perform public.cbgpu_school_messenger_api('reply_create',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='reply'),'body','Nested','client_message_id',gen_random_uuid()));raise exception 'NESTED_COMMENT';exception when no_data_found then null;end;
+ r:=public.cbgpu_school_messenger_api('messages','{"scope":"SCHOOL","school_id":"fixture-thread-a"}');if jsonb_array_length(r->'items')<>1 or r#>>'{items,0,reply_count}'<>'1'or r#>>'{items,0,body}'<>'Original retained post'then raise exception 'REPLY_LEAKED_IN_FEED';end if;
+ r:=public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',p));if r->>'total'<>'1'or r#>>'{items,0,scope}'<>'SCHOOL'or r#>>'{items,0,school_id}'<>'fixture-thread-a'then raise exception 'COMMENT_SCOPE_INHERITANCE';end if;
+ begin perform 1 from cbgpu_schools.messages;raise exception 'RAW_MESSAGE_ACCESS';exception when insufficient_privilege then null;end;
+end$$;
+select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000003"}',true);
+do $$begin begin perform public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='post')));raise exception 'OTHER_SCHOOL_COMMENTS';exception when no_data_found then null;end;end$$;
+-- Nationwide still requires verified membership; sharing a channel never grants school-private access.
+insert into thread_test values('national',public.cbgpu_school_messenger_api('message_create','{"scope":"NATIONWIDE","body":"Nationwide post"}'));
+select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000004","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000004"}',true);
+select public.cbgpu_school_messenger_api('reply_create',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='national'),'body','Cross-school nationwide reply','client_message_id',gen_random_uuid()));
+select public.cbgpu_school_messenger_api('message_report',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='reply'),'reason','Synthetic report'));
+select public.cbgpu_school_messenger_api('message_mute','{"muted_user_id":"fc810000-0000-4000-8000-000000000002","muted":true}');
+do $$declare x jsonb;begin x:=public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='post')));if x->>'total'<>'0'then raise exception 'MUTED_REPLY_VISIBLE';end if;end$$;
+select public.cbgpu_school_messenger_api('message_mute','{"muted_user_id":"fc810000-0000-4000-8000-000000000001","muted":true}');
+do $$begin begin perform public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='post')));raise exception 'MUTED_PARENT_COMMENTS';exception when no_data_found then null;end;end$$;
+-- Deleted parents never leave a readable comment backdoor; cleanup remains owner-only.
+select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000001"}',true);
+select public.cbgpu_school_messenger_api('message_delete',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='post')));
+select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000002"}',true);
+do $$begin begin perform public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='post')));raise exception 'DELETED_PARENT_READ';exception when no_data_found then null;end;end$$;
+reset role;update cbgpu_schools.memberships set status='SUSPENDED'where user_id='fc810000-0000-4000-8000-000000000002';set local role authenticated;
+select public.cbgpu_school_messenger_api('message_delete',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='reply')));
+reset role;delete from auth.sessions where id='fc820000-0000-4000-8000-000000000003';set local role authenticated;
+select set_config('request.jwt.claims','{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated","session_id":"fc820000-0000-4000-8000-000000000003"}',true);
+do $$begin begin perform public.cbgpu_school_messenger_api('replies',jsonb_build_object('id',(select v#>>'{message,id}'from thread_test where k='national')));raise exception 'REVOKED_SESSION_READ';exception when insufficient_privilege then null;end;end$$;
+reset role;set local role anon;
+do $$begin begin perform public.cbgpu_school_messenger_api('replies','{}');raise exception 'ANON_THREAD';exception when insufficient_privilege then null;end;end$$;
+rollback;

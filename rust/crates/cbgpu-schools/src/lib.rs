@@ -236,6 +236,15 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         (["v1", "direct-messages", id, "report"], &Method::POST) => {
             Some(("dm_direct_report", json!({"id":id})))
         }
+        (["v1", "messages", id], &Method::GET) => Some(("message", json!({"id":id}))),
+        (["v1", "messages", id, "replies"], &Method::GET) => {
+            let mut fields = query_fields.clone();
+            fields.insert("id".into(), json!(id));
+            Some(("replies", Value::Object(fields)))
+        }
+        (["v1", "messages", id, "replies"], &Method::POST) => {
+            Some(("reply_create", json!({"id":id})))
+        }
         (["v1", "messages"], &Method::GET) => Some(("messages", {
             let mut fields = query_fields.clone();
             for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
@@ -440,8 +449,10 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             "cbgpu_school_direct_messaging_api",
             action.strip_prefix("dm_").unwrap(),
         ),
-        "messages" | "message_create" | "message_delete" | "message_report" | "message_mute"
-        | "message_mutes" => ("cbgpu_school_messenger_api", action),
+        "message" | "replies" | "reply_create" | "messages" | "message_create"
+        | "message_delete" | "message_report" | "message_mute" | "message_mutes" => {
+            ("cbgpu_school_messenger_api", action)
+        }
         "draft_create" => ("cbgpu_school_catalog_application_api", "draft_create"),
         "feature_operator_list" => ("cbgpu_school_feature_operator_api", "list"),
         "feature_operator_review" => ("cbgpu_school_feature_operator_api", "review"),

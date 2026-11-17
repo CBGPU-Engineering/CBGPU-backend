@@ -108,3 +108,16 @@ uses a real PostgreSQL17 global cap: simultaneous individually affordable jobs
 must admit only one when their combined budget exceeds that cap. This is source
 and isolated-runtime evidence, not an assertion that central CPU has been enabled
 on the operating host or that unrelated legacy/AI workloads are accounted here.
+
+School/nationwide community posts preserve every former channel message and ID.
+The additive threaded-replies migration leaves old `parent_id` values NULL and
+never changes a body's visibility. `GET /v1/messages` returns root posts newest
+first; each DTO has `parent_id` and a viewer-filtered `reply_count`.
+`GET /v1/messages/:id` returns `{message}`. `GET /v1/messages/:id/replies` accepts
+bounded `limit`/`offset` and returns chronological `{items,total}`.
+`POST` on that replies route accepts only `body` and a required UUID
+`client_message_id`; the server derives scope/school from its live root and
+returns `{message,duplicate}`. Comments cannot nest. Existing delete/report/mute
+endpoints also cover replies. Deleted/muted/inaccessible parents do not expose
+comments, and owner cleanup remains available after affiliation loss. DM storage
+and opt-in are separate. No old school or nationwide content becomes public.
