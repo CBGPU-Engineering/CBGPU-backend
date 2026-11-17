@@ -1,4 +1,5 @@
 //! Host operator only. Fixed, reversible loopback routing; never a public API.
+mod review;
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -528,6 +529,32 @@ async fn activate(binary: &Path) -> Result<(), String> {
 }
 #[tokio::main(worker_threads = 2)]
 async fn main() {
+    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    if arguments.first().is_some_and(|v| v == "review") {
+        match review::run(&arguments[1..]) {
+            Ok(value) => println!(
+                "{}",
+                serde_json::to_string_pretty(&value).expect("JSON review")
+            ),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1)
+            }
+        }
+        return;
+    }
+    if arguments.is_empty() || arguments.iter().any(|v| v == "--help") {
+        println!(
+            "cbgpu-cutover review --repo ABS_BACKEND --proof ABS_CLONE [--web-repo ABS_WEB] [--gpu-repo ABS_GPU] [--latex-repo ABS_LATEX] [--materials-repo ABS_MATERIALS] [--inspect-host]\nReview/help never create operator state, lock files, containers or routes. Review emits evidence only, never an activation approval. Existing mutating commands: test-route STATIC_GATEWAY_BINARY | activate-deploy STATIC_GATEWAY_BINARY | rollback-deploy."
+        );
+        return;
+    }
+    if !matches!(arguments.first().map(String::as_str),Some("test-route"|"activate-deploy") if arguments.len()==2)
+        && !(arguments.first().is_some_and(|v| v == "rollback-deploy") && arguments.len() == 1)
+    {
+        eprintln!("Unknown or malformed cutover command; use --help. No operator state created.");
+        std::process::exit(1);
+    }
     let home = match std::env::var("HOME") {
         Ok(home) => home,
         Err(_) => {
