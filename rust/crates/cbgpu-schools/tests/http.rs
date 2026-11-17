@@ -208,3 +208,73 @@ async fn resource_contexts_are_self_only_and_resource_target_is_path_bound() {
     assert_eq!(body(r).await["school_id"], "school-b");
     server.abort();
 }
+
+#[tokio::test]
+async fn operator_review_uses_real_caller_and_route_identity() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|| async { Json(json!({"id":"trusted"})) }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_feature_operator_api",
+            post(|headers: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer fixture");
+                if v["action"] == "list" {
+                    assert_eq!(v["payload"]["school_id"], "cbsh");
+                    Json(json!({"items":[]}))
+                } else {
+                    assert_eq!(v["action"], "review");
+                    assert_eq!(v["payload"]["id"], "00000000-0000-4000-8000-000000000001");
+                    assert_eq!(v["payload"]["decision"], "REVIEWING");
+                    Json(json!({"request":{"revision":2,"status":"REVIEWING"}}))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let app = router(config(true, format!("http://{address}")));
+    let r = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/admin/feature-requests?school_id=cbsh")
+                .header("authorization", "Bearer fixture")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/v1/admin/feature-requests/00000000-0000-4000-8000-000000000001")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(
+                    r#"{"revision":1,"decision":"REVIEWING","operator_message":"Reviewing"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(body(r).await["request"]["revision"], 2);
+    let r = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/v1/admin/feature-requests/00000000-0000-4000-8000-000000000001")
+                .header("authorization", "Bearer fixture")
+                .body(Body::from(
+                    r#"{"id":"other","revision":1,"decision":"REVIEWING"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    task.abort();
+}

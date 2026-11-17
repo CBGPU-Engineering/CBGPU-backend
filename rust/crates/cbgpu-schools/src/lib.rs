@@ -82,7 +82,9 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
     let query = request.uri().query().unwrap_or("").to_owned();
     let query_fields: serde_json::Map<String, Value> =
         url::form_urlencoded::parse(query.as_bytes())
-            .filter(|(key, _)| ["q", "limit", "offset", "status"].contains(&key.as_ref()))
+            .filter(|(key, _)| {
+                ["q", "limit", "offset", "status", "school_id"].contains(&key.as_ref())
+            })
             .map(|(key, value)| (key.into_owned(), Value::String(value.into_owned())))
             .collect();
     let route = match (path.as_slice(), &method) {
@@ -136,6 +138,12 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         }
         (["v1", "admin", "school-applications", id, "review"], &Method::POST) => {
             Some(("platform_review", json!({"id":id})))
+        }
+        (["v1", "admin", "feature-requests"], &Method::GET) => {
+            Some(("feature_operator_list", Value::Object(query_fields.clone())))
+        }
+        (["v1", "admin", "feature-requests", id], &Method::PATCH) => {
+            Some(("feature_operator_review", json!({"id":id})))
         }
         (["v1", "schools", school, "feature-requests"], &Method::GET) => {
             Some(("feature_requests", json!({"school_id":school})))
@@ -319,6 +327,8 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         "cbgpu_school_api"
     };
     let (rpc, rpc_action) = match action {
+        "feature_operator_list" => ("cbgpu_school_feature_operator_api", "list"),
+        "feature_operator_review" => ("cbgpu_school_feature_operator_api", "review"),
         "publication_list" => ("cbgpu_public_project_api", "list"),
         "publication_save" => ("cbgpu_public_project_api", "save"),
         "resource_contexts" => ("cbgpu_school_resource_contexts", action),
