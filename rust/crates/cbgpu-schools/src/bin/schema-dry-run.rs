@@ -323,6 +323,7 @@ fn main() -> Result<()> {
         "20261117051453_gpu_scoped_assignment_snapshot.sql",
         "20261117063714_school_resource_contexts.sql",
         "20261117065015_effective_school_feature_policy.sql",
+        "20261117080536_guest_scoped_material_read.sql",
     ];
     let sources = migrations
         .iter()
