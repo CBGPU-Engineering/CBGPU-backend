@@ -5,6 +5,70 @@ candidates. It is **not** an approval, migration runner, service handoff, or
 claim that production already uses the candidates. It changes no users,
 projects, school memberships, notebook kernels, routes, containers or services.
 
+## Core schema atomic rehearsal — 2026-11-17
+
+The newer private review pack is `core-activation-review-20261117-44` under
+`~/.local/share/cbgpu-rust/`. It supersedes the older 27-migration evidence below.
+It is **interim**: the independently reviewed affiliation-change migration must
+be added and the complete final inventory rehearsed before operating execution.
+No schema or service activation was performed by this rehearsal.
+
+The 44 source hashes match `school-schema-clone-20261117-092-shared-settings`.
+The 2,408-school NEIS manifest byte-matches source commit `99dc7e0`. The bundle
+SHA-256 is `14166c90dff89e055721575e65b6b566953f332cb1f9178b676c6752651eea61`.
+The same production PostgreSQL image, with network disabled, accepted the entire
+bundle as the actual login/session user `supabase_admin`, not a bootstrap login
+using SET ROLE. A deliberate exception immediately before commit rolled back
+all new namespaces; the successful transaction took 648 ms. A second execution
+was refused. Original identity, password, session, profile and business-row
+fingerprints matched. Operating read-only counts remained 175 identities,
+167 profiles and two contests; account/school namespaces remained absent.
+
+The private preparation script lexes SQL strings, identifiers, dollar bodies
+and comments, removing only matched outer transaction wrappers. It rejects
+remaining transaction control and nontransactional commands. The resulting
+single transaction uses an advisory lock, 5-second lock timeout, 120-second
+statement timeout and 180-second transaction timeout. A NOWAIT write fence
+protects the before/backfill/after invariant. This is a brief bounded write
+pause, **not a promise of zero request latency**. Busy writers cause rollback;
+DDL waits are bounded. PGRST receives its reload notification only on commit.
+No academic rollover, guest approval, GPU enrollment, sharing or job execution
+is run. Public catalog rows remain listed/unverified with no enabled features.
+
+### Final operator sequence
+
+1. Freeze the complete final inventory, rerun actual-role injected-failure and
+   success rehearsals, review all protected-row fingerprints, and create the
+   final private operator-review marker. The interim pack deliberately lacks
+   this marker and its apply helper refuses execution.
+2. Use the reviewed helper with its exact final bundle SHA. It validates source
+   hashes, creates a new mode-0600 dump/globals snapshot for every attempt, and
+   sends the SQL through `docker exec -i cbgpu-supabase-db psql -w -U supabase_admin
+   -d postgres -v ON_ERROR_STOP=1`. Do not use the less-privileged postgres role.
+   Logs stay private. Check the transaction marker even after a dropped client
+   connection before deciding whether anything should be retried.
+3. After committed schema verification, provision the separate mail and public
+   asset execution-only logins from their encrypted review plans. Their group
+   roles do not exist before schema activation. The plans refuse existing login
+   names; passwords are independent, not copied from other service readers.
+4. Install reviewed private API units: schools 3546, accounts only when its
+   paired UI needs it, public content/assets 3547, optional ad reports 3549 only
+   when enabled. Verify health **and actual authenticated RPC workflows**.
+   Start the mail worker only after its release --check succeeds; provider
+   acceptance must not be described as inbox delivery.
+5. Pair scoped auxiliary BFF/materials/LaTeX configurations with their tested
+   server oracles, then activate the matching immutable web release. Test signup,
+   approval, school selection, NEIS life data, feature request/operator response,
+   school/national/DM messages and public banner reads. Keep unsupported compute
+   policies explicit; no new-school CPU/GPU capability is implied by membership.
+
+Before commit, any SQL failure rolls back automatically. After commit, preserve
+additive schema and new writes: restore prior web/unit configurations if needed
+and fix forward. **Never restore the preparation dump over a database receiving
+new writes.** Existing notebook kernels, controller units and tunnel settings
+are outside this operation and must remain untouched. The private backup is for
+review/disaster recovery under a separate write-fenced plan, not normal rollback.
+
 ## Candidate inventory and tested schema
 
 The review command below emits current repository HEADs, dirty-state booleans,
