@@ -1,0 +1,23 @@
+import crypto from'node:crypto';
+import{PlatformCPUAuthority,type PlatformAllocation,type PlatformPurpose,type PlatformLease}from'./platform-cpu.mts';
+/** Journal is in the existing private SQLite DB; token uses its existing AEAD key. */
+export function platformCPUJournal(db:any,seal:(v:unknown)=>string,unseal:(v:string)=>any,authority=new PlatformCPUAuthority()){
+ db.exec(`CREATE TABLE IF NOT EXISTS platform_cpu_leases(project_kind TEXT NOT NULL,project_id TEXT NOT NULL,job_id TEXT NOT NULL,purpose TEXT NOT NULL,school_id TEXT NOT NULL,request_hash TEXT NOT NULL,private_state TEXT NOT NULL,state TEXT NOT NULL,instance_id TEXT,blocked INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(project_kind,project_id,job_id,purpose))`);
+ if(!db.prepare('PRAGMA table_info(platform_cpu_leases)').all().some((r:any)=>r.name==='blocked'))db.exec('ALTER TABLE platform_cpu_leases ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0');
+ const get=(a:PlatformAllocation,job:string,purpose:PlatformPurpose)=>db.prepare('SELECT * FROM platform_cpu_leases WHERE project_kind=? AND project_id=? AND job_id=? AND purpose=?').get(a.project_kind,a.project_id,job,purpose);
+ return{
+  async reserve(a:PlatformAllocation,job:string,purpose:PlatformPurpose,budget:{cpu_millis:number;memory_bytes:number;storage_bytes:number}){
+   const request=JSON.stringify({a,job,purpose,budget}),requestHash=crypto.createHash('sha256').update(request).digest('hex');let row=get(a,job,purpose);
+   if(row&&row.request_hash!==requestHash)throw Error('Sealed CPU request changed');
+   if(!row){const state=seal({nonce:crypto.randomBytes(32).toString('hex'),allocation:a,budget});db.prepare('INSERT INTO platform_cpu_leases(project_kind,project_id,job_id,purpose,school_id,request_hash,private_state,state,created_at,updated_at)VALUES(?,?,?,?,?,?,?,?,?,?)').run(a.project_kind,a.project_id,job,purpose,a.school_id,requestHash,state,'PREPARED',new Date().toISOString(),new Date().toISOString());row=get(a,job,purpose)}
+   const saved=unseal(row.private_state),lease=await authority.acquire(a,job,purpose,budget,saved.nonce);
+   db.prepare('UPDATE platform_cpu_leases SET private_state=?,state=?,updated_at=? WHERE project_kind=? AND project_id=? AND job_id=? AND purpose=?').run(seal({...saved,lease}),lease.state,new Date().toISOString(),a.project_kind,a.project_id,job,purpose);return lease;
+  },
+  async start(lease:PlatformLease,instance:string,session:string){const out=await authority.start(lease,instance,session);db.prepare('UPDATE platform_cpu_leases SET state=?,instance_id=?,updated_at=? WHERE school_id=? AND job_id=? AND purpose=?').run('RUNNING',instance,new Date().toISOString(),lease.school_id,lease.job_id,lease.purpose);return out},
+  active(){return db.prepare("SELECT * FROM platform_cpu_leases WHERE state<>'RELEASED'").all().map(row=>({...row,private_state:unseal(row.private_state)}))},
+  async heartbeat(row:any){if(!row.private_state?.lease||!row.instance_id)return{allowed:false,stop_required:false,state:'RECONCILE_REQUIRED'};try{return await authority.heartbeat(row.private_state.lease,row.instance_id)}catch{db.prepare('UPDATE platform_cpu_leases SET state=? WHERE project_kind=? AND project_id=? AND job_id=? AND purpose=?').run('RECONCILE_REQUIRED',row.project_kind,row.project_id,row.job_id,row.purpose);throw Error('CPU authority unavailable; reservation retained')}},
+  async retireStopped(row:any,instance:string,proof:'PROCESS_EXITED'|'CONTAINER_ABSENT'='CONTAINER_ABSENT'){if(!['frontend_runtime','compose_runtime'].includes(row.purpose))throw Error('Only persistent runtimes may retain storage');await authority.call('retire',{lease_id:row.private_state.lease.lease_id,lease_token:row.private_state.lease.lease_token,instance_id:instance,stopped:true,proof});db.prepare("UPDATE platform_cpu_leases SET state='STORAGE_RETAINED',updated_at=? WHERE project_kind=? AND project_id=? AND job_id=? AND purpose=?").run(new Date().toISOString(),row.project_kind,row.project_id,row.job_id,row.purpose)},
+  async releaseCompleted(row:any,proof:{runtime_ref:string;runtime_absent:true;build_process_exited:true}){if(['frontend_runtime','compose_runtime'].includes(row.purpose)&&row.private_state?.budget?.storage_bytes>0)throw Error('Persistent storage remains reserved until explicit storage deletion');await authority.releaseStopped(row.private_state.lease,proof);db.prepare('UPDATE platform_cpu_leases SET state=?,updated_at=? WHERE project_kind=? AND project_id=? AND job_id=? AND purpose=?').run('RELEASED',new Date().toISOString(),row.project_kind,row.project_id,row.job_id,row.purpose)},
+  authority,
+ };
+}
