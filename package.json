@@ -8,7 +8,7 @@
   "scripts": {
     "check": "tsc --noEmit",
     "build:browser": "node scripts/build-browser-assets.mts",
-    "test": "node --test deploy/*.test.mts deploy/tests/*.test.mts developer/tests/*.test.mts operations/study-refresh/*.test.mts operations/study-monitor/*.test.mts rust/compat/*.test.mts",
+    "test": "node --test deploy/*.test.mts deploy/tests/*.test.mts developer/tests/*.test.mts operations/study-refresh/*.test.mts operations/study-monitor/*.test.mts operations/worker.test.mts rust/compat/*.test.mts",
     "check:source": "node scripts/check-source-languages.mts"
   },
   "devDependencies": {

@@ -27,6 +27,8 @@ The private recovery kit is available from the developer Account & security page
 
 A Cloudflare Worker probes the website, developer/admin portals, docs, preprints, all four GPU login pages, local backend readiness and offsite-backup freshness every minute. Three failures trigger an email to both developers; two successes trigger recovery mail. Monitoring continues if this PC goes offline. Provider email quotas still apply. The portal's operations page shows backup and external-monitor status.
 
+The same Worker serves a public status page: `GET /` (HTML) and `GET /api/status` (JSON) need no key. They expose only generic component names, up/down, the last check time and 30/90-day uptime from one sample every five minutes (kept for 90 days inside the monitor state). URLs, failure counters, backup entries and error text are never included, and a check older than ten minutes is shown as unknown. Point `status.cbgpu.com` at the Worker (custom domain or route) after deploying this file; the key-protected routes are unchanged.
+
 ## Service commands
 
 Use `systemctl --user status cbgpu-frontend cbgpu-developer-portal cbgpu-gpu-gateway` and `journalctl --user -u SERVICE`. Root-owned GPU controller is `cbgpu-daemon.service`. Avoid restarting or replacing GPU containers while users have running jobs.
