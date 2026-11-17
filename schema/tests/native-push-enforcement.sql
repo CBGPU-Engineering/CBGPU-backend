@@ -1,0 +1,48 @@
+\set ON_ERROR_STOP on
+create function test_assert(ok boolean,message text)returns void language plpgsql as $$begin if ok is distinct from true then raise exception 'TEST FAILED: %',message;end if;end$$;
+select test_assert((select native_kind is null from device_tokens where token='legacy-kept'),'legacy capability remains null');
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000001',false);select set_config('request.jwt.claim.role','authenticated',false);select set_config('request.jwt.claim.session_id','00000000-0000-4000-8000-000000000001',false);
+set role authenticated;
+insert into device_tokens(token,user_id,platform,native_kind)values('native-private-token',auth.uid(),'android','android-native-v1');
+insert into device_tokens(token,user_id,platform,native_kind)values('native-private-token',auth.uid(),'android','android-native-v1')on conflict(token)do update set native_kind=excluded.native_kind;
+do $$begin
+ begin update device_tokens set native_kind=null where token='native-private-token';raise exception 'native downgrade bypass';exception when insufficient_privilege then null;end;
+ begin perform * from cbgpu_push.native_capabilities;raise exception 'private hash disclosure';exception when insufficient_privilege then null;end;
+ begin insert into device_tokens(token,user_id,platform,native_kind)values('wrong-platform',auth.uid(),'ios','android-native-v1');raise exception 'platform capability bypass';exception when check_violation then null;end;
+end$$;
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000002',false);select set_config('request.jwt.claim.session_id','00000000-0000-4000-8000-000000000002',false);
+do $$begin begin insert into device_tokens(token,user_id,platform,native_kind)values('native-private-token',auth.uid(),'android','android-native-v1')on conflict(token)do update set user_id=excluded.user_id;raise exception 'foreign token takeover';exception when insufficient_privilege then null;end;end$$;
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000001',false);select set_config('request.jwt.claim.session_id','00000000-0000-4000-8000-000000000001',false);
+delete from device_tokens where token='native-private-token';
+do $$begin begin insert into device_tokens(token,user_id,platform)values('native-private-token',auth.uid(),'android');raise exception 'deleted native token downgrade';exception when insufficient_privilege then null;end;end$$;
+insert into device_tokens(token,user_id,platform,native_kind)values('native-private-token',auth.uid(),'android','android-native-v1');
+reset role;
+update auth.sessions set not_after=now()-interval '1 second' where user_id='00000000-0000-4000-8000-000000000001';
+set role authenticated;
+do $$begin
+ begin insert into device_tokens(token,user_id,platform,native_kind)values('revoked-session-token',auth.uid(),'android','android-native-v1');raise exception 'expired registration';exception when insufficient_privilege then null;end;
+ begin delete from device_tokens where token='native-private-token';raise exception 'expired deletion';exception when insufficient_privilege then null;end;
+end$$;
+reset role;
+update auth.sessions set not_after=null where user_id='00000000-0000-4000-8000-000000000001';
+update auth.users set banned_until=now()+interval '1 hour' where id='00000000-0000-4000-8000-000000000001';
+set role authenticated;
+do $$begin begin insert into device_tokens(token,user_id,platform,native_kind)values('banned-session-token',auth.uid(),'android','android-native-v1');raise exception 'banned registration';exception when insufficient_privilege then null;end;end$$;
+reset role;
+update auth.users set banned_until=null where id='00000000-0000-4000-8000-000000000001';
+update profiles set account_status='SUSPENDED' where id='00000000-0000-4000-8000-000000000001';
+set role authenticated;
+do $$begin begin insert into device_tokens(token,user_id,platform,native_kind)values('suspended-session-token',auth.uid(),'android','android-native-v1');raise exception 'suspended registration';exception when insufficient_privilege then null;end;end$$;
+reset role;
+update profiles set account_status='ACTIVE' where id='00000000-0000-4000-8000-000000000001';
+delete from auth.sessions where user_id='00000000-0000-4000-8000-000000000001';
+set role authenticated;
+do $$begin begin insert into device_tokens(token,user_id,platform,native_kind)values('deleted-session-token',auth.uid(),'android','android-native-v1');raise exception 'deleted session registration';exception when insufficient_privilege then null;end;end$$;
+reset role;
+select set_config('request.jwt.claim.role','service_role',false);set role service_role;
+delete from device_tokens where token='native-private-token';
+reset role;
+select test_assert((select count(*)=1 from cbgpu_push.native_capabilities),'only hashed native registry retained after server cleanup');
+select test_assert((select token_hash=encode(extensions.digest('native-private-token','sha256'),'hex')from cbgpu_push.native_capabilities),'registry stores no raw token');
+select test_assert((select count(*)=1 from device_tokens),'legacy row unchanged');
+select 'NATIVE_PUSH_PRIVACY_TESTS_PASSED';

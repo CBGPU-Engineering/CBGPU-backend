@@ -73,8 +73,8 @@ Deno.serve(async (req) => {
   const adminIds = (admins ?? []).map((a: { id: string }) => a.id);
   if (adminIds.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no admins' }, { headers: corsHeaders });
 
-  const { data: tokenRows } = await admin.from('device_tokens').select('token').in('user_id', adminIds).eq('platform', 'android');
-  const deviceTokens = (tokenRows ?? []).map((t: { token: string }) => t.token);
+  const { data: tokenRows } = await admin.from('device_tokens').select('token,user_id,platform,native_kind').in('user_id', adminIds).eq('platform', 'android');
+  const deviceTokens = tokenRows ?? [];
   if (deviceTokens.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no device tokens' }, { headers: corsHeaders });
 
   const firebaseServiceAccountRaw = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON');

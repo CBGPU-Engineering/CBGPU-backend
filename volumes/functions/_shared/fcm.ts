@@ -2,6 +2,7 @@
 // supabase/functions/selfstudy-reminder/index.ts — kept out of
 // firebase-admin because it depends on gRPC, a bad fit for Deno's edge
 // runtime. Shared here so every notify-* function reuses one implementation.
+import {buildPushMessage,type PushDevice} from './pushMessage.ts';
 import crypto from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
@@ -37,11 +38,11 @@ export async function getFcmAccessToken(serviceAccount: { client_email: string; 
   return data.access_token;
 }
 
-export async function sendFcmPush(projectId: string, accessToken: string, deviceToken: string, title: string, body: string, androidChannelId?: string, data?: Record<string, string>) {
+export async function sendFcmPush(projectId: string, accessToken: string, device: PushDevice, title: string, body: string, androidChannelId?: string, data?: Record<string, string>) {
   const res = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: { token: deviceToken, notification: { title, body }, ...(data ? { data } : {}), ...(androidChannelId ? { android: { priority: 'HIGH', notification: { channel_id: androidChannelId, sound: 'default' } } } : {}) } }),
+    body: JSON.stringify({message:buildPushMessage(device,title,body,androidChannelId,data)}),
   });
   if (!res.ok) throw new Error(`FCM send failed: HTTP ${res.status} ${await res.text()}`);
 }

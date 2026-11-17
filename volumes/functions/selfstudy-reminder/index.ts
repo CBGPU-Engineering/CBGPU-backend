@@ -2,10 +2,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import crypto from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { getFcmAccessToken } from '../_shared/fcm.ts';
+import { getFcmAccessToken,sendFcmPush } from '../_shared/fcm.ts';
 
 const API = 'https://api.cbsh.edu-set.com';
-type Device = { token: string; platform: string };
+type Device = { token: string; platform: string; user_id:string; native_kind?:string|null };
 type Profile = {
   id: string; student_id: string | null; selfstudy_reminder_time: string;
   selfstudy_reminder_repeat_minutes: number; selfstudy_reminder_repeat_count: number;
@@ -76,18 +76,8 @@ async function appliedPeriods(token: string, date: string): Promise<Map<string, 
   }
   return applied;
 }
-async function sendPush(projectId: string, accessToken: string, device: Device, body: string) {
-  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: {
-      token: device.token, notification: { title: '자습신청 알림', body },
-      data: { route: '/study?reminder=1' },
-      ...(device.platform === 'web' ? { webpush: { fcm_options: { link: 'https://cbgpu.com/study?reminder=1' } } } : {}),
-    } }),
-    signal: AbortSignal.timeout(12000),
-  });
-  if (!response.ok) throw new Error(`FCM HTTP ${response.status}: ${await response.text()}`);
+async function sendPush(projectId:string,accessToken:string,device:Device,body:string){
+ await sendFcmPush(projectId,accessToken,device,'자습신청 알림',body,undefined,{route:'/study?reminder=1'});
 }
 
 Deno.serve(async request => {
@@ -102,7 +92,7 @@ Deno.serve(async request => {
 
   const admin = createClient(url, serviceRoleKey);
   const { data: profiles, error: profilesError } = await admin.from('profiles')
-    .select('id, student_id, selfstudy_reminder_time, selfstudy_reminder_repeat_minutes, selfstudy_reminder_repeat_count, device_tokens(token, platform)')
+    .select('id, student_id, selfstudy_reminder_time, selfstudy_reminder_repeat_minutes, selfstudy_reminder_repeat_count, device_tokens(token, platform, user_id, native_kind)')
     .eq('notify_selfstudy_reminder', true).neq('is_approved', false).not('student_id', 'is', null);
   if (profilesError) return Response.json({ error: profilesError.message }, { status: 500 });
   const eligible = ((profiles ?? []) as Profile[]).filter(profile =>
