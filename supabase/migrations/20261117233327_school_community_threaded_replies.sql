@@ -13,7 +13,6 @@ do $upgrade$declare d text;begin
   d:=replace(d,'FUNCTION public.cbgpu_school_messenger_api','FUNCTION cbgpu_schools.messenger_before_threads');
   d:=replace(d,'msg.deleted_at is null','msg.deleted_at is null and msg.parent_id is null');
   d:=replace(d,'m.scope is distinct from v_scope','m.parent_id is not null or m.scope is distinct from v_scope');
-  d:=replace(d,'order by z.created_at,z.id','order by z.created_at desc,z.id desc');
   execute d;
  end if;
 end $upgrade$;
