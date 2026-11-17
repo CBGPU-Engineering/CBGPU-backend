@@ -599,6 +599,9 @@ impl<R: Runtime> Agent<R> {
                         "SPOTIFY_CLIENT_ID",
                         "SPOTIFY_CLIENT_SECRET",
                         "SPOTIFY_REDIRECT_URI",
+                        "CBGPU_ACCOUNTS_API_URL",
+                        "CBGPU_MULTISCHOOL_V1",
+                        "CBGPU_SCHOOLS_API_URL",
                     ]
                     .contains(&k.as_str())
             })
@@ -1607,7 +1610,7 @@ mod tests {
         let env = tmp.path().join("frontend.env");
         fs::write(
             &env,
-            "NEXT_PUBLIC_TEST=visible\nEDUSET_TOKEN_SECRET=synthetic-secret\nSPOTIFY_CLIENT_ID=synthetic-client\nSPOTIFY_CLIENT_SECRET=synthetic-server-secret\nSPOTIFY_REDIRECT_URI=https://cbgpu.com/api/wakeup/spotify/callback\nUNRELATED_PRIVATE_KEY=must-not-persist\n",
+            "NEXT_PUBLIC_TEST=visible\nEDUSET_TOKEN_SECRET=synthetic-secret\nSPOTIFY_CLIENT_ID=synthetic-client\nSPOTIFY_CLIENT_SECRET=synthetic-server-secret\nSPOTIFY_REDIRECT_URI=https://cbgpu.com/api/wakeup/spotify/callback\nCBGPU_MULTISCHOOL_V1=0\nCBGPU_SCHOOLS_API_URL=http://127.0.0.1:3546\nUNRELATED_PRIVATE_KEY=must-not-persist\n",
         )
         .unwrap();
         fs::write(settings.join("cbgpu-frontend.service"),"[Service]\nWorkingDirectory=/previous\nExecStart=/previous/server\nEnvironmentFile=/previous/.env\n").unwrap();
@@ -1679,6 +1682,8 @@ mod tests {
         );
         assert!(!saved.contains("NEXT_PUBLIC_SPOTIFY"));
         assert!(!saved.contains("UNRELATED_PRIVATE_KEY"));
+        assert!(saved.contains("CBGPU_MULTISCHOOL_V1=0\n"));
+        assert!(saved.contains("CBGPU_SCHOOLS_API_URL=http://127.0.0.1:3546\n"));
     }
     #[test]
     fn backend_component_rollout_keeps_unrelated_units_and_previews_without_mail() {
