@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use subtle::ConstantTimeEq;
+pub mod model_assets;
 pub mod preparation;
 pub mod resources;
 pub mod runner;

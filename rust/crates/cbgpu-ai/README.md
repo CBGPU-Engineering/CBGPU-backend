@@ -203,3 +203,15 @@ GPU access. Successful workers recheck policy before publishing completion.
 Existing owned files, extracted text, settings and history remain readable with
 a valid global identity. Guest requests still grant the underlying `gpu` scope;
 `ai` is a derived capability rather than a new guest-request approval scope.
+
+## Native model data preparation
+
+`cbgpu-ai-prepare-models MANIFEST ABSOLUTE_MODELS_ROOT` is an offline plan.
+Adding `--apply` explicitly downloads the reviewed revision/data allowlist with
+no cached Hugging Face credentials or proxy configuration. Every redirect uses
+approved HTTPS data hosts and fresh public DNS pinning. Weights verify SHA256;
+small Git-backed files verify their pinned blob identity, and every final file
+receives a recorded SHA256 digest. Existing changed assets and symlink targets
+are refused. This prepares data only: native CUDA/llama libraries, FFmpeg and the
+OCR image remain separately provisioned prerequisites. No GPU work, runtime
+installation, database migration or service activation is performed.

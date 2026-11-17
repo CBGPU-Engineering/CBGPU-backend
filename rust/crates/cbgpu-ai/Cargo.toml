@@ -1,5 +1,6 @@
 [package]
 name = "cbgpu-ai"
+default-run = "cbgpu-ai"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
@@ -25,6 +26,8 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 libc = "0.2"
 csv = "1"
+sha2 = "0.10"
+sha1 = "0.10"
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

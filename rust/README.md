@@ -240,3 +240,16 @@ its exact CI run and temporary Docker contracts passed. Existing project
 production pointers, deployment results and Compose state were unchanged.
 The TypeScript control supervisor and its SQLite state are still a separate
 Rust/PostgreSQL migration target.
+
+### Additional notebook bridge source
+
+`cbgpu-gpu-public-start GPU` plans an additional base-path-aware notebook without
+writing configuration; `--apply` is separate and never restarts existing kernels
+or containers. The temporary TypeScript compatibility proxy accepts only the
+trusted absolute ELF path in `CBGPU_GPU_PUBLIC_STARTER`; preparation stays
+read-only unless `CBGPU_GPU_PUBLIC_STARTER_APPLY=1` is explicitly reviewed.
+Existing immutable compatibility releases are unaffected by source retirement.
+The native helper serializes [Traitlets JSON configuration](https://traitlets.readthedocs.io/en/latest/config.html),
+parses existing literal password hashes as data, and refuses missing/ambiguous
+authentication. It replaces first-party setup logic; vendor Jupyter remains an
+external dependency, not a rewritten Python source tree.
