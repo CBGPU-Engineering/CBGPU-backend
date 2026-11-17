@@ -22,3 +22,8 @@ export function deploymentStatePaths(here:string,env:Record<string,string|undefi
  }
  return{privateRoot,data,key,database};
 }
+/** Old immutable releases used an absolute symlink alias; preserve it only when the physical file stays inside this project's existing store. */
+export function composeManagedFile(base:string,projectId:string,file:unknown){
+ if(typeof file!=='string'||!path.isAbsolute(file)||!/^[-a-f0-9]{36}$/i.test(projectId))throw Error('Invalid Compose stop path');
+ try{const root=fs.realpathSync(base),project=fs.realpathSync(path.join(root,projectId)),target=fs.realpathSync(file);if(!project.startsWith(root+path.sep)||!target.startsWith(project+path.sep)||!fs.statSync(target).isFile())throw Error();return target}catch{throw Error('Invalid Compose stop path')}
+}
