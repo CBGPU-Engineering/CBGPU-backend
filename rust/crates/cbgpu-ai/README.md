@@ -46,8 +46,31 @@ Required API configuration:
 | `CBGPU_AI_DATA_ROOT` | Optional existing bulk upload/workspace root |
 | `CBGPU_AI_REQUIRE_DATA_MOUNT=1` | Fail closed if configured bulk mount is absent |
 
-Scheduling is attached only when `CBGPU_AI_NATIVE_RUNNER` names an absolute native
-`cbgpu-ai-inference` ELF executable. Omitting it starts an API-only candidate.
+`CBGPU_AI_MODE=api-only` explicitly separates the central control plane from
+school execution. It ignores an inherited `CBGPU_AI_NATIVE_RUNNER`, creates no
+scheduler/instance lease, performs no local NVIDIA/reservation probes, launches
+no model/customer-code/OCR subprocesses, and does not extract uncached documents.
+Owned cached text/evidence and ordinary history, upload metadata, cancellation
+and authenticated queue admission remain available. Tasks persist as queued;
+health/status reports `NO_EXECUTOR`, never a working remote worker.
+
+`GET /health/ready` in this mode checks the PostgreSQL queue schema and reports
+`control_plane_ready` separately from `execution_ready:false`. An API-only process
+must not be used as evidence that submitted jobs can currently execute.
+
+With the mode unset or empty, existing behavior remains unchanged: scheduling
+attaches only when `CBGPU_AI_NATIVE_RUNNER` names an absolute native
+`cbgpu-ai-inference` ELF executable; document preparation can still run locally.
+`CBGPU_AI_MODE=all-in-one` makes that requirement explicit and refuses startup
+without a runner. Unknown/whitespace/case-variant mode values fail startup.
+
+Moving this API process does not implement school-node inference. Remote
+executor authentication, scoped durable claims/leases, authorized attachment and
+artifact transfer, node isolation, cancellation, retries and loss recovery still
+require a separate reviewed implementation. Signed GPU inventory enrollment is
+not a job-dispatch channel and enables no sharing. Keep existing execution at
+school and do not start independent schedulers against the same queue merely
+because the API is reachable.
 Configure `CBGPU_AI_MODELS_RUNNER` with the absolute separately built
 `cbgpu-ai-models` ELF for embedding/search/transcription. Assigned GPU execution
 requires the models binary built with its `cuda` feature; a CPU-only binary

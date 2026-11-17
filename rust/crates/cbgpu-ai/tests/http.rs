@@ -217,7 +217,7 @@ async fn native_routes_preserve_ownership_and_gate_only_execution() {
         .unwrap();
     });
     let app = router(Arc::new(Api::new(
-        store,
+        store.clone(),
         KEY.as_bytes().to_vec(),
         auth(format!("http://{addr}"), true),
         "native-test-no-visual".into(),
@@ -386,7 +386,171 @@ async fn native_routes_preserve_ownership_and_gate_only_execution() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    allowed.store(true, Ordering::SeqCst);
+    verify_api_only_control_plane(store, auth(format!("http://{addr}"), true), &upload).await;
     backend.abort();
+}
+async fn verify_api_only_control_plane(store: Store, authorization: Authorization, cached: &str) {
+    use cbgpu_ai::mode::RuntimeMode;
+    let tools = tempfile::tempdir().unwrap();
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    assert!(
+        std::process::Command::new(rustc)
+            .arg(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/resource_driver.rs")
+            )
+            .arg("-o")
+            .arg(tools.path().join("docker"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut configured = Api::new(
+        store.clone(),
+        KEY.as_bytes().to_vec(),
+        authorization,
+        "must-never-run-local-ocr".into(),
+    )
+    .with_runtime_mode(RuntimeMode::ApiOnly);
+    configured.preparation = configured
+        .preparation
+        .with_tool_directory(tools.path().to_owned())
+        .unwrap();
+    let api = Arc::new(configured);
+    let app = router(api.clone());
+    let ready = app
+        .clone()
+        .oneshot(request("GET", "/health/ready", None, Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), 200);
+    let ready = body(ready).await;
+    assert_eq!(ready["execution_ready"], false);
+    assert_eq!(ready["scheduler"]["reason"], "NO_EXECUTOR");
+    let queued = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/jobs",
+            Some(OWNER),
+            Body::from(r#"{"kind":"embed","input":{"input":"queued without executor"}}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(queued.status(), 202);
+    let job = body(queued).await["job"]["id"].as_str().unwrap().to_owned();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let row: Value = sqlx::query_scalar("SELECT to_jsonb(j) FROM ai_store.jobs j WHERE id=$1")
+        .bind(&job)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(row["state"], "queued");
+    assert_eq!(row["attempts"], 0);
+    assert!(row["started"].is_null());
+    assert!(!store.root.join(".native-scheduler.lock").exists());
+    let file = store
+        .upload(
+            OWNER,
+            "not-extracted.pdf",
+            &b"synthetic PDF: do not execute"[..],
+        )
+        .await
+        .unwrap();
+    let id = file["id"].as_str().unwrap();
+    let prepare = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            &format!("/uploads/{id}/prepare"),
+            Some(OWNER),
+            Body::from("{}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(prepare.status(), 503);
+    assert!(
+        body(prepare).await["message"]
+            .as_str()
+            .unwrap()
+            .contains("NO_EXECUTOR")
+    );
+    assert!(
+        !store
+            .root
+            .join("extracted")
+            .join(format!("{id}.json"))
+            .exists()
+    );
+    let text = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/uploads/{cached}/text"),
+            Some(OWNER),
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(text.status(), 200);
+    assert!(
+        body(text).await["text"]
+            .as_str()
+            .unwrap()
+            .contains("Native text evidence")
+    );
+    let chat = store.create_conversation(OWNER, None, false).await.unwrap();
+    let chat = chat["id"].as_str().unwrap();
+    let denied = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            &format!("/chats/{chat}/messages"),
+            Some(OWNER),
+            Body::from(json!({"content":"Use my file","attachments":[id]}).to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), 503);
+    let cached_chat = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            &format!("/chats/{chat}/messages"),
+            Some(OWNER),
+            Body::from(json!({"content":"Use cached evidence","attachments":[cached]}).to_string()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cached_chat.status(), 202);
+    let history = app
+        .clone()
+        .oneshot(request("GET", "/jobs", Some(OWNER), Body::empty()))
+        .await
+        .unwrap();
+    assert_eq!(history.status(), 200);
+    let cancelled = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            &format!("/jobs/{job}/cancel"),
+            Some(OWNER),
+            Body::from("{}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status(), 200);
+    assert_eq!(
+        store.job(OWNER, &job, false).await.unwrap()["state"],
+        "cancelled"
+    );
+    assert!(api.running.read().await.is_empty());
+    assert_eq!(api.scheduler.read().await["reason"], "NO_EXECUTOR");
+    assert!(
+        !tools.path().join("calls").exists(),
+        "API-only invoked a local native subprocess"
+    );
 }
 #[test]
 fn tenant_scope_mode_is_server_driven_and_bad_flags_never_fall_back() {
@@ -413,4 +577,58 @@ async fn owned_data_identity_is_fresh_without_requiring_school_resource_approval
     suspended.store(true, Ordering::SeqCst);
     assert_eq!(a.identity(OWNER).await.unwrap_err().status, 403);
     server.abort();
+}
+
+struct NoLocalExecutor;
+#[async_trait::async_trait]
+impl cbgpu_ai::resources::Resources for NoLocalExecutor {
+    fn free_bytes(&self, _: &std::path::Path) -> cbgpu_ai_store::Result<u64> {
+        panic!("API-only must never probe execution storage")
+    }
+    async fn snapshot(&self) -> cbgpu_ai_store::Result<cbgpu_ai::resources::Snapshot> {
+        panic!("API-only must never probe hardware or reservations")
+    }
+}
+#[async_trait::async_trait]
+impl cbgpu_ai::runner::Runner for NoLocalExecutor {
+    fn attached(&self) -> bool {
+        panic!("API-only must not inspect or attach a local runner")
+    }
+    async fn recover_owned(&self) -> cbgpu_ai_store::Result<()> {
+        panic!("API-only must never recover/stop subprocesses")
+    }
+    async fn start(
+        &self,
+        _: &Store,
+        _: &Value,
+        _: &cbgpu_ai::resources::Card,
+    ) -> cbgpu_ai_store::Result<Box<dyn cbgpu_ai::runner::Task>> {
+        panic!("API-only must never spawn execution")
+    }
+}
+#[tokio::test]
+async fn api_only_refuses_scheduler_before_probe_recovery_lock_or_process() {
+    let temp = tempfile::tempdir().unwrap();
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy("postgresql://unused@127.0.0.1:1/never_used")
+        .unwrap();
+    let store = Store::new(pool, temp.path().join("state"), None, Limits::default()).unwrap();
+    let api = Arc::new(
+        Api::new(
+            store.clone(),
+            KEY.as_bytes().to_vec(),
+            auth("http://127.0.0.1:1".into(), true),
+            "never-run".into(),
+        )
+        .with_runtime_mode(cbgpu_ai::mode::RuntimeMode::ApiOnly),
+    );
+    let scheduler = cbgpu_ai::scheduler::Scheduler::new(
+        api,
+        Arc::new(NoLocalExecutor),
+        Arc::new(NoLocalExecutor),
+        Default::default(),
+    );
+    assert!(scheduler.clone().start().await.is_err());
+    assert!(scheduler.tick().await.is_err());
+    assert!(!store.root.join(".native-scheduler.lock").exists());
 }

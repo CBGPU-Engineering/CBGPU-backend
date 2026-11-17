@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use subtle::ConstantTimeEq;
+pub mod mode;
 pub mod model_assets;
 pub mod preparation;
 pub mod resources;
@@ -204,6 +205,7 @@ impl Authorization {
     }
 }
 pub struct Api {
+    pub runtime_mode: mode::RuntimeMode,
     pub store: Store,
     pub internal_key: Vec<u8>,
     pub authorization: Authorization,
@@ -275,6 +277,7 @@ impl Api {
         );
         let preparation = preparation::Preparation::new(store.clone(), ocr_image);
         Self {
+            runtime_mode: mode::RuntimeMode::Legacy,
             store,
             internal_key: key,
             authorization,
@@ -289,6 +292,18 @@ impl Api {
             rates: Mutex::new(HashMap::new()),
             upload_slots: Arc::new(tokio::sync::Semaphore::new(2)),
         }
+    }
+    pub fn with_runtime_mode(mut self, mode: mode::RuntimeMode) -> Self {
+        self.runtime_mode = mode;
+        self.preparation = self
+            .preparation
+            .with_local_execution(mode.local_execution());
+        if mode == mode::RuntimeMode::ApiOnly {
+            self.scheduler = tokio::sync::RwLock::new(
+                json!({"status":"no_executor","available":false,"reason":"NO_EXECUTOR","mode":"api-only","gpus":[],"detail":"Control plane only. Tasks remain queued until a reviewed executor is attached; remote execution is not configured."}),
+            );
+        }
+        self
     }
     fn authenticate(&self, h: &HeaderMap) -> Result<()> {
         let supplied = h.get("x-cbgpu-ai-key").map(|v| v.as_bytes()).unwrap_or(&[]);
@@ -355,6 +370,16 @@ async fn handle(api: Arc<Api>, request: Request) -> Result<Response> {
     }
     if p == ["health", "ready"] && method == Method::GET {
         let scheduler = api.scheduler.read().await.clone();
+        if api.runtime_mode == mode::RuntimeMode::ApiOnly {
+            let ready = sqlx::query("SELECT id FROM ai_store.jobs LIMIT 0")
+                .execute(&api.store.pool)
+                .await
+                .is_ok();
+            return Ok(json_response(
+                if ready { 200 } else { 503 },
+                json!({"control_plane_ready":ready,"execution_ready":false,"scheduler":scheduler}),
+            ));
+        }
         return Ok(json_response(
             if scheduler["available"] == true {
                 200

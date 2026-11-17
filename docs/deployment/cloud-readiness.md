@@ -184,3 +184,23 @@ Perform one controlled cutover with private backups, a maintenance/rollback plan
 explicit approval for operating migrations and final live smoke tests. Do not
 activate distributed GPU sharing, execute a real academic rollover, or publish
 old private content as part of this readiness work.
+
+## Native AI control-plane preparation
+
+The native AI candidate supports `CBGPU_AI_MODE=api-only` for a relocated central
+API. This explicitly ignores an inherited native-runner setting and starts no
+local scheduler, GPU/reservation probe, model process, customer-code container or
+uncached document/OCR extraction. PostgreSQL queue admission, cancellation,
+history and already authorized cached text remain available. Jobs stay queued;
+status reports `NO_EXECUTOR`. Readiness distinguishes the PostgreSQL-backed
+control plane from execution availability. Unset/empty mode preserves the
+existing behavior; explicit `all-in-one` requires a configured native runner.
+
+This is not remote school inference. Signed GPU enrollment remains inventory
+only, sharing remains disabled, and no job is dispatched to another school.
+Scoped executor authentication, distributed job leases, authorized attachment
+and artifact transport, cancellation and node-loss recovery need separate
+reviewed implementation before a central API can actually schedule school
+execution. Independent schedulers must not share the queue without that lease
+protocol. No operating AI service, model cache, GPU workload or AWS resource was
+changed to validate this source mode.
