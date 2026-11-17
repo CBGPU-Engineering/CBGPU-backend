@@ -1,17 +1,49 @@
-# Activation review — evidence only
+# Activation review and operating record
 
-This pack prepares review of the account/multi-school and native-service
-candidates. It is **not** an approval, migration runner, service handoff, or
-claim that production already uses the candidates. It changes no users,
-projects, school memberships, notebook kernels, routes, containers or services.
+This document records the reviewed non-GPU core activation and retains earlier
+preparation evidence. It is not a migration runner or permission to replay an
+already committed initial-activation bundle. Private credentials and backups do
+not belong in this repository.
+
+## Operating activation — 2026-11-18
+
+The final 47-migration bundle below committed atomically under the user's
+explicit deployment authorization. The operator wrote the review marker for
+that execution; this is not a claim of a separate human approval ceremony.
+Post-commit validation found 175 Auth users, 167 profiles, 175 historical CBsh
+memberships, 146 account-owned legacy school selections and 2,408 directory
+schools. The one trusted teacher remains classified correctly. No academic
+rollover, guest approval or GPU sharing was executed.
+
+Native Schools API (3546), public content/assets API (3547) and ad reports API (3549) are enabled
+and started, together with the school-mail worker. Separate encrypted narrow
+mail/asset database credentials were provisioned after schema commit. The
+read-only operating HTTP probe passed 19 checks; three public-detail probes
+were explicitly skipped because their public collections were empty. It checked
+public DTO privacy, missing-Bearer 401 and anonymous private-row/schema denial;
+it did not create an operating test account or send a provider email.
+
+Scoped Node.js deployment control `1b70506` and Materials `2d9` are live. Their files,
+keys and history were retained; materials admission is unfenced. Web `e3` is live;
+Git main `20cd` has the same exact tree through a linear reconciliation, with its
+final immutable build pending at this snapshot. The `770207c` timetable warm cron
+completed against actual school data (34 cells, five days). The `9971a9c` delivery
+binary/unit has been updated, but its watcher remains paused until final SHA
+adoption and verification.
+
+AI and the root GPU controller remain on their prior operating runtimes.
+The first LaTeX gateway transition remains pending. No GPU controller/kernel
+reset, external GPU sharing or AWS migration is implied. Dependency advisories
+and remaining runtime handoffs are separate work; this is not an all-Rust or
+security-clean completion claim.
 
 ## Core schema atomic rehearsal — 2026-11-17
 
 The newer private review pack is `core-activation-review-20261117-47` under
 `~/.local/share/cbgpu-rust/`. It supersedes the older 27-migration evidence below.
 The final inventory includes affiliation-change review, report moderation and
-one-time historical account preferences. Operator review is still required before execution.
-No schema or service activation was performed by this rehearsal.
+one-time historical account preferences. The rehearsal itself performed no operating activation. The later Nov18
+execution is recorded above; do not rerun the initial-activation bundle.
 
 The 47 source hashes match `school-schema-clone-20261117-096-final47` (all migrations replayed twice with their actual SQL fixtures).
 The 2,408-school NEIS manifest byte-matches source commit `99dc7e0`. The bundle
@@ -21,7 +53,7 @@ bundle as the actual login/session user `supabase_admin`, not a bootstrap login
 using SET ROLE. A deliberate exception immediately before commit rolled back
 all new namespaces; the successful transaction took 694 ms. A second execution
 was refused. Original identity, password, session, profile and business-row
-fingerprints matched. Operating read-only counts remained 175 identities,
+fingerprints matched. During that rehearsal, operating read-only counts remained 175 identities,
 167 profiles and two contests; account/school namespaces remained absent.
 
 The private preparation script lexes SQL strings, identifiers, dollar bodies
@@ -58,13 +90,13 @@ running for an open-ended interval after commit. A failed post-commit check
 requires narrow service/UI rollback plus fix-forward; reverting to old web alone
 does not undo privacy policies or justify restoring a stale database dump.
 
-### Final operator sequence
+### Reviewed operator sequence (historical; core47 already committed)
 
 1. Freeze the complete final inventory, rerun actual-role injected-failure and
    success rehearsals, review all protected-row fingerprints, and create the
-   final private operator-review marker. The pack deliberately lacks
-   this marker and its apply helper refuses execution until the marker contains
-   the exact final bundle SHA.
+   final private operator-review marker. At preparation this marker was absent;
+   the operator later wrote the exact bundle SHA for the authorized execution.
+   Its presence is not permission to rerun an initial-only migration.
 2. Use the reviewed helper with its exact final bundle SHA. It validates source
    hashes, creates a new mode-0600 dump/globals snapshot for every attempt, and
    sends the SQL through `docker exec -i cbgpu-supabase-db psql -w -U supabase_admin
@@ -156,8 +188,9 @@ owner must be resolved before proposing an operating change.
 | --- | --- | --- |
 | Root combined controller | Active `/home/cbgpu/CBGPU/Daemon/daemon.py`; independent service-role assignment reads | New RLS cannot gate its raw reads. This blocks scoped GPU handoff, GPU guest access and claims of immediate runtime revocation; it does not prohibit the separately tested non-GPU school onboarding boundary. Keep GPU execution/sharing deferred and do not run CBsh rollover against active GPU users before runtime enforcement is paired. |
 | AI | Active immutable Python release `59ffb2b3ab4ac013b0cb4055e517d661848ef191`, port 3550; native unit absent/inactive | Rust source and Python retirement in the current repository do not establish a live Rust cutover. Preserve the immutable release and delivery hold. |
-| Deployment control | Active immutable `deploy/server.mts` compatibility release | Native workers/proxy are not evidence that all control/business API writes have moved to PostgreSQL. |
-| Materials | Running Rust container `cbgpu/materials-rust:candidate`, image ID `sha256:406a45e5d79cf5496e9856bdf45922913b6fdfb41835ff0d1c54d28143805307`, loopback 8421 | Image/source parity and scoped-mode/schema activation remain unverified. Do not infer that recent guest-upload code is active. |
+| Deployment control | Scoped Node.js compatibility release `1b70506` live on Nov18 | Existing deployment files/keys/history retained; this is not a completed native PostgreSQL business-control handoff. |
+| Materials | Scoped release `2d9` live on Nov18; admission unfenced | Existing material bytes, keys and history preserved. This activation does not migrate bytes to S3. |
+| LaTeX | First gateway transition still pending on Nov18 | Preserve current projects and runtime until the separately reviewed handoff completes. |
 | GPU HTTP gateway | Active native user service with compatibility upstream | An authenticated HTTP ingress does not replace root controller ownership, fence every direct Jupyter/SSH route, or prove scoped runtime flags are enabled. |
 
 Fresh AI preflight observed 1,407 jobs, 25 conversations, 104 messages, 20 hashed
@@ -227,7 +260,9 @@ admission has actually been fenced.
   durably and reports `NO_EXECUTOR` without local GPU/OCR/model probes. Remote
   authenticated school execution, distributed leases and artifact transport
   remain unimplemented; signed GPU enrollment enables inventory only.
-- **Materials and LaTeX need paired releases.** Verify the operating origin,
+- **Further material-storage and LaTeX handoffs need separate review.** The Nov18
+  scoped materials release is live, but its activation does not perform an S3
+  migration. The first LaTeX gateway transition remains pending. Verify the operating origin,
   current writer, PostgreSQL state/roles, image source and shared-file access
   before changing flags. Materials migration requires an explicit validated
   inventory and genuine writer fence; it preserves source objects. LaTeX
