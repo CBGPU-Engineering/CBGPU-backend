@@ -37,6 +37,7 @@ fn error(status: StatusCode, code: &str) -> Response {
 }
 const PROJECT_FIELDS: &[&str] = &[
     "id",
+    "ads_enabled",
     "slug",
     "title",
     "summary",
@@ -50,6 +51,7 @@ const PROJECT_FIELDS: &[&str] = &[
 ];
 const CONTEST_FIELDS: &[&str] = &[
     "id",
+    "ads_enabled",
     "title",
     "description",
     "organizer",
@@ -86,6 +88,7 @@ const SCHOOL_FIELDS: &[&str] = &[
 ];
 const COMMUNITY_FIELDS: &[&str] = &[
     "id",
+    "ads_enabled",
     "title",
     "body",
     "created_at",
@@ -101,6 +104,9 @@ fn project(value: &Value, fields: &[&str]) -> Option<Value> {
     let mut out = serde_json::Map::new();
     for field in fields {
         if let Some(value) = object.get(*field) {
+            if *field == "ads_enabled" && !value.is_boolean() {
+                continue;
+            }
             if value.is_array() || value.is_object() {
                 return None;
             }
@@ -125,7 +131,18 @@ fn clean_response(value: Value, fields: &[&str], detail: bool) -> Option<Value> 
         .iter()
         .map(|v| project(v, fields))
         .collect::<Option<Vec<_>>>()?;
-    Some(json!({"items":rows,"total":value["total"].as_u64().unwrap_or(items.len() as u64)}))
+    let allow_ads = value
+        .get("ads_enabled")
+        .and_then(Value::as_bool)
+        .map(|enabled| {
+            enabled && !rows.is_empty() && rows.iter().all(|row| row["ads_enabled"] == true)
+        });
+    let mut result =
+        json!({"items":rows,"total":value["total"].as_u64().unwrap_or(items.len() as u64)});
+    if let Some(allowed) = allow_ads {
+        result["ads_enabled"] = json!(allowed);
+    }
+    Some(result)
 }
 async fn handle(State(state): State<Arc<PublicState>>, request: Request) -> Response {
     if request.uri().path() == "/health" {
@@ -338,6 +355,34 @@ mod tests {
             result,
             json!({"items":[{"id":"example","title":"Public","description":"Opt-in description"}],"total":1})
         );
+    }
+    #[test]
+    fn only_explicit_boolean_school_consent_can_enable_public_ads() {
+        for consent in [json!("true"), json!(1), json!(null), json!({})] {
+            let item = project(
+                &json!({"id":"public","ads_enabled":consent}),
+                CONTEST_FIELDS,
+            )
+            .unwrap();
+            assert!(item.get("ads_enabled").is_none());
+        }
+        for (items, expected) in [
+            (json!([]), false),
+            (json!([{"id":"one","ads_enabled":true}]), true),
+            (
+                json!([{"id":"one","ads_enabled":true},{"id":"two","ads_enabled":false}]),
+                false,
+            ),
+            (json!([{"id":"one"}]), false),
+        ] {
+            let result = clean_response(
+                json!({"items":items,"ads_enabled":true}),
+                CONTEST_FIELDS,
+                false,
+            )
+            .unwrap();
+            assert_eq!(result["ads_enabled"], expected);
+        }
     }
     #[test]
     fn malformed_or_oversized_results_fail_closed() {
