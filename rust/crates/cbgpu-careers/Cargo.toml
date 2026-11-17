@@ -10,7 +10,7 @@ axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "fs", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite", "json", "macros"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite", "json", "macros"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 hmac = "0.12"
 sha2 = "0.10"

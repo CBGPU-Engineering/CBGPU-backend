@@ -55,9 +55,10 @@ pub async fn inspect(source: &Path) -> Result<Inspection> {
     let mut counts = BTreeMap::new();
     for table in TABLES {
         if available.iter().any(|name| name == table) {
-            let n: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
-                .fetch_one(&mut *tx)
-                .await?;
+            let n: i64 =
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
+                    .fetch_one(&mut *tx)
+                    .await?;
             counts.insert((*table).into(), n);
         }
     }
@@ -267,9 +268,9 @@ async fn target_fingerprint(pool: &sqlx::PgPool) -> Result<Value> {
             continue;
         }
         let mut digest = Sha256::new();
-        let values: Vec<String> = sqlx::query_scalar(&format!(
+        let values: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT to_jsonb(t)::text FROM ai_store.{table} t ORDER BY to_jsonb(t)::text"
-        ))
+        )))
         .fetch_all(pool)
         .await?;
         for value in &values {

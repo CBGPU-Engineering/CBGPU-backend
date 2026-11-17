@@ -1,4 +1,5 @@
-//! Anonymous-only DTO boundary. Never forwards browser cookies or user credentials.
+pub mod assets;
+// Anonymous-only DTO boundary. Never forwards browser cookies or user credentials.
 use axum::{
     Json, Router,
     extract::{Request, State},
@@ -14,6 +15,7 @@ pub struct Config {
     pub backend_url: String,
     pub anon_key: String,
     pub client: reqwest::Client,
+    pub assets: Option<assets::Assets>,
 }
 struct PublicState {
     config: Config,
@@ -35,12 +37,12 @@ fn error(status: StatusCode, code: &str) -> Response {
 }
 const PROJECT_FIELDS: &[&str] = &[
     "id",
+    "ads_enabled",
     "slug",
     "title",
     "summary",
     "body_markdown",
     "description",
-    "cover_path",
     "school_id",
     "school_name",
     "updated_at",
@@ -49,11 +51,11 @@ const PROJECT_FIELDS: &[&str] = &[
 ];
 const CONTEST_FIELDS: &[&str] = &[
     "id",
+    "ads_enabled",
     "title",
     "description",
-    "banner_path",
-    "logo_path",
     "organizer",
+    "organizer_school_names",
     "school_id",
     "school_name",
     "event_start_at",
@@ -81,13 +83,13 @@ const SCHOOL_FIELDS: &[&str] = &[
     "type",
     "region",
     "status",
-    "logo_path",
     "brand_color",
     "public_description",
     "ads_enabled",
 ];
 const COMMUNITY_FIELDS: &[&str] = &[
     "id",
+    "ads_enabled",
     "title",
     "body",
     "created_at",
@@ -103,6 +105,17 @@ fn project(value: &Value, fields: &[&str]) -> Option<Value> {
     let mut out = serde_json::Map::new();
     for field in fields {
         if let Some(value) = object.get(*field) {
+            if *field == "organizer_school_names"
+                && !value.is_null()
+                && !value
+                    .as_str()
+                    .is_some_and(|text| text.len() <= 20000 && !text.chars().any(char::is_control))
+            {
+                continue;
+            }
+            if *field == "ads_enabled" && !value.is_boolean() {
+                continue;
+            }
             if value.is_array() || value.is_object() {
                 return None;
             }
@@ -127,7 +140,18 @@ fn clean_response(value: Value, fields: &[&str], detail: bool) -> Option<Value> 
         .iter()
         .map(|v| project(v, fields))
         .collect::<Option<Vec<_>>>()?;
-    Some(json!({"items":rows,"total":value["total"].as_u64().unwrap_or(items.len() as u64)}))
+    let allow_ads = value
+        .get("ads_enabled")
+        .and_then(Value::as_bool)
+        .map(|enabled| {
+            enabled && !rows.is_empty() && rows.iter().all(|row| row["ads_enabled"] == true)
+        });
+    let mut result =
+        json!({"items":rows,"total":value["total"].as_u64().unwrap_or(items.len() as u64)});
+    if let Some(allowed) = allow_ads {
+        result["ads_enabled"] = json!(allowed);
+    }
+    Some(result)
 }
 async fn handle(State(state): State<Arc<PublicState>>, request: Request) -> Response {
     if request.uri().path() == "/health" {
@@ -160,6 +184,23 @@ async fn handle(State(state): State<Arc<PublicState>>, request: Request) -> Resp
         .trim_start_matches('/')
         .split('/')
         .collect::<Vec<_>>();
+    if parts.len() == 5
+        && parts[0] == "v1"
+        && parts[1] == "assets"
+        && parts[2] == "contests"
+        && parts[4] == "banner"
+    {
+        if request.uri().query().is_some() {
+            return assets::failure(StatusCode::NOT_FOUND);
+        }
+        let Ok(id) = uuid::Uuid::parse_str(parts[3]) else {
+            return assets::failure(StatusCode::NOT_FOUND);
+        };
+        return match &state.config.assets {
+            Some(store) => store.get(id).await,
+            None => assets::failure(StatusCode::NOT_FOUND),
+        };
+    }
     if parts.len() < 2 || parts.len() > 3 || parts[0] != "v1" {
         return error(StatusCode::NOT_FOUND, "NOT_FOUND");
     }
@@ -252,7 +293,7 @@ async fn handle(State(state): State<Arc<PublicState>>, request: Request) -> Resp
             Err(_) => return error(StatusCode::BAD_GATEWAY, "INVALID_PUBLIC_RESPONSE"),
         }
     }
-    let value = match serde_json::from_slice(&bytes)
+    let mut value = match serde_json::from_slice(&bytes)
         .ok()
         .and_then(|v| clean_response(v, fields, detail))
     {
@@ -261,6 +302,46 @@ async fn handle(State(state): State<Arc<PublicState>>, request: Request) -> Resp
     };
     if detail && value["item"].is_null() {
         return error(StatusCode::NOT_FOUND, "NOT_FOUND");
+    }
+    if parts[1] == "contests"
+        && let Some(store) = &config.assets
+    {
+        let ids = if detail {
+            vec![
+                value["item"]["id"]
+                    .as_str()
+                    .and_then(|v| uuid::Uuid::parse_str(v).ok()),
+            ]
+        } else {
+            value["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|row| {
+                    row["id"]
+                        .as_str()
+                        .and_then(|v| uuid::Uuid::parse_str(v).ok())
+                })
+                .collect()
+        };
+        let ids = ids.into_iter().flatten().collect::<Vec<_>>();
+        let available = store.available(&ids).await;
+        let attach = |row: &mut Value| {
+            if let Some(id) = row["id"]
+                .as_str()
+                .and_then(|v| uuid::Uuid::parse_str(v).ok())
+                && available.contains(&id)
+            {
+                row["banner_url"] = json!(assets::alias(id));
+            }
+        };
+        if detail {
+            attach(&mut value["item"])
+        } else if let Some(rows) = value["items"].as_array_mut() {
+            for row in rows {
+                attach(row)
+            }
+        }
     }
     let mut response = Json(value).into_response();
     response
@@ -285,6 +366,34 @@ mod tests {
         );
     }
     #[test]
+    fn only_explicit_boolean_school_consent_can_enable_public_ads() {
+        for consent in [json!("true"), json!(1), json!(null), json!({})] {
+            let item = project(
+                &json!({"id":"public","ads_enabled":consent}),
+                CONTEST_FIELDS,
+            )
+            .unwrap();
+            assert!(item.get("ads_enabled").is_none());
+        }
+        for (items, expected) in [
+            (json!([]), false),
+            (json!([{"id":"one","ads_enabled":true}]), true),
+            (
+                json!([{"id":"one","ads_enabled":true},{"id":"two","ads_enabled":false}]),
+                false,
+            ),
+            (json!([{"id":"one"}]), false),
+        ] {
+            let result = clean_response(
+                json!({"items":items,"ads_enabled":true}),
+                CONTEST_FIELDS,
+                false,
+            )
+            .unwrap();
+            assert_eq!(result["ads_enabled"], expected);
+        }
+    }
+    #[test]
     fn malformed_or_oversized_results_fail_closed() {
         assert!(
             clean_response(json!({"rows":[{"email":"private"}]}), PROJECT_FIELDS, false).is_none()
@@ -307,6 +416,7 @@ mod tests {
             backend_url: "http://127.0.0.1:1".into(),
             anon_key: "synthetic".into(),
             client,
+            assets: None,
         });
         for (method, path, status) in [
             ("POST", "/v1/projects", 405),
@@ -346,6 +456,7 @@ mod tests {
             backend_url: format!("http://{address}"),
             anon_key: "synthetic-anon".into(),
             client: reqwest::Client::builder().no_proxy().build().unwrap(),
+            assets: None,
         });
         let response = app
             .oneshot(
@@ -370,5 +481,23 @@ mod tests {
             json!({"items":[{"id":"public","title":"Owner published"}],"total":1})
         );
         task.abort();
+    }
+}
+
+#[cfg(test)]
+mod organizer_names_tests {
+    use super::*;
+    #[test]
+    fn accepted_school_names_are_scalar_only_without_private_actor_data() {
+        let row=project(&json!({"id":"fixture","organizer_school_names":"Synthetic School B","invited_by":"private-owner","invitations":[{"status":"INVITED"}]}),CONTEST_FIELDS).unwrap();
+        assert_eq!(row["organizer_school_names"], "Synthetic School B");
+        assert!(row.get("invited_by").is_none());
+        assert!(row.get("invitations").is_none());
+        let row = project(
+            &json!({"id":"fixture","organizer_school_names":{"private":"actor"}}),
+            CONTEST_FIELDS,
+        )
+        .unwrap();
+        assert!(row.get("organizer_school_names").is_none());
     }
 }

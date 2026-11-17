@@ -8,7 +8,7 @@ rust-version = "1.88"
 cbgpu-ai-store = { path = "../cbgpu-ai-store" }
 cbgpu-robotics = { path = "../cbgpu-robotics" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "net"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite"] }
 serde_json = "1"
 sha2 = "0.10"
 libc = "0.2"

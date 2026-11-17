@@ -1,0 +1,24 @@
+begin;
+insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data,aud,role,encrypted_password,email_confirmed_at,created_at,updated_at) select ('fb310000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,'synthetic-feature-operator-'||x||'@fixture.invalid',jsonb_build_object('full_name','Feature operator fixture','account_type_request','EXTERNAL'),'{}','authenticated','authenticated','fixture-no-password',now(),now(),now() from generate_series(1,2)x;
+insert into auth.sessions(id,user_id) select ('fb320000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,('fb310000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid from generate_series(1,2)x;
+select set_config('request.jwt.claims','{"role":"service_role"}',true);
+update public.profiles set is_admin=true where id='fb310000-0000-4000-8000-000000000001';
+insert into cbgpu_schools.feature_requests(id,school_id,requester_id,feature_key,title,description)values('fb330000-0000-4000-8000-000000000001','cbsh','fb310000-0000-4000-8000-000000000002','custom','Synthetic request','No real mail or feature actions');
+select set_config('request.jwt.claims','{"sub":"fb310000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fb320000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+do $$begin begin perform public.cbgpu_school_feature_operator_api('list');raise exception 'NONADMIN_OPERATOR_ALLOWED';exception when insufficient_privilege then null;end;end$$;
+select set_config('request.jwt.claims','{"sub":"fb310000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fb320000-0000-4000-8000-000000000001"}',true);
+do $$declare r jsonb;begin
+ r:=public.cbgpu_school_feature_operator_api('list','{"school_id":"cbsh"}');if not exists(select 1 from jsonb_array_elements(r->'items') i where i->>'id'='fb330000-0000-4000-8000-000000000001' and i->>'revision'='1')then raise exception 'OPERATOR_LIST_MISSING';end if;
+ r:=public.cbgpu_school_feature_operator_api('review','{"id":"fb330000-0000-4000-8000-000000000001","revision":1,"decision":"REVIEWING","operator_message":"We are reviewing this request"}');if r#>>'{request,status}'<>'REVIEWING' or r#>>'{request,revision}'<>'2' then raise exception 'OPERATOR_REVIEW_UNCONFIRMED';end if;
+ begin perform public.cbgpu_school_feature_operator_api('review','{"id":"fb330000-0000-4000-8000-000000000001","revision":1,"decision":"ACCEPTED"}');raise exception 'STALE_OPERATOR_WRITE';exception when serialization_failure then null;end;
+ begin perform public.cbgpu_school_feature_operator_api('review','{"id":"fb330000-0000-4000-8000-000000000001","revision":2,"decision":"DELIVERED"}');raise exception 'UNACCEPTED_DELIVERY';exception when invalid_parameter_value then null;end;
+ perform public.cbgpu_school_feature_operator_api('review','{"id":"fb330000-0000-4000-8000-000000000001","revision":2,"decision":"ACCEPTED"}');
+ perform public.cbgpu_school_feature_operator_api('review','{"id":"fb330000-0000-4000-8000-000000000001","revision":3,"decision":"DELIVERED"}');
+end$$;
+reset role;
+do $$begin if(select count(*) from cbgpu_schools.feature_request_reviews where request_id='fb330000-0000-4000-8000-000000000001')<>3 then raise exception 'OPERATOR_AUDIT_MISSING';end if;end$$;
+delete from auth.sessions where id='fb320000-0000-4000-8000-000000000001';
+set local role authenticated;
+do $$begin begin perform public.cbgpu_school_feature_operator_api('list');raise exception 'REVOKED_OPERATOR_ALLOWED';exception when insufficient_privilege then null;end;end$$;
+rollback;

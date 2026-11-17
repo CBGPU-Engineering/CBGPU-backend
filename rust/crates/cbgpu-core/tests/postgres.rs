@@ -1,7 +1,4 @@
-use axum::{
-    Json, Router,
-    routing::{get, post},
-};
+use axum::{Json, Router, routing::post};
 use cbgpu_core::{Settings, parse_web_origin, pool, run};
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -35,13 +32,13 @@ async fn postgres_claims_preserve_idempotency_and_uncertain_outcomes() {
     let calls = requests.clone();
     let app = Router::new()
         .route(
-            "/api/timetable",
-            get(move || {
+            "/api/cron/timetable-warm",
+            post(move || {
                 let calls = calls.clone();
                 async move {
                     calls.fetch_add(1, Ordering::SeqCst);
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    Json(json!({"grid":[[1]],"stale":false,"fetchedAt":"2026-11-16"}))
+                    Json(json!({"ok":true,"days":1,"cells":1,"stale":false}))
                 }
             }),
         )
@@ -56,7 +53,9 @@ async fn postgres_claims_preserve_idempotency_and_uncertain_outcomes() {
         database_url: database_url.clone(),
         listen: address,
         web_origin: parse_web_origin(&format!("http://{address}")).unwrap(),
-        cron_secret_file: key,
+        cron_secret_file: key.clone(),
+        timetable_secret_file: key,
+        timetable_school_id: "cbsh".into(),
         admin_key_file: PathBuf::new(),
         release: "test".into(),
     };

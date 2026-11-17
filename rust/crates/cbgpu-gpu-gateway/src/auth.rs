@@ -4,6 +4,34 @@ use crate::{Error, Result, now};
 use axum::http::HeaderMap;
 use base64::Engine;
 use serde_json::{Value, json};
+/// Canonical server flags only; validate both even when one already enables scope.
+pub fn authorization_mode(account: Option<&str>, schools: Option<&str>) -> Result<bool> {
+    let mut enabled = false;
+    for value in [account, schools].into_iter().flatten() {
+        match value {
+            "" | "0" | "false" => {}
+            "1" | "true" => enabled = true,
+            _ => {
+                return Err(Error {
+                    status: 503,
+                    message: "Invalid GPU authorization configuration".into(),
+                });
+            }
+        }
+    }
+    Ok(enabled)
+}
+pub fn authorization_from_environment() -> Result<bool> {
+    let values = ["CBGPU_ACCOUNT_V2", "CBGPU_MULTISCHOOL_V1"]
+        .into_iter()
+        .map(|key| match std::env::var(key) {
+            Ok(value) => Ok(Some(value)),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(_) => Err(Error::unavailable()),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    authorization_mode(values[0].as_deref(), values[1].as_deref())
+}
 #[derive(Clone, Debug)]
 pub struct Grant {
     pub owner: String,
@@ -340,5 +368,39 @@ mod tombstone_tests {
             credential(&h, "sb-cbgpu-auth-token").unwrap_err().status,
             401
         );
+    }
+}
+
+#[cfg(test)]
+mod authorization_flag_tests {
+    use super::authorization_mode as mode;
+    #[test]
+    fn all_server_flag_pairs_are_validated() {
+        for account in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("false"),
+            Some("1"),
+            Some("true"),
+        ] {
+            for schools in [
+                None,
+                Some(""),
+                Some("0"),
+                Some("false"),
+                Some("1"),
+                Some("true"),
+            ] {
+                assert_eq!(
+                    mode(account, schools).unwrap(),
+                    matches!(account, Some("1" | "true")) || matches!(schools, Some("1" | "true"))
+                );
+            }
+        }
+        for bad in ["TRUE", "FALSE", " 0", "1 ", "yes", "tru"] {
+            assert!(mode(Some("1"), Some(bad)).is_err());
+            assert!(mode(Some(bad), Some("1")).is_err());
+        }
     }
 }

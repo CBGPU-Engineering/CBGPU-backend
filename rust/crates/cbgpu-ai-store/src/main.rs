@@ -46,10 +46,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "conversations",
                 "chat_messages",
             ] {
-                let count: i64 =
-                    sqlx::query_scalar(&format!("SELECT count(*) FROM ai_store.{table}"))
-                        .fetch_one(&store.pool)
-                        .await?;
+                let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                    "SELECT count(*) FROM ai_store.{table}"
+                )))
+                .fetch_one(&store.pool)
+                .await?;
                 result[table] = serde_json::json!(count);
             }
             result

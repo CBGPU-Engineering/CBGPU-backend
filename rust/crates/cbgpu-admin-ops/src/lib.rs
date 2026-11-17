@@ -6,7 +6,7 @@ use cbgpu_delivery::{
 };
 use hmac::{Hmac, Mac};
 use rsa::{
-    RsaPrivateKey,
+    PrivateKey,
     pkcs1::DecodeRsaPrivateKey,
     pkcs1v15::SigningKey,
     pkcs8::DecodePrivateKey,
@@ -15,6 +15,7 @@ use rsa::{
 };
 use serde_json::{Value, json};
 use sha2::Sha256;
+use sha2_rsa::Sha256 as RsaSha256;
 use std::{collections::BTreeMap, fs, path::Path, time::Duration};
 pub type Result<T> = std::result::Result<T, String>;
 pub struct Response {
@@ -482,10 +483,10 @@ pub fn firebase_assertion(account: &Value, now: i64) -> Result<String> {
     let pem = account["private_key"]
         .as_str()
         .ok_or("Missing Firebase signing key")?;
-    let key = RsaPrivateKey::from_pkcs8_pem(pem)
-        .or_else(|_| RsaPrivateKey::from_pkcs1_pem(pem))
+    let key = PrivateKey::from_pkcs8_pem(pem)
+        .or_else(|_| PrivateKey::from_pkcs1_pem(pem))
         .map_err(|_| "Invalid Firebase private key")?;
-    if key.n().bits() < 2048 {
+    if key.n().bit_width() < 2048 {
         return Err("Firebase RSA key must be at least2048bits".into());
     }
     let email = account["client_email"]
@@ -498,7 +499,7 @@ pub fn firebase_assertion(account: &Value, now: i64) -> Result<String> {
         URL_SAFE_NO_PAD
             .encode(serde_json::to_vec(&claims).map_err(|_| "Cannot encode Firebase claims")?)
     );
-    let signature = SigningKey::<Sha256>::new(key).sign(unsigned.as_bytes());
+    let signature = SigningKey::<RsaSha256>::new(key).sign(unsigned.as_bytes());
     Ok(format!(
         "{unsigned}.{}",
         URL_SAFE_NO_PAD.encode(signature.to_bytes())
@@ -1124,13 +1125,13 @@ mod tests {
     fn firebase_rs256_exchange_never_sends_notifications() {
         let tmp = tempdir().unwrap();
         fixture(tmp.path());
-        let private = RsaPrivateKey::new(&mut rand::rngs::OsRng, 2048).unwrap();
+        let private = <PrivateKey as rsa::Generate>::generate();
         let account = json!({"client_email":"fixture@example.test","token_uri":"https://oauth2.googleapis.com/token","private_key":private.to_pkcs8_pem(LineEnding::LF).unwrap().to_string()});
         let assertion = firebase_assertion(&account, 100).unwrap();
         let parts: Vec<_> = assertion.split('.').collect();
         let signature =
             Signature::try_from(URL_SAFE_NO_PAD.decode(parts[2]).unwrap().as_slice()).unwrap();
-        VerifyingKey::<Sha256>::new(private.to_public_key())
+        VerifyingKey::<RsaSha256>::new(private.to_public_key())
             .verify(format!("{}.{}", parts[0], parts[1]).as_bytes(), &signature)
             .unwrap();
         fs::write(

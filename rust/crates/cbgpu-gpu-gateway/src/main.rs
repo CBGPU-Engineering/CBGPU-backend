@@ -47,10 +47,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             String::new()
         },
-        account_v2: matches!(
-            std::env::var("CBGPU_ACCOUNT_V2").ok().as_deref(),
-            Some("1" | "true")
-        ),
+        account_v2: cbgpu_gpu_gateway::auth::authorization_from_environment()
+            .map_err(|e| e.message)?,
         client: reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())

@@ -52,19 +52,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
+    let mode = cbgpu_contests_api::auth::authorization_mode_from_env()?;
     let identity = Arc::new(Auth {
         origin: origin.clone(),
         anon_key: anon.clone(),
         sessions: Arc::new(PgSessions { pool }),
         client: client.clone(),
-        multischool: matches!(
-            std::env::var("CBGPU_MULTISCHOOL_V1").as_deref(),
-            Ok("1" | "true")
-        ),
-        account_v2: matches!(
-            std::env::var("CBGPU_ACCOUNT_V2").as_deref(),
-            Ok("1" | "true")
-        ),
+        multischool: mode.multischool,
+        account_v2: mode.account_v2,
     });
     let origins:BTreeSet<_>=std::env::var("CBGPU_CONTEST_ALLOWED_ORIGINS").unwrap_or("https://cbgpu.com,https://app.cbgpu.com,https://student.cbgpu.com,https://researcher.cbgpu.com,https://developer.cbgpu.com".into()).split(',').filter(|v|!v.trim().is_empty()).map(|v|v.trim().to_owned()).collect();
     let api = Api::new(

@@ -65,6 +65,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Auth reader and token executor must use separate dedicated logins".into());
     }
     cbgpu_contest_tokens::store::verify_executor(&exec_pool).await?;
+    let mode = cbgpu_contests_api::auth::authorization_mode_from_env()?;
     let identity = Arc::new(Auth {
         origin,
         anon_key: anon,
@@ -74,14 +75,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(10))
             .build()?,
-        account_v2: matches!(
-            std::env::var("CBGPU_ACCOUNT_V2").as_deref(),
-            Ok("1" | "true")
-        ),
-        multischool: matches!(
-            std::env::var("CBGPU_MULTISCHOOL_V1").as_deref(),
-            Ok("1" | "true")
-        ),
+        account_v2: mode.account_v2,
+        multischool: mode.multischool,
     });
     let api = Api::new(identity, Arc::new(Store { pool: exec_pool }), key)?;
     axum::serve(tokio::net::TcpListener::bind(address).await?, router(api))

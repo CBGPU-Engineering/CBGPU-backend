@@ -129,7 +129,7 @@ impl Runner for FakeRunner {
     }
 }
 async fn wait(store: &Store, owner: &str, id: &str, state: &str) {
-    for _ in 0..500 {
+    for _ in 0..1000 {
         if store.job(owner, id, false).await.unwrap()["state"] == state {
             return;
         }
@@ -180,12 +180,20 @@ async fn real_queue_claim_fairness_preemption_cancel_and_recovery() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let module_enabled = Arc::new(AtomicBool::new(true));
+    let module_policy = module_enabled.clone();
     let backend = tokio::spawn(async move {
         axum::serve(
             listener,
             axum::Router::new().route(
                 "/rest/v1/rpc/cbgpu_service_can_use_resource",
-                axum::routing::post(|| async { axum::Json(json!(true)) }),
+                axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+                    let policy = module_policy.clone();
+                    async move {
+                        assert_eq!(request["resource"], "ai");
+                        axum::Json(json!(policy.load(Ordering::SeqCst)))
+                    }
+                }),
             ),
         )
         .await
@@ -285,6 +293,42 @@ async fn real_queue_claim_fairness_preemption_cancel_and_recovery() {
     wait(&store, OWNER, outageid, "paused").await;
     store.cancel_job(OWNER, outageid).await.unwrap();
     resources.failed.store(false, Ordering::SeqCst);
+    let policy_job = store
+        .enqueue(OWNER, "embed", input(), "AI module revocation")
+        .await
+        .unwrap();
+    let policy_id = policy_job["id"].as_str().unwrap();
+    wait(&store, OWNER, policy_id, "running").await;
+    module_enabled.store(false, Ordering::SeqCst);
+    wait(&store, OWNER, policy_id, "cancelled").await;
+    assert_eq!(
+        runner.active.load(Ordering::SeqCst),
+        0,
+        "fresh AI module denial must stop the owned worker"
+    );
+    let launches = runner.launched.lock().unwrap().len();
+    let denied = store
+        .enqueue(OWNER, "embed", input(), "Disabled module queued import")
+        .await
+        .unwrap();
+    wait(&store, OWNER, denied["id"].as_str().unwrap(), "cancelled").await;
+    assert_eq!(
+        runner.launched.lock().unwrap().len(),
+        launches,
+        "disabled module may not launch a queued task"
+    );
+    module_enabled.store(true, Ordering::SeqCst);
+    let fast = store
+        .enqueue(OWNER, "embed", input(), "Policy changed at completion")
+        .await
+        .unwrap();
+    let fast_id = fast["id"].as_str().unwrap();
+    wait(&store, OWNER, fast_id, "running").await;
+    module_enabled.store(false, Ordering::SeqCst);
+    runner.complete.store(true, Ordering::SeqCst);
+    wait(&store, OWNER, fast_id, "cancelled").await;
+    module_enabled.store(true, Ordering::SeqCst);
+    runner.complete.store(false, Ordering::SeqCst);
     let cancelled = store
         .enqueue(OWNER, "embed", input(), "cancel")
         .await

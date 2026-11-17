@@ -12,6 +12,8 @@ use tokio::{
 };
 #[derive(Clone)]
 pub struct Preparation {
+    local_execution: bool,
+    tool_dir: Option<PathBuf>,
     store: Store,
     image: String,
     active: Arc<Mutex<HashMap<String, Value>>>,
@@ -41,11 +43,31 @@ impl Drop for Spool {
 impl Preparation {
     pub fn new(store: Store, image: String) -> Self {
         Self {
+            local_execution: true,
+            tool_dir: None,
             store,
             image,
             active: Arc::new(Mutex::new(HashMap::new())),
             slots: Arc::new(Semaphore::new(2)),
         }
+    }
+    pub fn with_local_execution(mut self, enabled: bool) -> Self {
+        self.local_execution = enabled;
+        self
+    }
+    /// Trusted process configuration only; never populated from uploaded/job data.
+    pub fn with_tool_directory(mut self, directory: PathBuf) -> Result<Self> {
+        if !directory.is_absolute() || !directory.is_dir() {
+            return Err(fail("Invalid native tool directory", 503));
+        }
+        self.tool_dir = Some(directory);
+        Ok(self)
+    }
+    fn docker(&self) -> PathBuf {
+        self.tool_dir
+            .as_ref()
+            .map(|p| p.join("docker"))
+            .unwrap_or_else(|| "docker".into())
     }
     fn cache(&self, id: &str) -> PathBuf {
         self.store.root.join("extracted").join(format!("{id}.json"))
@@ -118,6 +140,12 @@ impl Preparation {
         if ["ready", "processing"].contains(&old["state"].as_str().unwrap_or("")) {
             return Ok(old);
         }
+        if !self.local_execution {
+            return Err(fail(
+                "NO_EXECUTOR: document preparation is unavailable on this control plane",
+                503,
+            ));
+        }
         let slot = self
             .slots
             .clone()
@@ -177,6 +205,12 @@ impl Preparation {
         suffix: &str,
         visual: bool,
     ) -> Result<cbgpu_ai_documents::Extracted> {
+        if !self.local_execution {
+            return Err(fail(
+                "NO_EXECUTOR: local document extraction is disabled",
+                503,
+            ));
+        }
         let source = self.store.root.join("uploads").join(id).canonicalize()?;
         if !visual {
             let suffix = suffix.to_owned();
@@ -188,7 +222,7 @@ impl Preparation {
             .map_err(|e| fail(&e, 400));
         }
         let name = format!("cbgpu-ocr-{}", uuid::Uuid::new_v4());
-        let mut command = tokio::process::Command::new("docker");
+        let mut command = tokio::process::Command::new(self.docker());
         let uid = unsafe { libc_uid() };
         command
             .args([
@@ -282,7 +316,7 @@ impl Preparation {
             .and_then(|r| r);
         let _ = tokio::time::timeout(
             std::time::Duration::from_secs(10),
-            tokio::process::Command::new("docker")
+            tokio::process::Command::new(self.docker())
                 .args(["rm", "-f", &name])
                 .kill_on_drop(true)
                 .stdout(std::process::Stdio::null())

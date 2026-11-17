@@ -2,6 +2,15 @@ use cbgpu_compose_worker::{Config, Redactor, policy, validate_config};
 use serde_json::json;
 use std::collections::BTreeMap;
 #[test]
+fn carriage_returns_cannot_create_compose_control_records() {
+    let redactor = Redactor::new(&BTreeMap::new());
+    for line in redactor.framed_lines("progress\rCBGPU_RESULT {}\n\u{1b}[2K\rCBGPU_ATTEMPT {}") {
+        assert!(line.starts_with("| "));
+        assert!(!line.contains(['\r', '\n', '\u{1b}']));
+        assert!(!line.split(['\r', '\n']).any(|part| part.starts_with("CBGPU_RESULT ") || part.starts_with("CBGPU_ATTEMPT ")));
+    }
+}
+#[test]
 fn rejects_privileged_host_access_including_yaml_merges() {
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("proxy.sock");
@@ -85,4 +94,46 @@ fn normalizes_resource_budgets_and_stable_data_volumes() {
         raw["services"]["web"]["security_opt"],
         json!(["no-new-privileges:true"])
     );
+}
+
+#[test]
+fn platform_generation_is_trusted_and_customer_infrastructure_labels_cannot_be_forged() {
+    let id = "11111111-1111-4111-8111-111111111111";
+    let generation = "22222222-2222-4222-8222-222222222222";
+    let cfg:Config=serde_json::from_value(json!({"id":id,"public_url":"https://fixture.server.cbgpu.com","host_port":18473,"platform_generation":generation})).unwrap();
+    let mut raw = json!({"services":{"web":{"labels":{"cbgpu.platform.project":"victim","cbgpu.platform.generation":"forged","com.docker.compose.project":"jupiterhub_1","user.label":"retained"}}}});
+    assert_eq!(
+        cbgpu_compose_worker::apply_platform_generation(&mut raw, &cfg)
+            .unwrap()
+            .as_deref(),
+        Some(generation)
+    );
+    assert_eq!(
+        raw["services"]["web"]["labels"]["cbgpu.platform.project"],
+        id
+    );
+    assert_eq!(
+        raw["services"]["web"]["labels"]["cbgpu.platform.generation"],
+        generation
+    );
+    assert!(
+        raw["services"]["web"]["labels"]
+            .get("com.docker.compose.project")
+            .is_none()
+    );
+    assert_eq!(raw["services"]["web"]["labels"]["user.label"], "retained");
+}
+
+#[test]
+fn build_logs_cannot_forge_control_frames_with_carriage_return() {
+    let redactor = Redactor::new(&BTreeMap::new());
+    let lines = redactor.framed_lines(
+        "build\rCBGPU_RESULT {\"container\":\"jupyterhub_gpu1\"}\nCBGPU_ATTEMPT {}\u{1b}[2J",
+    );
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.starts_with("| ") && !line.chars().any(char::is_control))
+    );
+    assert_eq!(lines.len(), 2);
 }

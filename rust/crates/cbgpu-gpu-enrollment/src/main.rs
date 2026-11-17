@@ -27,10 +27,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("GPU registry must bind private loopback".into());
     }
     let config = Config {
-        enabled: matches!(
-            std::env::var("CBGPU_GPU_REGISTRY_ENABLED").as_deref(),
-            Ok("1" | "true")
-        ),
+        diagnostics: match std::env::var("CBGPU_GPU_DIAGNOSTICS_ENABLED")
+            .ok()
+            .as_deref()
+        {
+            None | Some("" | "0" | "false") => None,
+            Some("1" | "true") => {
+                let value = secret("CBGPU_GPU_COMMAND_SIGNING_KEY_FILE")?;
+                let bytes = cbgpu_gpu_enrollment::unhex::<32>(&value)
+                    .ok_or("Command signing key must be 32-byte private hex")?;
+                Some(std::sync::Arc::new(ed25519_dalek::SigningKey::from_bytes(
+                    &bytes,
+                )))
+            }
+            _ => return Err("Invalid diagnostics flag".into()),
+        },
+        enabled: flag(std::env::var("CBGPU_GPU_REGISTRY_ENABLED").ok().as_deref())?,
         backend_url: std::env::var("CBGPU_GPU_REGISTRY_BACKEND_URL")
             .unwrap_or("http://127.0.0.1:54321".into())
             .trim_end_matches('/')
@@ -60,4 +72,27 @@ async fn shutdown() {
         }
     }
     let _ = tokio::signal::ctrl_c().await;
+}
+
+fn flag(value: Option<&str>) -> Result<bool, Box<dyn std::error::Error>> {
+    match value {
+        None | Some("" | "0" | "false") => Ok(false),
+        Some("1" | "true") => Ok(true),
+        _ => Err("Invalid GPU registry flag".into()),
+    }
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn registry_flag_literals_fail_closed() {
+        for x in [None, Some(""), Some("0"), Some("false")] {
+            assert!(!super::flag(x).unwrap())
+        }
+        for x in ["1", "true"] {
+            assert!(super::flag(Some(x)).unwrap())
+        }
+        for x in ["True", "yes", " 1", "false "] {
+            assert!(super::flag(Some(x)).is_err())
+        }
+    }
 }

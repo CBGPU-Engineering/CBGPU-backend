@@ -1,0 +1,108 @@
+-- Distinct guest contexts: no affiliation, role or ownership changes.
+begin;
+insert into cbgpu_schools.schools(id,official_name,normalized_name,display_name,type,region,configuration,features) values('fixture-context-a','Context A','context a','A','HIGH_SCHOOL','충북','{}',array['contests','materials']),('fixture-context-b','Context B','context b','B','HIGH_SCHOOL','충남','{}',array['contests','materials','school_life']);
+insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data,aud,role,encrypted_password,email_confirmed_at,created_at,updated_at) select ('fd100000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,'synthetic-context-'||x||'@fixture.invalid',jsonb_build_object('full_name','Resource context fixture','account_type_request','EXTERNAL'),'{}','authenticated','authenticated','fixture-no-password',now(),now(),now() from generate_series(1,4)x;
+insert into auth.sessions(id,user_id) select ('fd200000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,('fd100000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid from generate_series(1,4)x;
+insert into cbgpu_schools.memberships(user_id,school_id,membership_type,status,verified,school_roles) values('fd100000-0000-4000-8000-000000000001','fixture-context-b','STUDENT','ACTIVE',true,'{}'),('fd100000-0000-4000-8000-000000000003','fixture-context-a','STUDENT','ACTIVE',true,'{}'),('fd100000-0000-4000-8000-000000000004','fixture-context-b','EXTERNAL','ACTIVE',true,array['SCHOOL_ADMIN']);
+select set_config('request.jwt.claims','{"sub":"fd100000-0000-4000-8000-000000000003","role":"authenticated","session_id":"fd200000-0000-4000-8000-000000000003"}',true);
+set local role authenticated;
+do $$declare c jsonb:=public.cbgpu_school_resource_contexts()#>'{items,0}';begin if c->>'type'<>'MEMBERSHIP' or c->>'school_id'<>'fixture-context-a' or not(c?'membership_id') or(c->>'can_administer')::boolean then raise exception 'VERIFIED_MEMBERSHIP_CONTEXT_CHANGED';end if;end$$;
+reset role;
+insert into public.shared_materials(id,uploader_id,title,file_name,size_bytes,status,school_id,access_scope) values
+ ('fd300000-0000-4000-8000-000000000001','fd100000-0000-4000-8000-000000000001','Guest school material','fixture.txt',1,'ready','fixture-context-b','SCHOOL'),
+ ('fd300000-0000-4000-8000-000000000002','fd100000-0000-4000-8000-000000000001','Never guest private material','fixture.txt',1,'ready','fixture-context-b','PRIVATE'),
+ ('fd300000-0000-4000-8000-000000000003','fd100000-0000-4000-8000-000000000003','Other school material','fixture.txt',1,'ready','fixture-context-a','SCHOOL');
+create temp table context_values(k text,v jsonb);grant all on context_values to authenticated;
+select set_config('request.jwt.claims','{"sub":"fd100000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fd200000-0000-4000-8000-000000000001"}',true);
+set local role authenticated;
+insert into context_values values('request',public.cbgpu_school_guest_api('create',jsonb_build_object('school_id','fixture-context-b','external_email','synthetic-context-2@fixture.invalid','project_name','Context fixture','purpose','Temporary scoped collaboration','resources',jsonb_build_array('contests','school_storage'),'starts_at',now()+interval '1 hour','ends_at',now()+interval '2 hours')));
+reset role;
+select set_config('request.jwt.claims','{"sub":"fd100000-0000-4000-8000-000000000004","role":"authenticated","session_id":"fd200000-0000-4000-8000-000000000004"}',true);
+set local role authenticated;
+select public.cbgpu_school_guest_api('review',jsonb_build_object('school_id','fixture-context-b','id',(select v#>>'{request,id}' from context_values where k='request'),'decision','APPROVE'));
+reset role;
+select set_config('request.jwt.claims','{"sub":"fd100000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fd200000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+do $$begin if exists(select 1 from public.shared_materials where id in('fd300000-0000-4000-8000-000000000001','fd300000-0000-4000-8000-000000000002','fd300000-0000-4000-8000-000000000003')) then raise exception 'FUTURE_GUEST_MATERIAL_VISIBLE';end if;if jsonb_array_length(public.cbgpu_school_resource_contexts()->'items')<>0 then raise exception 'FUTURE_GUEST_CONTEXT_VISIBLE';end if;begin perform public.cbgpu_school_api('select_school','{"school_id":"fixture-context-b"}');raise exception 'FUTURE_GUEST_SELECTED';exception when insufficient_privilege then null;end;end$$;
+reset role;
+update cbgpu_accounts.guest_requests set starts_at=now()-interval '1 minute' where id=(select (v#>>'{request,id}')::uuid from context_values where k='request');
+set local role authenticated;
+do $$declare response jsonb;context jsonb;access jsonb;begin
+ if(select count(*) from public.shared_materials where id in('fd300000-0000-4000-8000-000000000001','fd300000-0000-4000-8000-000000000002','fd300000-0000-4000-8000-000000000003'))<>1 or not exists(select 1 from public.shared_materials where id='fd300000-0000-4000-8000-000000000001') then raise exception 'ACTIVE_GUEST_MATERIAL_SCOPE_MISMATCH';end if;
+ response:=public.cbgpu_school_resource_contexts();context:=response#>'{items,0}';
+ if jsonb_array_length(response->'items')<>1 or context->>'type'<>'GUEST' or context->>'school_id'<>'fixture-context-b' or context->'resources'<>'["contests","school_storage"]'::jsonb or(context->>'can_administer')::boolean or context?'membership_id' or context?'school_roles' or context#>'{school,gpu}' is not null or context#>'{school,contact_email}' is not null then raise exception 'GUEST_CONTEXT_PRIVILEGE_OR_DTO_LEAK';end if;
+ perform public.cbgpu_school_api('select_school','{"school_id":"fixture-context-b"}');
+ if public.cbgpu_school_resource_contexts()->>'current_school_id'<>'fixture-context-b' then raise exception 'GUEST_SELECTION_NOT_DURABLE';end if;
+ if jsonb_array_length(public.cbgpu_school_api('memberships')->'items')<>0 then raise exception 'GUEST_FAKE_MEMBERSHIP';end if;
+ access:=public.cbgpu_self_resource_access('fixture-context-b');
+ if access#>>'{resources,contests}'<>'true' or access#>>'{resources,school_storage}'<>'true' or access#>>'{resources,gpu}'<>'false' or access#>>'{reasons,gpu}'<>'NOT_CONFIGURED' or access->>'context_type'<>'GUEST' or(access->>'legacy_cbsh_access')::boolean then raise exception 'GUEST_SCOPE_BORROWED';end if;
+ if public.cbgpu_self_resource_access('fixture-context-a')#>>'{reasons,contests}'<>'NO_CONTEXT' then raise exception 'OTHER_SCHOOL_CONTEXT_LEAK';end if;
+ begin perform public.cbgpu_school_life_sources('fixture-context-b');raise exception 'GUEST_CONTEXT_BROADENED_SCHOOL_LIFE';exception when insufficient_privilege then null;end;
+end$$;
+insert into public.shared_materials(id,uploader_id,title,file_name,size_bytes,status,school_id,access_scope) values('fd300000-0000-4000-8000-000000000004',auth.uid(),'Guest pending upload continuity','fixture.txt',1,'pending','fixture-context-b','SCHOOL');
+do $$declare target text;visibility text;begin
+ foreach target in array array['fixture-context-a','fixture-context-b'] loop
+  visibility:=case when target='fixture-context-b' then 'PUBLIC' else 'SCHOOL' end;
+  begin insert into public.shared_materials(uploader_id,title,file_name,size_bytes,status,school_id,access_scope) values(auth.uid(),'Forbidden scope','fixture.txt',1,'pending',target,visibility);raise exception 'GUEST_UPLOAD_SCOPE_BYPASS' using errcode='XX000';exception when insufficient_privilege then null;end;
+ end loop;
+ begin insert into public.shared_materials(uploader_id,title,file_name,size_bytes,status,school_id,access_scope) values('fd100000-0000-4000-8000-000000000001','Spoofed upload','fixture.txt',1,'pending','fixture-context-b','SCHOOL');raise exception 'GUEST_UPLOAD_OWNER_BYPASS' using errcode='XX000';exception when insufficient_privilege then null;end;
+end$$;
+insert into public.research_notes(user_id,title,is_shared) values(auth.uid(),'Guest owned continuity',false);
+reset role;
+update cbgpu_accounts.guest_requests set resources=array['contests'] where id=(select (v#>>'{request,id}')::uuid from context_values where k='request');
+set local role authenticated;
+do $$begin if exists(select 1 from public.shared_materials where id in('fd300000-0000-4000-8000-000000000001','fd300000-0000-4000-8000-000000000002','fd300000-0000-4000-8000-000000000003')) then raise exception 'OUT_OF_SCOPE_GUEST_MATERIAL_VISIBLE';end if;end$$;
+reset role;
+update cbgpu_accounts.guest_requests set resources=array['contests','school_storage'] where id=(select (v#>>'{request,id}')::uuid from context_values where k='request');
+
+select set_config('request.jwt.claims','{"sub":"fd100000-0000-4000-8000-000000000004","role":"authenticated","session_id":"fd200000-0000-4000-8000-000000000004"}',true);
+set local role authenticated;
+select public.cbgpu_school_guest_api('review',jsonb_build_object('school_id','fixture-context-b','id',(select v#>>'{request,id}' from context_values where k='request'),'decision','REVOKE'));
+reset role;
+select set_config('request.jwt.claims','{"sub":"fd100000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fd200000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+do $$begin if exists(select 1 from public.shared_materials where id in('fd300000-0000-4000-8000-000000000001','fd300000-0000-4000-8000-000000000002','fd300000-0000-4000-8000-000000000003')) then raise exception 'REVOKED_GUEST_MATERIAL_VISIBLE';end if;if not exists(select 1 from public.shared_materials where id='fd300000-0000-4000-8000-000000000004') then raise exception 'REVOKE_LOST_OWN_UPLOAD';end if;begin insert into public.shared_materials(uploader_id,title,file_name,size_bytes,status,school_id,access_scope) values(auth.uid(),'Revoked upload','fixture.txt',1,'pending','fixture-context-b','SCHOOL');raise exception 'REVOKED_GUEST_UPLOAD' using errcode='XX000';exception when insufficient_privilege then null;end;if jsonb_array_length(public.cbgpu_school_resource_contexts()->'items')<>0 or public.cbgpu_school_resource_contexts()->>'current_school_id' is not null then raise exception 'REVOKED_CONTEXT_RETAINED';end if;begin perform public.cbgpu_school_api('select_school','{"school_id":"fixture-context-b"}');raise exception 'REVOKED_GUEST_SELECTED';exception when insufficient_privilege then null;end;if (select count(*) from public.research_notes where title='Guest owned continuity')<>1 then raise exception 'OWN_PROJECT_LOST_AFTER_REVOKE';end if;end$$;
+reset role;
+-- Expiry and sponsor revocation are evaluated each request, not cached in prefs.
+update cbgpu_accounts.guest_requests set status='APPROVED',ends_at=now()-interval '1 second' where id=(select (v#>>'{request,id}')::uuid from context_values where k='request');
+set local role authenticated;
+do $$begin if jsonb_array_length(public.cbgpu_school_resource_contexts()->'items')<>0 then raise exception 'EXPIRED_CONTEXT_RETAINED';end if;if exists(select 1 from public.shared_materials where id in('fd300000-0000-4000-8000-000000000001','fd300000-0000-4000-8000-000000000002','fd300000-0000-4000-8000-000000000003')) then raise exception 'EXPIRED_GUEST_MATERIAL_VISIBLE';end if;begin insert into public.shared_materials(uploader_id,title,file_name,size_bytes,status,school_id,access_scope) values(auth.uid(),'Expired upload','fixture.txt',1,'pending','fixture-context-b','SCHOOL');raise exception 'EXPIRED_GUEST_UPLOAD' using errcode='XX000';exception when insufficient_privilege then null;end;end$$;
+reset role;
+update cbgpu_accounts.guest_requests set ends_at=now()+interval '1 hour' where id=(select (v#>>'{request,id}')::uuid from context_values where k='request');
+update cbgpu_schools.memberships set status='SUSPENDED' where user_id='fd100000-0000-4000-8000-000000000001';
+set local role authenticated;
+do $$begin if jsonb_array_length(public.cbgpu_school_resource_contexts()->'items')<>0 then raise exception 'REVOKED_SPONSOR_CONTEXT_RETAINED';end if;if exists(select 1 from public.shared_materials where id in('fd300000-0000-4000-8000-000000000001','fd300000-0000-4000-8000-000000000002','fd300000-0000-4000-8000-000000000003')) then raise exception 'REVOKED_SPONSOR_MATERIAL_VISIBLE';end if;end$$;
+reset role;
+update cbgpu_schools.memberships set status='ACTIVE' where user_id='fd100000-0000-4000-8000-000000000001';
+update cbgpu_schools.schools set status='SUSPENDED' where id='fixture-context-b';
+set local role authenticated;
+do $$begin if jsonb_array_length(public.cbgpu_school_resource_contexts()->'items')<>0 or public.cbgpu_self_resource_access('fixture-context-b')#>>'{reasons,contests}'<>'SCHOOL_UNAVAILABLE' then raise exception 'SUSPENDED_SCHOOL_CONTEXT_ALLOWED';end if;end$$;
+reset role;
+update cbgpu_schools.schools set status='APPROVED' where id='fixture-context-b';
+
+select set_config('request.jwt.claims','{"role":"service_role"}',true);
+update public.profiles set account_status='SUSPENDED' where id='fd100000-0000-4000-8000-000000000002';
+select set_config('request.jwt.claims','{"sub":"fd100000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fd200000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+do $$begin begin perform public.cbgpu_school_resource_contexts();raise exception 'SUSPENDED_CONTEXT_ALLOWED';exception when insufficient_privilege then null;end;end$$;
+reset role;
+select set_config('request.jwt.claims','{"role":"service_role"}',true);
+update public.profiles set account_status='ACTIVE',is_admin=true where id='fd100000-0000-4000-8000-000000000002';
+update auth.users set deleted_at=now() where id='fd100000-0000-4000-8000-000000000002';
+select set_config('request.jwt.claims','{"sub":"fd100000-0000-4000-8000-000000000002","role":"authenticated","session_id":"fd200000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+do $$begin begin perform public.cbgpu_school_resource_contexts();raise exception 'DELETED_PLATFORM_CONTEXT_ALLOWED';exception when insufficient_privilege then null;end;end$$;
+reset role;
+update auth.users set deleted_at=null where id='fd100000-0000-4000-8000-000000000002';
+update auth.users set banned_until=now()+interval '1 day' where id='fd100000-0000-4000-8000-000000000002';
+set local role authenticated;
+do $$begin begin perform public.cbgpu_school_resource_contexts();raise exception 'BANNED_PLATFORM_CONTEXT_ALLOWED';exception when insufficient_privilege then null;end;end$$;
+reset role;
+update auth.users set banned_until=null where id='fd100000-0000-4000-8000-000000000002';
+
+update auth.sessions set not_after=now()-interval '1 second' where id='fd200000-0000-4000-8000-000000000002';
+set local role authenticated;
+do $$begin begin perform public.cbgpu_school_resource_contexts();raise exception 'EXPIRED_PLATFORM_SESSION_CONTEXT_ALLOWED';exception when insufficient_privilege then null;end;end$$;
+reset role;
+do $$begin if exists(select 1 from cbgpu_schools.memberships where user_id='fd100000-0000-4000-8000-000000000002') or not exists(select 1 from public.profiles where id='fd100000-0000-4000-8000-000000000002' and account_type='EXTERNAL' and not is_approved) then raise exception 'GUEST_GLOBAL_IDENTITY_MUTATED';end if;end$$;
+rollback;

@@ -129,10 +129,12 @@ pub async fn import_read_only(pool: &PgPool, source: &Path) -> Result<Value> {
         ("robot_commands", COMMANDS),
         ("robot_plans", PLANS),
     ] {
-        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM ai_store.{table}"))
-            .fetch_one(&mut *target)
-            .await
-            .map_err(db_error)?;
+        let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM ai_store.{table}"
+        )))
+        .fetch_one(&mut *target)
+        .await
+        .map_err(db_error)?;
         if count != 0 {
             return Err(fail(
                 "Native robotics target is not empty; import refused without changing existing data",
@@ -149,7 +151,7 @@ pub async fn import_read_only(pool: &PgPool, source: &Path) -> Result<Value> {
             counts.insert(table.into(), json!(0));
             continue;
         }
-        let description = sqlx::query(&format!("PRAGMA table_info({table})"))
+        let description = sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA table_info({table})")))
             .fetch_all(&mut *source_tx)
             .await
             .map_err(|_| invalid())?;
@@ -164,16 +166,18 @@ pub async fn import_read_only(pool: &PgPool, source: &Path) -> Result<Value> {
         {
             return Err(invalid());
         }
-        let rows = sqlx::query(&format!("SELECT * FROM {table} ORDER BY id"))
-            .fetch_all(&mut *source_tx)
-            .await
-            .map_err(|_| invalid())?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {table} ORDER BY id"
+        )))
+        .fetch_all(&mut *source_tx)
+        .await
+        .map_err(|_| invalid())?;
         for row in &rows {
             let value = transform(table, row)?;
-            sqlx::query(&format!("INSERT INTO ai_store.{table} SELECT * FROM jsonb_populate_record(NULL::ai_store.{table},$1)")).bind(&value).execute(&mut *target).await.map_err(|_|invalid())?;
-            let verified: bool = sqlx::query_scalar(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO ai_store.{table} SELECT * FROM jsonb_populate_record(NULL::ai_store.{table},$1)"))).bind(&value).execute(&mut *target).await.map_err(|_|invalid())?;
+            let verified: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT to_jsonb(r)=$1 FROM ai_store.{table} r WHERE id=$2"
-            ))
+            )))
             .bind(&value)
             .bind(
                 value
@@ -191,10 +195,12 @@ pub async fn import_read_only(pool: &PgPool, source: &Path) -> Result<Value> {
                 ));
             }
         }
-        let actual: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM ai_store.{table}"))
-            .fetch_one(&mut *target)
-            .await
-            .map_err(db_error)?;
+        let actual: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM ai_store.{table}"
+        )))
+        .fetch_one(&mut *target)
+        .await
+        .map_err(db_error)?;
         if actual != rows.len() as i64 {
             return Err(fail(
                 "Robotics snapshot count mismatch; import rolled back",

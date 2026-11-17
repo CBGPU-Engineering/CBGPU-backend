@@ -2,7 +2,7 @@ create role anon nologin;create role authenticated nologin;
 create schema auth;create schema cbgpu_accounts;
 create table auth.users(id uuid primary key,raw_user_meta_data jsonb default '{}',email_confirmed_at timestamptz default now(),deleted_at timestamptz,banned_until timestamptz);
 create table auth.sessions(id uuid primary key,user_id uuid references auth.users,not_after timestamptz);
-create table public.profiles(id uuid primary key references auth.users,full_name text,school_id text default 'cbsh',account_type text default 'STUDENT',account_status text default 'ACTIVE',affiliation_verified boolean default true,is_admin boolean default false,student_id text,student_id_school_year integer,department text,verified_at timestamptz);
+create table public.profiles(id uuid primary key references auth.users,full_name text,school_id text default 'cbsh',account_type text default 'STUDENT',account_status text default 'ACTIVE',affiliation_verified boolean default true,is_admin boolean default false,is_approved boolean default true,is_laser_cut_manager boolean default false,is_wakeup_manager boolean default false,student_id text,student_id_school_year integer,department text,verified_at timestamptz);
 create function auth.uid() returns uuid language sql stable as $$select (nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid$$;
 create function cbgpu_accounts.current_session_valid() returns boolean language sql stable as $$select exists(select 1 from auth.sessions s join auth.users u on u.id=s.user_id where u.id=auth.uid() and s.id=(nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'session_id')::uuid and(s.not_after is null or s.not_after>now()) and u.deleted_at is null and(u.banned_until is null or u.banned_until<=now()))$$;
 insert into auth.users(id) select ('00000000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid from generate_series(1,5)x;
@@ -32,3 +32,22 @@ create policy materials_read on public.shared_materials for select to authentica
 create policy materials_own on public.shared_materials for insert to authenticated with check(uploader_id=auth.uid());
 create policy cpu_own on public.cpu_projects to authenticated using(user_id=auth.uid());
 create function public.cbgpu_can_use_resource(resource text,target_school text default 'cbsh') returns boolean language sql security definer as $$select false$$;
+
+create table public.contest_award_ballots(contest_id uuid,voter_id uuid);
+
+create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claims',true),'')::jsonb,'{}'::jsonb)$$;
+
+alter table public.profiles enable row level security;grant select on public.profiles to authenticated;create policy legacy_profiles_read on public.profiles for select to authenticated using(true);
+create table public.printer_managers(user_id uuid,printer_id integer);
+create table public.print_jobs(id uuid default gen_random_uuid(),user_id uuid,manager_id uuid,preferred_printer_id integer,status text,plate_count integer default 1,plates_completed integer default 0);
+create table public.laser_jobs(id uuid default gen_random_uuid(),user_id uuid,manager_id uuid,status text);
+create function public.is_admin(uid uuid) returns boolean language sql stable security definer as $$select coalesce((select is_admin from public.profiles where id=uid),false)$$;
+create function public.is_laser_manager(uid uuid) returns boolean language sql stable security definer as $$select coalesce((select is_laser_cut_manager from public.profiles where id=uid),false)$$;
+create function public.is_3d_manager(uid uuid) returns boolean language sql stable security definer as $$select exists(select 1 from public.printer_managers where user_id=uid)$$;
+create function public.can_manage_printer(uid uuid,pid integer) returns boolean language sql stable security definer as $$select exists(select 1 from public.printer_managers where user_id=uid and printer_id=pid)$$;
+create table public.study_posts(id uuid primary key default gen_random_uuid(),user_id uuid,subject text,title text,description text,created_at timestamptz default now(),max_members integer default 4,is_open boolean default true);
+create table public.study_members(post_id uuid,user_id uuid,joined_at timestamptz default now(),primary key(post_id,user_id));
+alter table public.study_posts enable row level security;alter table public.study_members enable row level security;
+grant select,insert,update,delete on public.study_posts,public.study_members to authenticated;
+create policy study_read on public.study_posts for select to authenticated using(true);create policy study_write on public.study_posts to authenticated using(user_id=auth.uid());
+create policy member_read on public.study_members for select to authenticated using(true);create policy member_insert on public.study_members for insert to authenticated with check(user_id=auth.uid());

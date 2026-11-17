@@ -12,7 +12,7 @@ fs2 = "0.4"
 walkdir = "2"
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+rusqlite = { version = "=0.41.1", features = ["bundled", "backup"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 libc = "0.2"
 

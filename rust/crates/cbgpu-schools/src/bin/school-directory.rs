@@ -9,6 +9,29 @@ const ORIGIN: &str = "https://open.neis.go.kr";
 const DATASET: &str = "OPEN17020190531110010104913";
 const MAX_BYTES: usize = 20 * 1024 * 1024;
 
+fn official_homepage(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 2000 {
+        return None;
+    }
+    let mut url = url::Url::parse(value).ok()?;
+    let host = url.host_str()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !matches!(url.port(), None | Some(80 | 443))
+        || !matches!(url.host(), Some(url::Host::Domain(_)))
+        || !host.contains('.')
+        || ["localhost", ".localhost", ".local", ".internal"]
+            .iter()
+            .any(|suffix| host.ends_with(suffix))
+    {
+        return None;
+    }
+    url.set_fragment(None);
+    Some(url.into())
+}
+
 fn source_date(name: &str) -> Option<(u32, u32, u32)> {
     let (_, tail) = name.split_once('_')?;
     let (year, tail) = tail.split_once('년')?;
@@ -44,6 +67,7 @@ fn normalize(bytes: &[u8]) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
     let address = index("도로명주소")?;
     let phone = index("전화번호")?;
     let office = index("시도교육청코드")?;
+    let homepage = headers.iter().position(|h| h == "홈페이지주소");
     let mut ids = BTreeSet::new();
     let mut schools = Vec::new();
     let mut excluded = Vec::new();
@@ -77,6 +101,7 @@ fn normalize(bytes: &[u8]) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
             "official_id":official_id,"official_name":get(name),"display_name":get(name),
             "type":"HIGH_SCHOOL","region":get(region),"address":get(address),
             "contact_phone":get(phone),"education_office_code":get(office),
+            "homepage_url":homepage.and_then(|i|official_homepage(get(i))),
             "status":"LISTED","features":[],"verified_at":null
         }));
     }
@@ -164,6 +189,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn official_homepage_is_metadata_not_an_arbitrary_proxy_destination() {
+        assert_eq!(
+            official_homepage("https://school.cbe.go.kr/cbs-h#content"),
+            Some("https://school.cbe.go.kr/cbs-h".into())
+        );
+        for bad in [
+            "http://127.0.0.1/",
+            "http://169.254.169.254/",
+            "http://metadata.internal/",
+            "https://user:secret@school.example/",
+            "javascript:alert(1)",
+            "https://school.example:5432/",
+        ] {
+            assert!(official_homepage(bad).is_none())
+        }
+    }
     #[test]
     fn chronological_dates_are_not_lexicographic() {
         assert!(

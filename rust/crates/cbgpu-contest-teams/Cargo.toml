@@ -7,7 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "macros"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "macros"] }
 uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }

@@ -119,6 +119,8 @@ async fn deploy_redeploy_preserves_volumes_literals_and_resource_limits() {
     std::fs::write(f.source.join("web/Dockerfile"), "FROM nginx:alpine\n").unwrap();
     let mut prior = None;
     for revision in ["1", "2"] {
+        let generation = uuid::Uuid::new_v4().to_string();
+        f.config.platform_generation = Some(generation.clone());
         f.config.env_vars.insert("REVISION".into(), revision.into());
         let result = deploy(&f.config, &f.base, Some(&f.source)).await.unwrap();
         assert_eq!(
@@ -146,6 +148,21 @@ async fn deploy_redeploy_preserves_volumes_literals_and_resource_limits() {
             "127.0.0.1"
         );
         assert_eq!(managed["services"]["db"]["pids_limit"], 256);
+        assert_eq!(
+            result.platform_generation.as_deref(),
+            Some(generation.as_str())
+        );
+        let containers: Value =
+            serde_json::from_str(&docker(&["inspect", &format!("{}-web", f.namespace)])).unwrap();
+        assert_eq!(
+            containers[0]["Config"]["Labels"]["cbgpu.platform.generation"],
+            generation
+        );
+        assert_eq!(
+            containers[0]["Config"]["Labels"]["cbgpu.platform.project"],
+            f.id
+        );
+
         if let Some(volumes) = prior {
             assert_eq!(result.volumes, volumes);
         }
@@ -232,6 +249,7 @@ async fn unhealthy_services_retain_data_and_redacted_health_evidence() {
     )
     .unwrap();
     let attempt = cbgpu_compose_worker::Attempt {
+        platform_generation: None,
         namespace: f.namespace.clone(),
         file: release.join("compose-managed.json"),
         release: release.clone(),

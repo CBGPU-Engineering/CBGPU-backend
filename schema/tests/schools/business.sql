@@ -1,0 +1,109 @@
+-- Actual production functions/policies; synthetic identities only, rollback always.
+begin;
+insert into cbgpu_schools.schools(id,official_name,normalized_name,display_name,type,configuration,features) values('fixture-business-school','Synthetic Business School','synthetic business school','Synthetic Business School','HIGH_SCHOOL','{"join_policy":"APPROVAL_REQUIRED","student_id_policy":"SCHOOL_DEFINED","teacher_policy":"MANUAL_REVIEW","community_policy":"MEMBERS_ONLY"}',array['projects','contests','community']);
+insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data,aud,role,encrypted_password,email_confirmed_at,created_at,updated_at)
+select ('f1000000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,'synthetic-business-'||x||'@fixture.invalid',jsonb_build_object('full_name','Synthetic business '||x,'account_type_request','EXTERNAL','school_join_request',jsonb_build_object('school_id','fixture-business-school','type','STUDENT','student_number','AB-'||x)),'{}','authenticated','authenticated','fixture-no-password',now(),now(),now() from generate_series(1,3)x;
+insert into auth.sessions(id,user_id) select ('f2000000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,('f1000000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid from generate_series(1,3)x;
+update cbgpu_schools.memberships set status='ACTIVE',verified=true where school_id='fixture-business-school';
+insert into public.contests(id,host_id,title,fields,school_id,access_scope,participation_mode,allow_individual_entries,team_min_size,team_max_size,registration_opens_at,registration_closes_at,event_start_at,ends_at)
+values('f3000000-0000-4000-8000-000000000001','f1000000-0000-4000-8000-000000000001','Synthetic public contest','[{"id":"f5000000-0000-4000-8000-000000000001","type":"text","label":"Fixture answer","description":"","required":false}]','fixture-business-school','PUBLIC','individual',false,2,3,now()-interval '1 day',now()+interval '12 hours',now()+interval '1 day',now()+interval '2 days'),
+('f3000000-0000-4000-8000-000000000002','f1000000-0000-4000-8000-000000000001','Synthetic B team contest','[{"id":"f5000000-0000-4000-8000-000000000001","type":"text","label":"Fixture answer","description":"","required":false}]','fixture-business-school','SCHOOL','team',true,2,3,now()-interval '1 day',now()+interval '12 hours',now()+interval '1 day',now()+interval '2 days'),
+('f3000000-0000-4000-8000-000000000003','f1000000-0000-4000-8000-000000000001','Synthetic CBsh contest','[{"id":"f5000000-0000-4000-8000-000000000001","type":"text","label":"Fixture answer","description":"","required":false}]','cbsh','SCHOOL','individual',false,2,3,now()-interval '1 day',now()+interval '12 hours',now()+interval '1 day',now()+interval '2 days');
+create temp table business_values(name text,value uuid);grant all on business_values to authenticated;
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000002","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+select count(*) from public.register_contest_entry('f3000000-0000-4000-8000-000000000001','Synthetic Two','{}','individual');
+select count(*) from public.register_contest_entry('f3000000-0000-4000-8000-000000000002','Synthetic Two','{}','team_create','Fixture team');
+insert into business_values select 'team',id from public.contest_teams where contest_id='f3000000-0000-4000-8000-000000000002';
+insert into business_values select 'join',join_code from public.contest_teams where contest_id='f3000000-0000-4000-8000-000000000002';
+do $$begin begin perform * from public.register_contest_entry('f3000000-0000-4000-8000-000000000003','Cross school denied','{}','individual');raise exception 'CROSS_SCHOOL_REGISTRATION_ALLOWED';exception when insufficient_privilege then null;end;end$$;
+reset role;
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000003","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000003"}',true);
+set local role authenticated;
+select count(*) from public.register_contest_entry('f3000000-0000-4000-8000-000000000001','Synthetic Three','{}','individual');
+select count(*) from public.register_contest_entry('f3000000-0000-4000-8000-000000000002','Synthetic Three','{}','team_join',null,(select value from business_values where name='join'));
+insert into public.contest_submissions(contest_id,user_id,participant_name,student_id,answers,student_id_consent) values('f3000000-0000-4000-8000-000000000001',auth.uid(),'Synthetic Three','AB-3','{}',true);
+reset role;
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000002","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+insert into public.contest_submissions(contest_id,user_id,participant_name,student_id,answers,student_id_consent) values('f3000000-0000-4000-8000-000000000001',auth.uid(),'Synthetic Two','AB-2','{}',true);
+insert into public.contest_submissions(contest_id,user_id,participant_name,student_id,answers,team_id,student_id_consent) values('f3000000-0000-4000-8000-000000000002',auth.uid(),'Fixture team','AB-2','{}',(select value from business_values where name='team'),true);
+select public.contest_awards_api('f3000000-0000-4000-8000-000000000001','showcase',jsonb_build_object('submission_user_id',auth.uid(),'title','Fixture project','summary','Fixture showcase','enabled',true));
+reset role;
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000003","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000003"}',true);
+set local role authenticated;
+update public.contest_submissions set participant_name='Shared team edit' where contest_id='f3000000-0000-4000-8000-000000000002';
+reset role;
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000001","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000001"}',true);
+set local role authenticated;
+select public.contest_awards_api('f3000000-0000-4000-8000-000000000001','configure',jsonb_build_object('enabled',true,'starts_at',now()-interval '1 hour','closes_at',now()+interval '2 hours','categories',jsonb_build_array(jsonb_build_object('id','f4000000-0000-4000-8000-000000000001','name','Fixture award','description','Synthetic'))));
+reset role;
+insert into business_values select 'showcase',id from public.contest_showcases where contest_id='f3000000-0000-4000-8000-000000000001';
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000003","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000003"}',true);
+set local role authenticated;
+select public.contest_awards_api('f3000000-0000-4000-8000-000000000001','vote',jsonb_build_object('category_id','f4000000-0000-4000-8000-000000000001','showcase_id',(select value from business_values where name='showcase')));
+reset role;
+do $$begin
+ if(select count(*) from public.profiles where id::text like 'f1000000-%' and account_type='EXTERNAL' and is_approved=false and is_admin=false)<>3 then raise exception 'PRIMARY_PRIVILEGES_CHANGED';end if;
+ if not exists(select 1 from public.contest_submissions where contest_id='f3000000-0000-4000-8000-000000000002' and user_id='f1000000-0000-4000-8000-000000000002' and participant_name='Shared team edit') then raise exception 'SHARED_SUBMISSION_FAILED';end if;
+end$$;
+-- School-relative external sponsorship does not require global CBsh approval.
+insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data,aud,role,encrypted_password,email_confirmed_at,created_at,updated_at) values('f1000000-0000-4000-8000-000000000004','synthetic-guest@fixture.invalid','{"full_name":"Synthetic Guest","account_type_request":"EXTERNAL"}','{}','authenticated','authenticated','fixture-no-password',now(),now(),now());
+insert into auth.sessions(id,user_id) values('f2000000-0000-4000-8000-000000000004','f1000000-0000-4000-8000-000000000004');
+update cbgpu_schools.memberships set school_roles=array['SCHOOL_OWNER','SCHOOL_ADMIN'] where school_id='fixture-business-school' and user_id='f1000000-0000-4000-8000-000000000001';
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000002","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+insert into business_values select 'guest_request',(public.cbgpu_school_guest_api('create',jsonb_build_object('school_id','fixture-business-school','external_email','synthetic-guest@fixture.invalid','project_name','Synthetic collaboration','purpose','Fixture collaboration only','resources',jsonb_build_array('contests'),'starts_at',now()+interval '1 hour','ends_at',now()+interval '2 hours'))#>>'{request,id}')::uuid;
+reset role;
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000001","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000001"}',true);
+set local role authenticated;
+select public.cbgpu_school_guest_api('review',jsonb_build_object('school_id','fixture-business-school','id',(select value from business_values where name='guest_request'),'decision','APPROVE'));
+reset role;
+do $$begin if cbgpu_accounts.can_user_use_resource('f1000000-0000-4000-8000-000000000004','contests','fixture-business-school') then raise exception 'FUTURE_GUEST_ACCESS_ALLOWED';end if;end$$;
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000004","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000004"}',true);
+set local role authenticated;
+do $$begin if exists(select 1 from public.contests where id='f3000000-0000-4000-8000-000000000002') then raise exception 'FUTURE_GUEST_FORM_VISIBLE';end if;end$$;
+reset role;
+update cbgpu_accounts.guest_requests set starts_at=now()-interval '1 minute' where id=(select value from business_values where name='guest_request');
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000004","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000004"}',true);
+set local role authenticated;
+do $$begin if not exists(select 1 from public.contests where id='f3000000-0000-4000-8000-000000000002') then raise exception 'ACTIVE_GUEST_FORM_HIDDEN_BEFORE_ENTRY';end if;end$$;
+select count(*) from public.register_contest_entry('f3000000-0000-4000-8000-000000000002','Synthetic guest','{}','individual');
+reset role;
+do $$begin if cbgpu_accounts.can_user_use_resource('f1000000-0000-4000-8000-000000000004','gpu','cbsh') then raise exception 'GUEST_SCOPE_ESCALATION';end if;end$$;
+update cbgpu_accounts.guest_requests set starts_at=now()-interval '2 minutes',ends_at=now()-interval '1 minute' where id=(select value from business_values where name='guest_request');
+do $$begin if cbgpu_accounts.can_user_use_resource('f1000000-0000-4000-8000-000000000004','contests','fixture-business-school') then raise exception 'EXPIRED_GUEST_ACCESS_ALLOWED';end if;end$$;
+set local role authenticated;
+do $$begin if exists(select 1 from public.contests where id='f3000000-0000-4000-8000-000000000002') then raise exception 'EXPIRED_GUEST_NEW_CONTENT_VISIBLE';end if;if not exists(select 1 from public.event_registrations where contest_id='f3000000-0000-4000-8000-000000000002' and user_id=auth.uid()) then raise exception 'EXPIRED_GUEST_OWN_HISTORY_LOST';end if;end$$;
+update public.event_registrations set status='cancelled' where contest_id='f3000000-0000-4000-8000-000000000002' and user_id=auth.uid();
+reset role;
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000001","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000001"}',true);
+set local role authenticated;
+select public.cbgpu_school_guest_api('review',jsonb_build_object('school_id','fixture-business-school','id',(select value from business_values where name='guest_request'),'decision','REVOKE'));
+reset role;
+do $$begin if(select account_type from public.profiles where id='f1000000-0000-4000-8000-000000000004')<>'EXTERNAL' or exists(select 1 from cbgpu_schools.memberships where user_id='f1000000-0000-4000-8000-000000000004') then raise exception 'GUEST_IDENTITY_OR_ROLE_CHANGED';end if;end$$;
+-- Real scoped-token path for an EXTERNAL user with no school membership.
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000004","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000004"}',true);
+set local role cbgpu_contest_tokens_backend;
+select contest_api.mint(decode(repeat('04',32),'hex'),'Public external fixture',array['contests:read','contests:register','contests:cancel'],array['f3000000-0000-4000-8000-000000000001'::uuid],1);
+select contest_api.register_allowed(decode(repeat('04',32),'hex'),'f3000000-0000-4000-8000-000000000001','Synthetic no-school participant','{}','individual',null,null);
+select contest_api.read_allowed(decode(repeat('04',32),'hex'),'f3000000-0000-4000-8000-000000000001',true);
+do $$begin
+ begin
+  perform contest_api.mint(decode(repeat('05',32),'hex'),'Forbidden school fixture',array['contests:register'],array['f3000000-0000-4000-8000-000000000003'::uuid],1);
+  raise exception 'TOKEN_SCHOOL_RESOURCE_BYPASS';
+ exception when sqlstate 'PT403' then null;end;
+end$$;
+select contest_api.cancel_allowed(decode(repeat('04',32),'hex'),'f3000000-0000-4000-8000-000000000001');
+reset role;
+do $$begin
+ if not exists(select 1 from public.event_registrations where contest_id='f3000000-0000-4000-8000-000000000001' and user_id='f1000000-0000-4000-8000-000000000004' and status='cancelled') then raise exception 'TOKEN_OWNER_CANCELLATION_FAILED';end if;
+ if exists(select 1 from cbgpu_schools.memberships where user_id='f1000000-0000-4000-8000-000000000004') or(select is_approved from public.profiles where id='f1000000-0000-4000-8000-000000000004') then raise exception 'TOKEN_GRANTED_BLANKET_AFFILIATION';end if;
+end$$;
+delete from auth.sessions where id='f2000000-0000-4000-8000-000000000004';
+set local role cbgpu_contest_tokens_backend;
+do $$begin
+ begin perform contest_api.read_allowed(decode(repeat('04',32),'hex'),'f3000000-0000-4000-8000-000000000001',true);raise exception 'TOKEN_REVOKED_PARENT_SESSION_ACCEPTED';exception when sqlstate 'PT401' then null;end;
+end$$;
+reset role;
+rollback;

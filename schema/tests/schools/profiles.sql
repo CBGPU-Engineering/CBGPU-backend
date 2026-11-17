@@ -1,0 +1,24 @@
+begin;
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000002","session_id":"10000000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+select public.assert_true((select count(*)=0 from public.profiles where id='00000000-0000-4000-8000-000000000001'),'SchoolB administrator cannot read SchoolA primary profile');
+select public.assert_true((select count(*)=1 from public.profiles where id=auth.uid()),'own identity remains visible');
+reset role;
+-- Current assigned printer manager remains functional without generic approval.
+update public.profiles set account_status='PENDING_VERIFICATION',affiliation_verified=false,is_approved=false where id='00000000-0000-4000-8000-000000000004';
+insert into public.printer_managers values('00000000-0000-4000-8000-000000000004',1);
+insert into public.print_jobs(user_id,manager_id,preferred_printer_id,status) values('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000004',1,'pending'),('00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000001',2,'pending');
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000004","session_id":"10000000-0000-4000-8000-000000000004"}',true);
+set local role authenticated;
+select public.assert_true((select count(*)=1 from public.cbgpu_manufacturing_profiles('print',array['00000000-0000-4000-8000-000000000002'::uuid,'00000000-0000-4000-8000-000000000005'::uuid])),'manager only resolves own assigned printer requester');
+select public.assert_true(public.cbgpu_self_session_status()->>'valid'='true' and public.cbgpu_self_session_status()->>'approved'='false','manufacturing role does not imply timetable teacher permission');
+reset role;
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000002","session_id":"10000000-0000-4000-8000-000000000002"}',true);
+set local role authenticated;
+select public.assert_true((select count(*)=1 from public.cbgpu_manufacturing_managers('print',null,array['00000000-0000-4000-8000-000000000004'::uuid])),'owner retains historical manager label after resource expiry');
+reset role;
+delete from auth.sessions where user_id='00000000-0000-4000-8000-000000000002';
+set local role authenticated;
+select public.assert_true(public.cbgpu_self_session_status()=jsonb_build_object('valid',false,'approved',false,'school_id',null),'revoked JWT self oracle contains no identity');
+reset role;
+rollback;

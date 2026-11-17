@@ -23,15 +23,17 @@
     "id": "cbgpu-embeddings"
   },
   "transcribe": {
-    "repo": "Systran/faster-whisper-large-v3",
-    "revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "repo": "ggerganov/whisper.cpp",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
     "files": [
-      "*.json",
-      "*.txt",
-      "model.bin"
+      "ggml-large-v3.bin"
     ],
     "license": "MIT",
-    "id": "cbgpu-whisper"
+    "id": "cbgpu-whisper",
+    "local_dir": "transcribe-native",
+    "sha256": {
+      "ggml-large-v3.bin": "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2"
+    }
   },
   "coder": {
     "repo": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
@@ -61,5 +63,18 @@
     ],
     "license": "Apache-2.0",
     "id": "cbgpu-oss"
+  },
+  "vad": {
+    "repo": "ggml-org/whisper-vad",
+    "revision": "9ffd54a1e1ee413ddf265af9913beaf518d1639b",
+    "files": [
+      "ggml-silero-v5.1.2.bin"
+    ],
+    "license": "MIT",
+    "id": "cbgpu-whisper-vad",
+    "local_dir": "transcribe-native",
+    "sha256": {
+      "ggml-silero-v5.1.2.bin": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
+    }
   }
 }

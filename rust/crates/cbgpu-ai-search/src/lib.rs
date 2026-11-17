@@ -5,6 +5,46 @@ use cbgpu_ai_models::{Candidate, rank};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
 
+pub fn authorization_mode(values: impl IntoIterator<Item = Option<String>>) -> Result<bool> {
+    let mut enabled = false;
+    for value in values.into_iter().flatten() {
+        match value.as_str() {
+            "" | "0" | "false" => {}
+            "1" | "true" => enabled = true,
+            _ => anyhow::bail!("Invalid search authorization configuration"),
+        }
+    }
+    Ok(enabled)
+}
+pub fn authorization_from_environment() -> Result<bool> {
+    let values = ["CBGPU_ACCOUNT_V2", "CBGPU_MULTISCHOOL_V1"]
+        .into_iter()
+        .map(|key| match std::env::var(key) {
+            Ok(value) => Ok(Some(value)),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(_) => anyhow::bail!("Invalid search authorization configuration"),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    authorization_mode(values)
+}
+#[cfg(test)]
+mod flag_tests {
+    #[test]
+    fn scopes_never_fall_back_when_school_mode_is_enabled() {
+        for off in [None, Some(""), Some("0"), Some("false")] {
+            for on in ["1", "true"] {
+                assert!(
+                    super::authorization_mode([off.map(str::to_owned), Some(on.into())]).unwrap()
+                );
+            }
+        }
+        for bad in ["TRUE", "False", " 1", "0 ", "tru"] {
+            assert!(super::authorization_mode([Some("1".into()), Some(bad.into())]).is_err());
+        }
+        assert!(!super::authorization_mode([None, Some("".into())]).unwrap());
+    }
+}
+
 pub fn owned_job(folder: &Path, state: &Path) -> Result<String> {
     let root = state.canonicalize()?;
     let folder = folder.canonicalize()?;

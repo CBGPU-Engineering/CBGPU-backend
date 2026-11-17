@@ -54,10 +54,8 @@ async fn run() -> Result<()> {
         })
         .connect(&std::env::var("CBGPU_AI_CORPUS_POLICY_DATABASE_URL")?)
         .await?;
-    let corpus = Corpus::new(runtime, policy).with_account_v2(matches!(
-        std::env::var("CBGPU_ACCOUNT_V2").as_deref(),
-        Ok("1" | "true")
-    ));
+    let corpus = Corpus::new(runtime, policy)
+        .with_account_v2(cbgpu_ai_search::authorization_from_environment()?);
     // Validate active owner before loading model weights or opening source files.
     let snapshot = corpus.trusted_job(&job).await?;
     corpus.candidate_sources(&snapshot).await?;

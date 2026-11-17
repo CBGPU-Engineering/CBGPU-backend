@@ -35,6 +35,8 @@ pub struct Config {
     pub private_host: Option<String>,
     #[serde(default)]
     pub school_host: Option<String>,
+    #[serde(default)]
+    pub platform_generation: Option<String>,
 }
 fn nullable_branch<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
@@ -70,6 +72,8 @@ pub struct Attempt {
     pub socket: PathBuf,
     #[serde(default = "storage_budget")]
     pub storage_gb: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_generation: Option<String>,
 }
 fn storage_budget() -> u64 {
     40
@@ -123,9 +127,23 @@ impl Redactor {
             .replace_all(&text, "${1}[REDACTED]@")
             .into_owned()
     }
+    pub fn framed_lines(&self, text: &str) -> Vec<String> {
+        self.clean(text)
+            .lines()
+            .map(|line| {
+                format!(
+                    "| {}",
+                    line.chars()
+                        .map(|c| if c.is_control() { ' ' } else { c })
+                        .take(6000)
+                        .collect::<String>()
+                )
+            })
+            .collect()
+    }
     pub fn log(&self, text: &str) {
-        for line in self.clean(text).lines() {
-            println!("| {}", line.chars().take(6000).collect::<String>());
+        for line in self.framed_lines(text) {
+            println!("{line}");
         }
     }
 }
@@ -284,6 +302,38 @@ pub fn validate_config(cfg: &Config) -> Result<(u64, f64)> {
         return Err("Invalid access scope".into());
     }
     Ok((size as u64, cpu))
+}
+/// Infrastructure-owned immutable generation labels; customer Compose cannot forge them.
+pub fn apply_platform_generation(raw: &mut Value, cfg: &Config) -> Result<Option<String>> {
+    let generation = cfg
+        .platform_generation
+        .as_ref()
+        .map(|v| {
+            uuid::Uuid::parse_str(v)
+                .map(|v| v.to_string())
+                .map_err(|_| "Invalid platform generation".to_string())
+        })
+        .transpose()?;
+    let services = raw["services"]
+        .as_object_mut()
+        .ok_or("Invalid managed services")?;
+    for service in services.values_mut() {
+        if service.get("labels").is_none() || service["labels"].is_null() {
+            service["labels"] = json!({})
+        }
+        let labels = service["labels"]
+            .as_object_mut()
+            .ok_or("Invalid service labels")?;
+        labels.retain(|key, _| {
+            !key.starts_with("cbgpu.platform.")
+                && (generation.is_none() || !key.starts_with("com.docker.compose."))
+        });
+        if let Some(g) = &generation {
+            labels.insert("cbgpu.platform.generation".into(), json!(g));
+            labels.insert("cbgpu.platform.project".into(), json!(cfg.id));
+        }
+    }
+    Ok(generation)
 }
 pub async fn prepare(
     cfg: &Config,
@@ -515,6 +565,7 @@ pub async fn prepare(
             extra_address: extra,
         },
     )?;
+    let platform_generation = apply_platform_generation(&mut normalized, cfg)?;
     let services = normalized["services"]
         .as_object()
         .ok_or("Invalid services")?
@@ -554,6 +605,7 @@ pub async fn prepare(
     redactor.values.sort_by_key(|v| std::cmp::Reverse(v.len()));
     Ok((
         Attempt {
+            platform_generation,
             namespace,
             file: managed,
             release,

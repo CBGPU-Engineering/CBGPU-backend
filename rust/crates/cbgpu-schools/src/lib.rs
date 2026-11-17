@@ -21,6 +21,7 @@ pub const FEATURES: &[&str] = &[
 ];
 pub struct Config {
     pub enabled: bool,
+    pub central_cpu_enabled: bool,
     pub backend_url: String,
     pub anon_key: String,
     pub client: reqwest::Client,
@@ -66,12 +67,25 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         .split('/')
         .collect::<Vec<_>>();
     let method = request.method().clone();
+    if path.iter().any(|part| {
+        matches!(
+            *part,
+            "central-cpu" | "central-cpu-access" | "central-cpu-pool"
+        )
+    }) && !config.central_cpu_enabled
+    {
+        return failure(
+            StatusCode::NOT_FOUND,
+            "Central CPU is not enabled",
+            "FEATURE_DISABLED",
+        );
+    }
     let public = (method == Method::GET && path.as_slice() == ["v1", "features"])
         || method == Method::GET
             && path.first() == Some(&"v1")
             && path.get(1) == Some(&"schools")
             && path.len() <= 3;
-    let auth = bearer(&request);
+    let auth = if public { None } else { bearer(&request) };
     if !public && auth.is_none() {
         return failure(
             StatusCode::UNAUTHORIZED,
@@ -82,10 +96,54 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
     let query = request.uri().query().unwrap_or("").to_owned();
     let query_fields: serde_json::Map<String, Value> =
         url::form_urlencoded::parse(query.as_bytes())
-            .filter(|(key, _)| ["q", "limit", "offset", "status"].contains(&key.as_ref()))
+            .filter(|(key, _)| {
+                ["q", "limit", "offset", "status", "school_id", "purpose"].contains(&key.as_ref())
+            })
             .map(|(key, value)| (key.into_owned(), Value::String(value.into_owned())))
             .collect();
     let route = match (path.as_slice(), &method) {
+        (["v1", "admin", "central-cpu-pool"], &Method::GET) => {
+            Some(("central_cpu_pool_get", json!({})))
+        }
+        (["v1", "admin", "central-cpu-pool"], &Method::PATCH) => {
+            Some(("central_cpu_pool_set", json!({})))
+        }
+        (["v1", "central-cpu-access"], &Method::GET) => Some((
+            "central_cpu_self",
+            json!({"purpose":query_fields.get("purpose")}),
+        )),
+        (["v1", "admin", "schools", school, "central-cpu"], &Method::GET) => {
+            Some(("central_cpu_get", json!({"school_id":school})))
+        }
+        (["v1", "admin", "schools", school, "central-cpu"], &Method::PATCH) => {
+            Some(("central_cpu_set", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "affiliation-requests"], &Method::GET) => {
+            Some(("affiliation_own", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "affiliation-requests"], &Method::POST) => {
+            Some(("affiliation_create", json!({"school_id":school})))
+        }
+        (
+            [
+                "v1",
+                "schools",
+                school,
+                "affiliation-requests",
+                id,
+                "withdraw",
+            ],
+            &Method::POST,
+        ) => Some(("affiliation_withdraw", json!({"school_id":school,"id":id}))),
+        (["v1", "admin", "schools", school, "affiliation-requests"], &Method::GET) => {
+            Some(("affiliation_inbox", json!({"school_id":school})))
+        }
+        (["v1", "admin", "affiliation-requests"], &Method::GET) => {
+            Some(("affiliation_platform_inbox", json!({})))
+        }
+        (["v1", "admin", "affiliation-requests", id, "review"], &Method::POST) => {
+            Some(("affiliation_review", json!({"id":id})))
+        }
         (["v1", "features"], &Method::GET) => Some(("feature_catalog", {
             let fields = url::form_urlencoded::parse(query.as_bytes())
                 .filter(|(key, _)| key == "school_id")
@@ -98,6 +156,10 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         }
         (["v1", "schools", school], &Method::GET) => Some(("school", json!({"school_id":school}))),
         (["v1", "memberships"], &Method::GET) => Some(("memberships", json!({}))),
+        (["v1", "resource-contexts"], &Method::GET) => Some(("resource_contexts", json!({}))),
+        (["v1", "schools", school, "resource-access"], &Method::GET) => {
+            Some(("resource_access", json!({"school_id":school})))
+        }
         (["v1", "current-school"], &Method::POST) => Some(("select_school", json!({}))),
         (["v1", "schools", school, "memberships"], &Method::POST) => {
             Some(("join", json!({"school_id":school})))
@@ -133,11 +195,46 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         (["v1", "admin", "school-applications", id, "review"], &Method::POST) => {
             Some(("platform_review", json!({"id":id})))
         }
+        (["v1", "admin", "feature-requests"], &Method::GET) => {
+            Some(("feature_operator_list", Value::Object(query_fields.clone())))
+        }
+        (["v1", "admin", "feature-requests", id], &Method::PATCH) => {
+            Some(("feature_operator_review", json!({"id":id})))
+        }
         (["v1", "schools", school, "feature-requests"], &Method::GET) => {
             Some(("feature_requests", json!({"school_id":school})))
         }
         (["v1", "schools", school, "feature-requests"], &Method::POST) => {
             Some(("feature_request_create", json!({"school_id":school})))
+        }
+        (["v1", "messaging", "preferences"], &Method::GET) => Some(("dm_preferences", json!({}))),
+        (["v1", "messaging", "preferences"], &Method::PATCH) => {
+            Some(("dm_preferences_save", json!({})))
+        }
+        (["v1", "direct-recipients"], &Method::GET) => Some(("dm_recipients", {
+            let mut fields = serde_json::Map::new();
+            for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+                if ["scope", "school_id"].contains(&k.as_ref()) {
+                    fields.insert(k.into_owned(), json!(v));
+                }
+            }
+            Value::Object(fields)
+        })),
+        (["v1", "direct-conversations"], &Method::GET) => Some(("dm_conversations", json!({}))),
+        (["v1", "direct-conversations"], &Method::POST) => {
+            Some(("dm_conversation_create", json!({})))
+        }
+        (["v1", "direct-conversations", id, "messages"], &Method::GET) => {
+            Some(("dm_direct_messages", json!({"conversation_id":id})))
+        }
+        (["v1", "direct-conversations", id, "messages"], &Method::POST) => {
+            Some(("dm_direct_send", json!({"conversation_id":id})))
+        }
+        (["v1", "direct-messages", id], &Method::DELETE) => {
+            Some(("dm_direct_delete", json!({"id":id})))
+        }
+        (["v1", "direct-messages", id, "report"], &Method::POST) => {
+            Some(("dm_direct_report", json!({"id":id})))
         }
         (["v1", "messages"], &Method::GET) => Some(("messages", {
             let mut fields = query_fields.clone();
@@ -153,16 +250,68 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         (["v1", "messages", id, "report"], &Method::POST) => {
             Some(("message_report", json!({"id":id})))
         }
+        (["v1", "message-mutes"], &Method::GET) => Some(("message_mutes", json!({}))),
         (["v1", "message-mutes"], &Method::POST) => Some(("message_mute", json!({}))),
         (["v1", "publications"], &Method::GET) => Some(("publication_list", json!({}))),
         (["v1", "publications"], &Method::POST) => Some(("publication_save", json!({}))),
+        (["v1", "schools", school, "guest-requests"], &Method::GET) => {
+            Some(("guest_list", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "guest-requests"], &Method::POST) => {
+            Some(("guest_create", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "guest-requests", id, "review"], &Method::POST) => {
+            Some(("guest_review", json!({"school_id":school,"id":id})))
+        }
+        (["v1", "schools", school, "life-sources"], &Method::GET) => {
+            Some(("life_sources", json!({"school_id":school})))
+        }
+        (["v1", "admin", "schools", school, "life-sources"], &Method::GET) => {
+            Some(("life_sources", json!({"school_id":school})))
+        }
+        (["v1", "admin", "schools", school, "life-sources"], &Method::PATCH) => {
+            Some(("life_configure", json!({"school_id":school})))
+        }
+        (
+            [
+                "v1",
+                "admin",
+                "schools",
+                school,
+                "academic",
+                action @ ("preview" | "history"),
+            ],
+            &Method::GET,
+        ) => {
+            let mut fields = query_fields.clone();
+            for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+                if key == "school_year" {
+                    fields.insert(key.into_owned(), json!(value));
+                }
+            }
+            fields.insert("school_id".into(), json!(school));
+            Some((
+                if *action == "preview" {
+                    "academic_preview"
+                } else {
+                    "academic_history"
+                },
+                Value::Object(fields),
+            ))
+        }
+        (["v1", "admin", "schools", school, "academic", "execute"], &Method::POST) => {
+            Some(("academic_execute", json!({"school_id":school})))
+        }
+        (["v1", "schools", school, "academic", "reverify"], &Method::POST) => {
+            Some(("academic_reverify", json!({"school_id":school})))
+        }
         _ => None,
     };
     let Some((action, mut payload)) = route else {
         return failure(StatusCode::NOT_FOUND, "School route not found", "NOT_FOUND");
     };
     if method != Method::GET {
-        let bytes = match to_bytes(request.into_body(), 65536).await {
+        let bytes = match to_bytes(request.into_body(), 262144).await {
             Ok(v) => v,
             Err(_) => {
                 return failure(
@@ -204,6 +353,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             ]
             .contains(&k.as_str())
                 && !(action == "review_member" && k == "school_roles")
+                && !(["central_cpu_set", "central_cpu_pool_set"].contains(&action) && k == "status")
         }) {
             return failure(
                 StatusCode::BAD_REQUEST,
@@ -264,15 +414,72 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         "cbgpu_school_api"
     };
     let (rpc, rpc_action) = match action {
+        "central_cpu_pool_get" => ("cbgpu_platform_cpu_api", "pool_get"),
+        "central_cpu_pool_set" => ("cbgpu_platform_cpu_api", "pool_set"),
+        "central_cpu_self" => ("cbgpu_platform_cpu_api", "self"),
+        "central_cpu_get" => ("cbgpu_platform_cpu_api", "get"),
+        "central_cpu_set" => ("cbgpu_platform_cpu_api", "set"),
+        "affiliation_own"
+        | "affiliation_create"
+        | "affiliation_withdraw"
+        | "affiliation_inbox"
+        | "affiliation_platform_inbox"
+        | "affiliation_review" => (
+            "cbgpu_school_affiliation_api",
+            action.strip_prefix("affiliation_").unwrap(),
+        ),
+        "dm_preferences"
+        | "dm_preferences_save"
+        | "dm_recipients"
+        | "dm_conversations"
+        | "dm_conversation_create"
+        | "dm_direct_messages"
+        | "dm_direct_send"
+        | "dm_direct_delete"
+        | "dm_direct_report" => (
+            "cbgpu_school_direct_messaging_api",
+            action.strip_prefix("dm_").unwrap(),
+        ),
+        "messages" | "message_create" | "message_delete" | "message_report" | "message_mute"
+        | "message_mutes" => ("cbgpu_school_messenger_api", action),
+        "draft_create" => ("cbgpu_school_catalog_application_api", "draft_create"),
+        "feature_operator_list" => ("cbgpu_school_feature_operator_api", "list"),
+        "feature_operator_review" => ("cbgpu_school_feature_operator_api", "review"),
         "publication_list" => ("cbgpu_public_project_api", "list"),
         "publication_save" => ("cbgpu_public_project_api", "save"),
+        "resource_contexts" => ("cbgpu_school_resource_contexts", action),
+        "resource_access" => ("cbgpu_self_resource_access", action),
+        "academic_preview" => ("cbgpu_school_academic_api", "preview"),
+        "academic_history" => ("cbgpu_school_academic_api", "history"),
+        "academic_execute" => ("cbgpu_school_academic_api", "execute"),
+        "academic_reverify" => ("cbgpu_school_academic_api", "reverify"),
+        "guest_list" => ("cbgpu_school_guest_api", "list"),
+        "guest_create" => ("cbgpu_school_guest_api", "create"),
+        "guest_review" => ("cbgpu_school_guest_api", "review"),
+        "life_sources" => ("cbgpu_school_life_sources", action),
+        "life_configure" => ("cbgpu_school_life_configure", action),
         _ => (rpc, action),
+    };
+    let rpc_body = match action {
+        "resource_contexts" => json!({}),
+        "resource_access" => json!({"target_school":payload["school_id"]}),
+        "life_sources" => json!({"p_school_id":payload["school_id"]}),
+        "life_configure" => {
+            let school = payload["school_id"].clone();
+            let mut settings = payload.clone();
+            settings
+                .as_object_mut()
+                .expect("route payload object")
+                .remove("school_id");
+            json!({"p_school_id":school,"p_payload":settings})
+        }
+        _ => json!({"action":rpc_action,"payload":payload}),
     };
     let mut call = config
         .client
         .post(format!("{}/rest/v1/rpc/{rpc}", config.backend_url))
         .header("apikey", &config.anon_key)
-        .json(&json!({"action":rpc_action,"payload":payload}));
+        .json(&rpc_body);
     if let Some(auth) = auth {
         call = call.header("authorization", auth);
     } else {
@@ -306,8 +513,9 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             } else {
                 let status = match value["code"].as_str() {
                     Some("42501") => StatusCode::FORBIDDEN,
-                    Some("23505") => StatusCode::CONFLICT,
+                    Some("23505" | "40001") => StatusCode::CONFLICT,
                     Some("P0002") => StatusCode::NOT_FOUND,
+                    Some("P0429") => StatusCode::TOO_MANY_REQUESTS,
                     _ => StatusCode::BAD_REQUEST,
                 };
                 {

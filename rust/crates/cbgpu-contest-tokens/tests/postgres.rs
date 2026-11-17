@@ -45,7 +45,7 @@ async fn scoped_grants_preserve_existing_rpc_rules_and_reject_expiry_revocation_
     ] {
         let bytes = std::fs::read(repo.join(file)).unwrap();
         sources.push((file, Sha256::digest(&bytes)));
-        sqlx::raw_sql(std::str::from_utf8(&bytes).unwrap())
+        sqlx::raw_sql(sqlx::AssertSqlSafe(std::str::from_utf8(&bytes).unwrap()))
             .execute(&admin)
             .await
             .unwrap();
@@ -58,7 +58,7 @@ async fn scoped_grants_preserve_existing_rpc_rules_and_reject_expiry_revocation_
         let bytes = std::fs::read(repo.join(file)).unwrap();
         sources.push((file, Sha256::digest(&bytes)));
         for _ in 0..2 {
-            sqlx::raw_sql(std::str::from_utf8(&bytes).unwrap())
+            sqlx::raw_sql(sqlx::AssertSqlSafe(std::str::from_utf8(&bytes).unwrap()))
                 .execute(&admin)
                 .await
                 .unwrap_or_else(|e| panic!("{file}: {e}"));
@@ -66,7 +66,7 @@ async fn scoped_grants_preserve_existing_rpc_rules_and_reject_expiry_revocation_
     }
     for role in ["anon", "authenticated"] {
         let mut tx = admin.begin().await.unwrap();
-        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {role}")))
             .execute(&mut *tx)
             .await
             .unwrap();
@@ -318,7 +318,7 @@ async fn scoped_grants_preserve_existing_rpc_rules_and_reject_expiry_revocation_
         .register(&hidden_hash, id(7), &registration("individual"))
         .await
         .unwrap();
-    sqlx::raw_sql(&format!("ALTER POLICY contests_read ON public.contests USING(host_id=auth.uid()OR id NOT IN('{}'::uuid,'{}'::uuid))",id(7),id(8))).execute(&admin).await.unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("ALTER POLICY contests_read ON public.contests USING(host_id=auth.uid()OR id NOT IN('{}'::uuid,'{}'::uuid))",id(7),id(8)))).execute(&admin).await.unwrap();
     let (_, blocked_hash) = generate();
     assert_eq!(
         store

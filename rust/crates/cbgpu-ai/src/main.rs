@@ -17,13 +17,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
-                    "Native private AI API. Configure CBGPU_AI_DATABASE_URL, CBGPU_AI_STATE, CBGPU_AI_KEY_FILE and CBGPU_AI_BACKEND_KEY_FILE. CBGPU_AI_NATIVE_RUNNER explicitly attaches the reservation-first scheduler; omitted means API-only candidate. Default loopback port 13550."
+                    "Native private AI API. Configure CBGPU_AI_DATABASE_URL, CBGPU_AI_STATE, CBGPU_AI_KEY_FILE and CBGPU_AI_BACKEND_KEY_FILE. CBGPU_AI_NATIVE_RUNNER explicitly attaches the reservation-first scheduler; omitted preserves legacy behavior. CBGPU_AI_MODE=api-only explicitly disables all local execution and OCR, even with a runner environment; all-in-one requires a runner. Default loopback port 13550."
                 );
                 return Ok(());
             }
             _ => return Err("Unknown option".into()),
         }
     }
+    let runtime_mode = cbgpu_ai::mode::RuntimeMode::from_environment()?;
+    let attach_runner =
+        runtime_mode.attach_runner(std::env::var_os("CBGPU_AI_NATIVE_RUNNER").is_some())?;
     let address: std::net::SocketAddr = std::env::var("CBGPU_AI_LISTEN")
         .unwrap_or("127.0.0.1:13550".into())
         .parse()?;
@@ -57,24 +60,26 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         service_key: std::fs::read_to_string(std::env::var("CBGPU_AI_BACKEND_KEY_FILE")?)?
             .trim()
             .to_owned(),
-        account_v2: matches!(
-            std::env::var("CBGPU_ACCOUNT_V2").ok().as_deref(),
-            Some("1" | "true")
-        ),
+        account_v2: cbgpu_ai::scoped_authorization_from_environment()?,
         client: reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(10))
             .build()?,
     };
-    let api = Arc::new(Api::new(
-        store,
-        key,
-        authorization,
-        std::env::var("CBGPU_AI_OCR_IMAGE").unwrap_or("cbgpu-ocr:rust1-candidate".into()),
-    ));
+    let api = Arc::new(
+        Api::new(
+            store,
+            key,
+            authorization,
+            std::env::var("CBGPU_AI_OCR_IMAGE").unwrap_or("cbgpu-ocr:rust1-candidate".into()),
+        )
+        .with_runtime_mode(runtime_mode),
+    );
     let listener = tokio::net::TcpListener::bind(address).await?;
-    let scheduler = if let Some(path) = std::env::var_os("CBGPU_AI_NATIVE_RUNNER") {
+    let scheduler = if attach_runner {
+        let path = std::env::var_os("CBGPU_AI_NATIVE_RUNNER")
+            .ok_or("Explicit native runner is required")?;
         let runner = cbgpu_ai::runner::NativeRunner::new(
             PathBuf::from(path),
             std::env::var("CBGPU_AI_JOB_IMAGE")

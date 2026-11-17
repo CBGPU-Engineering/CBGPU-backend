@@ -46,8 +46,31 @@ Required API configuration:
 | `CBGPU_AI_DATA_ROOT` | Optional existing bulk upload/workspace root |
 | `CBGPU_AI_REQUIRE_DATA_MOUNT=1` | Fail closed if configured bulk mount is absent |
 
-Scheduling is attached only when `CBGPU_AI_NATIVE_RUNNER` names an absolute native
-`cbgpu-ai-inference` ELF executable. Omitting it starts an API-only candidate.
+`CBGPU_AI_MODE=api-only` explicitly separates the central control plane from
+school execution. It ignores an inherited `CBGPU_AI_NATIVE_RUNNER`, creates no
+scheduler/instance lease, performs no local NVIDIA/reservation probes, launches
+no model/customer-code/OCR subprocesses, and does not extract uncached documents.
+Owned cached text/evidence and ordinary history, upload metadata, cancellation
+and authenticated queue admission remain available. Tasks persist as queued;
+health/status reports `NO_EXECUTOR`, never a working remote worker.
+
+`GET /health/ready` in this mode checks the PostgreSQL queue schema and reports
+`control_plane_ready` separately from `execution_ready:false`. An API-only process
+must not be used as evidence that submitted jobs can currently execute.
+
+With the mode unset or empty, existing behavior remains unchanged: scheduling
+attaches only when `CBGPU_AI_NATIVE_RUNNER` names an absolute native
+`cbgpu-ai-inference` ELF executable; document preparation can still run locally.
+`CBGPU_AI_MODE=all-in-one` makes that requirement explicit and refuses startup
+without a runner. Unknown/whitespace/case-variant mode values fail startup.
+
+Moving this API process does not implement school-node inference. Remote
+executor authentication, scoped durable claims/leases, authorized attachment and
+artifact transfer, node isolation, cancellation, retries and loss recovery still
+require a separate reviewed implementation. Signed GPU inventory enrollment is
+not a job-dispatch channel and enables no sharing. Keep existing execution at
+school and do not start independent schedulers against the same queue merely
+because the API is reachable.
 Configure `CBGPU_AI_MODELS_RUNNER` with the absolute separately built
 `cbgpu-ai-models` ELF for embedding/search/transcription. Assigned GPU execution
 requires the models binary built with its `cuda` feature; a CPU-only binary
@@ -166,3 +189,52 @@ ports, imports all twelve legacy core/robotics tables, checks original SQLite
 bytes, restores the private snapshot in a temporary directory, rejects queued
 work and repeat imports, and forbids rollback after a new native row. It never
 queries real systemd units or uses the production AI ports.
+
+## Scoped authorization and remaining operational gate
+
+`CBGPU_MULTISCHOOL_V1=1` or `CBGPU_ACCOUNT_V2=true` selects fresh school-resource
+oracles; `1` and `true` are equivalent. Malformed configured flags stop startup.
+The scheduler checks the owner's current GPU scope before claiming a job and
+again during execution. Trusted native subprocesses receive the canonical
+effective policy flag; customer-code containers receive no host policy/database
+credentials. Private owned records use fresh global identity checks, separately
+from GPU approval: pending affiliation and graduation preserve ownership, while
+suspension, deletion or a ban deny access.
+
+Jobs are personal owner-bound work; there is no project editor impersonation.
+Creator browser-session IDs are not persisted as an additional job lease. The
+trusted BFF must authenticate the real caller freshly before admission; runtime
+revocation uses current identity and scoped resource permission. A browser logout
+alone is not represented as cancellation of an already admitted background job.
+
+Production switching still requires a drained admission barrier, stopped/masked
+legacy writer, idle old/native listeners, a private immutable state/files backup,
+reviewed PostgreSQL provisioning, core plus robotics import and equality checks.
+A zero queued-job snapshot while the Python writer remains active is insufficient.
+`cbgpu-ai-handoff` implements the explicit import and rollback checks; rollback
+must refuse after any new native writes. Native API availability alone does not
+prove model, OCR, web-search or corpus worker readiness. Validate the configured
+native model executables, trusted CUDA libraries, OCR image and scoped corpus
+policy connection before a separately reviewed routing change. Private notes are
+not added to the shared corpus. These changes do not activate production.
+
+Scoped execution uses the derived `ai` permission: current GPU permission **and**
+the school's effective AI module policy (global enabled state, allowed-school
+restriction, local configuration). Disabling AI cancels admitted AI workers and
+blocks new jobs, web search and document preparation without revoking notebook
+GPU access. Successful workers recheck policy before publishing completion.
+Existing owned files, extracted text, settings and history remain readable with
+a valid global identity. Guest requests still grant the underlying `gpu` scope;
+`ai` is a derived capability rather than a new guest-request approval scope.
+
+## Native model data preparation
+
+`cbgpu-ai-prepare-models MANIFEST ABSOLUTE_MODELS_ROOT` is an offline plan.
+Adding `--apply` explicitly downloads the reviewed revision/data allowlist with
+no cached Hugging Face credentials or proxy configuration. Every redirect uses
+approved HTTPS data hosts and fresh public DNS pinning. Weights verify SHA256;
+small Git-backed files verify their pinned blob identity, and every final file
+receives a recorded SHA256 digest. Existing changed assets and symlink targets
+are refused. This prepares data only: native CUDA/llama libraries, FFmpeg and the
+OCR image remain separately provisioned prerequisites. No GPU work, runtime
+installation, database migration or service activation is performed.

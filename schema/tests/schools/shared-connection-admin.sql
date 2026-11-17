@@ -1,0 +1,25 @@
+begin;
+create or replace function pg_temp.assert_true(value boolean,label text) returns void language plpgsql as $$begin if value is distinct from true then raise exception '%',label;end if;end$$;
+insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data,aud,role,encrypted_password,email_confirmed_at,created_at,updated_at)
+select ('f8100000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,'synthetic-credential-admin-'||x||'@fixture.invalid','{"full_name":"Synthetic credential test","account_type_request":"EXTERNAL"}','{}','authenticated','authenticated','fixture-no-password',now(),now(),now() from generate_series(1,2)x;
+insert into auth.sessions(id,user_id) select ('f8200000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,('f8100000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid from generate_series(1,2)x;
+select set_config('request.jwt.claims','{"role":"service_role"}',true);
+update public.profiles set is_admin=true where id='f8100000-0000-4000-8000-000000000001';
+select set_config('request.jwt.claims','{"sub":"f8100000-0000-4000-8000-000000000001","session_id":"f8200000-0000-4000-8000-000000000001","role":"authenticated"}',true);
+set local role authenticated;
+select pg_temp.assert_true(public.cbgpu_shared_connection_admin(),'fresh administrator admitted');
+reset role;
+update auth.sessions set not_after=now()-interval '1 second' where id='f8200000-0000-4000-8000-000000000001';
+set local role authenticated;
+select pg_temp.assert_true(not public.cbgpu_shared_connection_admin(),'revoked administrator session denied');
+reset role;
+select set_config('request.jwt.claims','{"sub":"f8100000-0000-4000-8000-000000000002","session_id":"f8200000-0000-4000-8000-000000000002","role":"authenticated"}',true);
+set local role authenticated;
+select pg_temp.assert_true(not public.cbgpu_shared_connection_admin(),'ordinary authenticated user denied');
+select pg_temp.assert_true((select count(*)=0 from public.eduset_settings),'ordinary user sees no credential ciphertext');
+reset role;
+set local role anon;
+select pg_temp.assert_true((select count(*)=0 from public.eduset_settings),'anonymous still sees no credential ciphertext');
+reset role;
+rollback;
+select 'SHARED_CONNECTION_ADMIN_TESTS_PASSED';

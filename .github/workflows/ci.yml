@@ -10,6 +10,22 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22
+      - run: rustup toolchain install 1.100.0 --profile minimal && rustup default 1.100.0
+      - run: cargo install cargo-audit --locked --version 0.23.0
+      - run: cargo audit --file rust/Cargo.lock
+      - run: npm ci --ignore-scripts --no-audit --no-fund && npm audit
+      - run: npm ci --ignore-scripts --no-audit --no-fund && npm audit
+        working-directory: developer
+      - run: npm ci --ignore-scripts --no-audit --no-fund && npm audit --audit-level=high
+        working-directory: infra/cloud
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -25,12 +41,10 @@ jobs:
       - run: npm run check:source
       - run: npm run build:browser
       - run: sudo apt-get update -qq && sudo apt-get install -y tmux
-      - run: node --test developer/tests/*.test.mts operations/study-refresh/*.test.mts operations/study-monitor/*.test.mts rust/compat/*.test.mts
-      - run: python3 -m unittest discover -s ai -p 'test_*.py'
-      - run: python3 -m compileall -q ai
+      - run: node --test developer/tests/*.test.mts operations/study-refresh/*.test.mts operations/study-monitor/*.test.mts operations/worker.test.mts rust/compat/*.test.mts
+      # Native AI parity is verified in the Rust job below; no legacy interpreter.
       - run: node scripts/verify-mail-queue.mts
       - run: node --check deploy/server.mts && node --check developer/server.mts
-      - run: python3 -m compileall -q scripts
       - run: node --check careers/public/app.js && node --check careers/public/theme.js && node --check careers/public/onboarding.js
       - run: node scripts/check-publication.mts
 
@@ -51,9 +65,14 @@ jobs:
       PGPASSWORD: ci-only-password
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22
       - run: rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy && rustup default 1.100.0
       - name: Native CPU model build dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y cmake clang libclang-dev
+      - name: Verify manifest-only SQLite compatibility patch
+        run: node scripts/check-vendored-sqlite.mts
       - run: cargo fmt --manifest-path rust/Cargo.toml --check
       - run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path rust/Cargo.toml
@@ -63,6 +82,12 @@ jobs:
         run: |
           cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-contest-teams --test awards_race -- --ignored
           cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-compose-worker --test cpu_diagnostics_pg -- --ignored
+      - name: Native portal cookie, principal, revocation and read-only import contracts
+        run: |
+          docker pull postgres:17-alpine
+          cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-portal-auth --test postgres -- --ignored
+      - name: Official ad report transaction, privacy and experiment contracts
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-ad-revenue --test postgres -- --ignored
       - name: Build static ingress binary
         env:
           CBGPU_SOURCE_SHA: ${{ github.sha }}
@@ -94,6 +119,14 @@ jobs:
         env:
           CBGPU_COMPOSE_RUN_DOCKER_TEST: '1'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-compose-worker --test docker_contract -- --ignored
+      - name: Native model preparation and notebook bridge retirement contracts
+        run: |
+          cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-ai --test model_assets --test native_resources
+          cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-gpu-gateway --test public_start
+          offline_model_plan=$(mktemp -d)
+          cargo run --locked --manifest-path rust/Cargo.toml -p cbgpu-ai --bin cbgpu-ai-prepare-models -- ai/models.json "$offline_model_plan/models"
+          test ! -e "$offline_model_plan/models"
+          cargo run --locked --manifest-path rust/Cargo.toml -p cbgpu-gpu-gateway --bin cbgpu-gpu-public-start -- --help
       - name: Isolated native AI storage, API and scheduler contracts
         run: |
           for database in cbgpu_ai_store_test cbgpu_ai_api_test cbgpu_ai_scheduler_test cbgpu_ai_handoff_test; do

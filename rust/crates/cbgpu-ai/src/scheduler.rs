@@ -58,6 +58,9 @@ impl Scheduler {
         self.stop.send_replace(true);
     }
     pub async fn start(self: Arc<Self>) -> Result<tokio::task::JoinHandle<()>> {
+        if !self.api.runtime_mode.local_execution() {
+            return Err(fail("NO_EXECUTOR: local scheduler is disabled", 503));
+        }
         if !self.runner.attached() {
             return Err(fail("Native inference runner is not attached", 503));
         }
@@ -86,6 +89,9 @@ impl Scheduler {
         }))
     }
     pub async fn tick(self: &Arc<Self>) -> Result<()> {
+        if !self.api.runtime_mode.local_execution() {
+            return Err(fail("NO_EXECUTOR: local scheduler is disabled", 503));
+        }
         if *self.stop.borrow() {
             return Ok(());
         }
@@ -346,6 +352,9 @@ impl Scheduler {
                         "Task failed. See the task log for details.".into(),
                     ));
                 }
+                // A fast worker can finish between periodic checks. Revalidate
+                // the effective module/resource policy before publishing success.
+                self.api.authorization.execution(owner).await?;
                 if job["kind"] == "python" {
                     atomic_json(
                         &folder.join("result.json"),

@@ -15,11 +15,41 @@ use std::{
     sync::{Arc, Mutex},
 };
 use subtle::ConstantTimeEq;
+pub mod mode;
+pub mod model_assets;
 pub mod preparation;
 pub mod resources;
 pub mod runner;
 pub mod scheduler;
 pub mod web;
+/// Server-side scope flags are authoritative; malformed configuration must not
+/// quietly select the old primary-profile authorization path.
+pub fn scoped_authorization_mode(values: impl IntoIterator<Item = Option<String>>) -> Result<bool> {
+    let mut enabled = false;
+    for value in values.into_iter().flatten() {
+        match value.as_str() {
+            "" | "0" | "false" => {}
+            "1" | "true" => enabled = true,
+            _ => return Err(fail("Invalid school authorization configuration", 503)),
+        }
+    }
+    Ok(enabled)
+}
+pub fn scoped_authorization_from_environment() -> Result<bool> {
+    let values = [
+        "CBGPU_MULTISCHOOL_V1",
+        "CBGPU_ACCOUNT_V2",
+        "NEXT_PUBLIC_CBGPU_ACCOUNT_V2",
+    ]
+    .into_iter()
+    .map(|key| match std::env::var(key) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(_) => Err(fail("Invalid school authorization configuration", 503)),
+    })
+    .collect::<Result<Vec<_>>>()?;
+    scoped_authorization_mode(values)
+}
 #[derive(Clone)]
 pub struct Authorization {
     pub backend_url: String,
@@ -28,6 +58,75 @@ pub struct Authorization {
     pub client: reqwest::Client,
 }
 impl Authorization {
+    /// Identity remains independent of school GPU rights: graduation/pending
+    /// affiliation retains owned records, suspension/deletion does not.
+    pub async fn identity(&self, owner: &str) -> Result<()> {
+        if !valid_id(owner) {
+            return Err(fail("Authentication required", 401));
+        }
+        let response = self
+            .client
+            .get(format!("{}/auth/v1/admin/users/{owner}", self.backend_url))
+            .header("apikey", &self.service_key)
+            .bearer_auth(&self.service_key)
+            .send()
+            .await
+            .map_err(|_| fail("Identity verification unavailable", 503))?;
+        if !response.status().is_success() {
+            return Err(fail("Identity verification unavailable", 503));
+        }
+        let raw: Value = response
+            .json()
+            .await
+            .map_err(|_| fail("Identity verification unavailable", 503))?;
+        let account = raw.get("user").filter(|v| v.is_object()).unwrap_or(&raw);
+        if account["id"] != owner || account.get("deleted_at").is_some_and(|v| !v.is_null()) {
+            return Err(fail("Account unavailable", 403));
+        }
+        if let Some(value) = account["banned_until"].as_str().filter(|v| !v.is_empty()) {
+            let until = chrono::DateTime::parse_from_rfc3339(value)
+                .map_err(|_| fail("Identity verification unavailable", 503))?;
+            if until.timestamp() as f64 > now() {
+                return Err(fail("Account unavailable", 403));
+            }
+        }
+        let columns = if self.account_v2 {
+            "id,account_status"
+        } else {
+            "id"
+        };
+        let response = self
+            .client
+            .get(format!("{}/rest/v1/profiles", self.backend_url))
+            .query(&[("id", format!("eq.{owner}")), ("select", columns.into())])
+            .header("apikey", &self.service_key)
+            .bearer_auth(&self.service_key)
+            .send()
+            .await
+            .map_err(|_| fail("Identity verification unavailable", 503))?;
+        if !response.status().is_success() {
+            return Err(fail("Identity verification unavailable", 503));
+        }
+        let rows: Value = response
+            .json()
+            .await
+            .map_err(|_| fail("Identity verification unavailable", 503))?;
+        let profile = rows
+            .as_array()
+            .filter(|v| v.len() == 1)
+            .and_then(|v| v.first())
+            .filter(|v| v["id"] == owner)
+            .ok_or_else(|| fail("Account unavailable", 403))?;
+        if self.account_v2
+            && !matches!(
+                profile["account_status"].as_str(),
+                Some("ACTIVE" | "PENDING_VERIFICATION" | "REVERIFICATION_REQUIRED")
+            )
+        {
+            return Err(fail("Account unavailable", 403));
+        }
+        Ok(())
+    }
     pub async fn execution(&self, owner: &str) -> Result<()> {
         if !valid_id(owner) {
             return Err(fail("Authentication required", 401));
@@ -69,7 +168,7 @@ impl Authorization {
                     "{}/rest/v1/rpc/cbgpu_service_can_use_resource",
                     self.backend_url
                 ))
-                .json(&json!({"user_id":owner,"resource":"gpu","target_school":"cbsh"}))
+                .json(&json!({"user_id":owner,"resource":"ai","target_school":"cbsh"}))
         } else {
             self.client
                 .get(format!("{}/rest/v1/profiles", self.backend_url))
@@ -100,12 +199,13 @@ impl Authorization {
             })
         };
         if !allowed {
-            return Err(fail("Verified school GPU permission is required", 403));
+            return Err(fail("Verified school AI permission is required", 403));
         }
         Ok(())
     }
 }
 pub struct Api {
+    pub runtime_mode: mode::RuntimeMode,
     pub store: Store,
     pub internal_key: Vec<u8>,
     pub authorization: Authorization,
@@ -177,6 +277,7 @@ impl Api {
         );
         let preparation = preparation::Preparation::new(store.clone(), ocr_image);
         Self {
+            runtime_mode: mode::RuntimeMode::Legacy,
             store,
             internal_key: key,
             authorization,
@@ -191,6 +292,18 @@ impl Api {
             rates: Mutex::new(HashMap::new()),
             upload_slots: Arc::new(tokio::sync::Semaphore::new(2)),
         }
+    }
+    pub fn with_runtime_mode(mut self, mode: mode::RuntimeMode) -> Self {
+        self.runtime_mode = mode;
+        self.preparation = self
+            .preparation
+            .with_local_execution(mode.local_execution());
+        if mode == mode::RuntimeMode::ApiOnly {
+            self.scheduler = tokio::sync::RwLock::new(
+                json!({"status":"no_executor","available":false,"reason":"NO_EXECUTOR","mode":"api-only","gpus":[],"detail":"Control plane only. Tasks remain queued until a reviewed executor is attached; remote execution is not configured."}),
+            );
+        }
+        self
     }
     fn authenticate(&self, h: &HeaderMap) -> Result<()> {
         let supplied = h.get("x-cbgpu-ai-key").map(|v| v.as_bytes()).unwrap_or(&[]);
@@ -257,6 +370,16 @@ async fn handle(api: Arc<Api>, request: Request) -> Result<Response> {
     }
     if p == ["health", "ready"] && method == Method::GET {
         let scheduler = api.scheduler.read().await.clone();
+        if api.runtime_mode == mode::RuntimeMode::ApiOnly {
+            let ready = sqlx::query("SELECT id FROM ai_store.jobs LIMIT 0")
+                .execute(&api.store.pool)
+                .await
+                .is_ok();
+            return Ok(json_response(
+                if ready { 200 } else { 503 },
+                json!({"control_plane_ready":ready,"execution_ready":false,"scheduler":scheduler}),
+            ));
+        }
         return Ok(json_response(
             if scheduler["available"] == true {
                 200
@@ -283,6 +406,7 @@ async fn handle(api: Arc<Api>, request: Request) -> Result<Response> {
         api.rate(&owner)?;
     }
     if p == ["uploads"] && method == Method::POST {
+        api.authorization.identity(&owner).await?;
         let _slot = api
             .upload_slots
             .clone()
@@ -331,12 +455,16 @@ async fn handle(api: Arc<Api>, request: Request) -> Result<Response> {
     } else {
         json!({})
     };
+    if !special && p != ["models"] {
+        api.authorization.identity(&owner).await?;
+    }
     let text = |key: &str| body[key].as_str().unwrap_or("");
     if p == ["authenticate-key"] && method == Method::POST {
-        return Ok(json_response(
-            200,
-            json!({"owner":api.store.key_owner(text("key")).await?}),
-        ));
+        return Ok(json_response(200, {
+            let owner = api.store.key_owner(text("key")).await?;
+            api.authorization.identity(&owner).await?;
+            json!({"owner":owner})
+        }));
     }
     if p == ["robotics", "agent", "enroll"] && method == Method::POST {
         return Ok(json_response(
@@ -351,6 +479,9 @@ async fn handle(api: Arc<Api>, request: Request) -> Result<Response> {
         ));
     }
     if p == ["web", "search"] && method == Method::POST {
+        if api.authorization.account_v2 {
+            api.authorization.execution(&owner).await?;
+        }
         return Ok(json_response(
             200,
             api.web.search(&owner, text("query"), false).await?,
@@ -621,6 +752,9 @@ async fn handle(api: Arc<Api>, request: Request) -> Result<Response> {
             }
         }
         if p == ["uploads", id, "prepare"] && method == Method::POST {
+            if api.authorization.account_v2 {
+                api.authorization.execution(&owner).await?;
+            }
             return Ok(json_response(
                 202,
                 json!({"file":api.preparation.start(&owner,id).await?}),

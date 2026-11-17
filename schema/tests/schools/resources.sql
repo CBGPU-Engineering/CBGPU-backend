@@ -9,7 +9,7 @@ insert into public.shared_materials(uploader_id,status,title) values('00000000-0
 select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000002","session_id":"10000000-0000-4000-8000-000000000002"}',false);
 -- School owner administration does not turn EXTERNAL into a GPU-enabled student.
 select public.assert_true(not cbgpu_accounts.can_user_use_resource(auth.uid(),'gpu','cbsh'),'B owner cannot borrow CBshGPU');
-select public.assert_true(not cbgpu_schools.features_allowed((select id from school_b),array['school_life']),'CBsh-specific module cannot be enabled for B');
+select public.assert_true(not cbgpu_schools.features_allowed((select id from school_b),array['cbsh_eduset']),'CBsh-specific module cannot be enabled for B');
 set role authenticated;
 select public.assert_true((select count(*)=1 from public.contests),'contest listing isolated actual SELECT');
 select public.assert_true((select count(*)=0 from public.research_notes),'shared notes isolated actual SELECT');
@@ -34,6 +34,9 @@ do $$begin begin perform public.cbgpu_school_extensions_api('messages','{"scope"
 insert into public.cpu_projects(user_id,title,school_id) select auth.uid(),'Permanent project',id from school_b;
 set role authenticated;
 select public.assert_true((select count(*)=1 from public.cpu_projects),'owned project survives resource revocation');
+insert into public.research_notes(user_id,is_shared,title) values(auth.uid(),false,'Personal after graduation');
+select public.assert_true((select count(*)=1 from public.research_notes),'personal unshared notes survive resource revocation');
+do $$begin begin update public.research_notes set is_shared=true where user_id=auth.uid();raise exception 'revoked school share allowed';exception when insufficient_privilege then null;end;end$$;
 reset role;
 select 'MULTISCHOOL_RESOURCE_TESTS_PASSED';
 -- Least-privilege mail worker receives one fixed-address payload, never table access.

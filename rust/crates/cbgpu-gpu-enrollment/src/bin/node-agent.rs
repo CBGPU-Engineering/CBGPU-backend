@@ -1,4 +1,8 @@
 //! Ubuntu-only foreground inventory reporter. Never changes drivers, daemons or GPU jobs.
+#[path = "node_agent/client.rs"]
+mod diagnostic_client;
+#[path = "node_agent/diagnostics.rs"]
+mod diagnostics;
 use cbgpu_gpu_enrollment::{GpuHealth, Health, Report, hex, unhex};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
@@ -115,7 +119,7 @@ fn endpoint(value: &str) -> Result<String, Box<dyn std::error::Error>> {
 fn collect() -> Result<Health, Box<dyn std::error::Error>> {
     let output = std::process::Command::new("/usr/bin/nvidia-smi")
         .args([
-            "--query-gpu=index,name,memory.total,memory.used,utilization.gpu",
+            "--query-gpu=index,name,memory.total,memory.used,utilization.gpu,uuid",
             "--format=csv,noheader,nounits",
         ])
         .output()?;
@@ -126,11 +130,12 @@ fn collect() -> Result<Health, Box<dyn std::error::Error>> {
     let mut gpus = vec![];
     for line in text.lines() {
         let p = line.split(',').map(str::trim).collect::<Vec<_>>();
-        if p.len() != 5 {
+        if p.len() != 6 {
             return Err("Unsupported NVIDIA inventory response".into());
         }
         gpus.push(GpuHealth {
             index: p[0].parse()?,
+            hardware_uuid: Some(p[5].into()),
             name: p[1].into(),
             memory_total_mib: p[2].parse()?,
             memory_used_mib: p[3].parse()?,
@@ -160,7 +165,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().is_some_and(|s| s == "--help") {
         println!(
-            "Ubuntu inventory only. init <https-origin> <private-token-file> <absolute-new-identity-file>; report <private-identity-file>; run <private-identity-file>. No drivers, services, jobs, sharing or daemon changes."
+            "Ubuntu inventory only. init <https-origin> <private-token-file> <absolute-new-identity-file>; report <private-identity-file> [--diagnostics <private-server-trust-json>]; run <private-identity-file> [--diagnostics <private-server-trust-json>]. Diagnostics are opt-in DIAGNOSTICS_ONLY, not notebook-ready. No drivers, services, jobs, sharing or daemon changes."
         );
         return Ok(());
     }
@@ -170,6 +175,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let client = reqwest::Client::builder()
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
@@ -217,15 +223,36 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("Private node identity saved. No execution or sharing enabled.");
         }
-        Some("report" | "run") if args.len() == 2 => {
+        Some("report" | "run")
+            if args.len() == 2 || (args.len() == 4 && args[2] == "--diagnostics") =>
+        {
             let path = Path::new(&args[1]);
             let _lock = lock_identity(path)?;
+            let mut diagnostics_client = None;
             loop {
                 let mut identity: Identity = serde_json::from_str(&private_read(path)?)?;
                 let url = endpoint(&identity.url)?;
                 let key = SigningKey::from_bytes(
                     &unhex::<32>(&identity.private_key).ok_or("Invalid node key")?,
                 );
+                if args.len() == 4 {
+                    if diagnostics_client.is_none() {
+                        diagnostics_client = Some(diagnostic_client::Client::open(
+                            path,
+                            Path::new(&args[3]),
+                            &url,
+                            &identity.node_id,
+                            identity.credential_version,
+                            key.clone(),
+                            client.clone(),
+                        )?);
+                    }
+                    if !diagnostics_client.as_ref().is_some_and(|value| {
+                        value.matches(&url, &identity.node_id, identity.credential_version, &key)
+                    }) {
+                        return Err("Diagnostic identity changed".into());
+                    }
+                }
                 identity.sequence = identity
                     .sequence
                     .checked_add(1)
@@ -252,6 +279,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .await?;
                 println!("Signed inventory accepted; no execution or sharing.");
+                if let Some(control) = diagnostics_client.as_mut() {
+                    match control
+                        .tick(std::sync::Arc::new(diagnostics::Nvidia::default()))
+                        .await
+                    {
+                        Ok(_) => println!(
+                            "Optional diagnostic control checked; sharing remains disabled."
+                        ),
+                        Err(_) => eprintln!(
+                            "Optional diagnostic control unavailable; no authority assumed."
+                        ),
+                    }
+                }
                 if args[0] == "report" {
                     break;
                 }

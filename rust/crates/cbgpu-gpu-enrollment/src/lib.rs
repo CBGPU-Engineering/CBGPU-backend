@@ -1,4 +1,5 @@
 //! Optional school GPU inventory. No scheduling, commands, execution or sharing endpoints.
+pub mod commands;
 use axum::{
     Json, Router,
     body::to_bytes,
@@ -14,6 +15,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct Config {
     pub enabled: bool,
+    pub diagnostics: Option<Arc<ed25519_dalek::SigningKey>>,
     pub backend_url: String,
     pub anon_key: String,
     pub service_key: String,
@@ -23,6 +25,8 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct GpuHealth {
     pub index: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware_uuid: Option<String>,
     pub name: String,
     pub memory_total_mib: u64,
     pub memory_used_mib: u64,
@@ -80,6 +84,9 @@ fn uuid(value: &str) -> bool {
             }
         })
 }
+pub fn valid_hardware_uuid(value: &str) -> bool {
+    value.len() == 40 && value.starts_with("GPU-") && uuid(&value[4..])
+}
 pub fn validate_report(r: &Report) -> bool {
     uuid(&r.node_id)
         && r.credential_version > 0
@@ -92,6 +99,7 @@ pub fn validate_report(r: &Report) -> bool {
             !g.name.is_empty()
                 && g.name.len() <= 120
                 && !g.name.chars().any(char::is_control)
+                && g.hardware_uuid.as_deref().is_none_or(valid_hardware_uuid)
                 && g.index < 256
                 && g.memory_total_mib > 0
                 && g.memory_total_mib <= 16_777_216
@@ -99,9 +107,15 @@ pub fn validate_report(r: &Report) -> bool {
                 && g.utilization_percent <= 100
         })
         && r.health.gpus.iter().enumerate().all(|(i, g)| {
-            !r.health.gpus[..i]
-                .iter()
-                .any(|other| other.index == g.index)
+            !r.health.gpus[..i].iter().any(|other| {
+                other.index == g.index
+                    || (g.hardware_uuid.is_some()
+                        && other
+                            .hardware_uuid
+                            .as_ref()
+                            .zip(g.hardware_uuid.as_ref())
+                            .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b)))
+            })
         })
 }
 pub fn verify_report(r: &Report, signature: &str, public_key: &str) -> bool {
@@ -121,7 +135,12 @@ pub fn verify_report(r: &Report, signature: &str, public_key: &str) -> bool {
         .is_ok()
 }
 fn fail(status: StatusCode, code: &str) -> Response {
-    (status, Json(json!({"error":code}))).into_response()
+    (
+        status,
+        [("Cache-Control", "private, no-store")],
+        Json(json!({"error":code})),
+    )
+        .into_response()
 }
 fn bearer(request: &Request) -> Option<String> {
     if request.headers().get_all("authorization").iter().count() != 1 {
@@ -147,7 +166,7 @@ async fn rpc(
     } else {
         &c.anon_key
     };
-    let response = c
+    let mut response = c
         .client
         .post(format!("{}/rest/v1/rpc/{name}", c.backend_url))
         .header("apikey", key)
@@ -167,12 +186,19 @@ async fn rpc(
             StatusCode::FORBIDDEN
         });
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    if bytes.len() > 256 * 1024 {
+    if response.content_length().is_some_and(|n| n > 256 * 1024) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+    {
+        if bytes.len() + chunk.len() > 256 * 1024 {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        bytes.extend_from_slice(&chunk);
     }
     serde_json::from_slice(&bytes).map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
 }
@@ -181,7 +207,7 @@ pub fn router(config: Config) -> Router {
 }
 async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     if request.uri().path() == "/health" {
-        return Json(json!({"ok":true,"enabled":c.enabled,"implementation":"native-rust","execution":false,"sharing":false})).into_response();
+        return Json(json!({"ok":true,"enabled":c.enabled,"implementation":"native-rust","execution":false,"sharing":false,"diagnostics_enabled":c.diagnostics.is_some(),"execution_ready":false})).into_response();
     }
     if !c.enabled {
         return fail(StatusCode::NOT_FOUND, "FEATURE_DISABLED");
@@ -192,6 +218,9 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     let auth = bearer(&request);
     if request.uri().query().is_some() {
         return fail(StatusCode::BAD_REQUEST, "QUERY_NOT_SUPPORTED");
+    }
+    if path.starts_with("/v1/gpu/commands/") {
+        return commands::device(&c, request).await;
     }
     let bytes = match to_bytes(request.into_body(), 16 * 1024).await {
         Ok(b) => b,
@@ -252,7 +281,7 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
         {
             return fail(StatusCode::FORBIDDEN, "INVALID_NODE_PROOF");
         }
-        rpc(&c,"school_gpu_store_report",json!({"p_node_id":s.report.node_id,"p_version":s.report.credential_version,"p_sequence":s.report.sequence,"p_reported_at":s.report.reported_at,"p_health":s.report.health}),None,true).await
+        rpc(&c,"school_gpu_store_resource_report",json!({"p_node_id":s.report.node_id,"p_version":s.report.credential_version,"p_sequence":s.report.sequence,"p_reported_at":s.report.reported_at,"p_health":s.report.health}),None,true).await
     } else if parts.len() >= 5 && parts[0] == "v1" && parts[1] == "schools" && parts[3] == "gpu" {
         let Some(auth) = auth else {
             return fail(StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED");
@@ -265,13 +294,52 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
         {
             return fail(StatusCode::BAD_REQUEST, "INVALID_SCHOOL");
         }
-        let (action, data) = match (&method, parts.as_slice()) {
-            (&Method::POST, [_, _, _, _, "enrollments"]) => ("mint", payload),
-            (&Method::GET, [_, _, _, _, "nodes"]) => ("list", json!({})),
+        let (action, data, resource) = match (&method, parts.as_slice()) {
+            (&Method::POST, [_, _, _, _, "enrollments"]) => ("mint", payload, false),
+            (&Method::GET, [_, _, _, _, "nodes"]) => ("list", json!({}), false),
             (&Method::POST, [_, _, _, _, "nodes", id, "revoke"])
                 if uuid(id) && payload.as_object().is_some_and(|o| o.is_empty()) =>
             {
-                ("revoke", json!({"node_id":id}))
+                ("revoke", json!({"node_id":id}), false)
+            }
+            (&Method::POST, [_, _, _, _, "nodes", id, "diagnostics"])
+                if uuid(id) && c.diagnostics.is_some() =>
+            {
+                let Some(fields) = payload.as_object() else {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                };
+                if fields.len() != 1 || !fields.contains_key("idempotency_key") {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                }
+                let mut data = payload.clone();
+                data["node_id"] = json!(id);
+                ("diagnostic_create", data, false)
+            }
+            (&Method::GET, [_, _, _, _, "nodes", id, "diagnostics"])
+                if uuid(id) && c.diagnostics.is_some() =>
+            {
+                ("diagnostic_list", json!({"node_id":id}), false)
+            }
+            (&Method::GET, [_, _, _, _, "resources"]) => ("list", json!({}), true),
+            (&Method::GET, [_, _, _, _, "reservations"]) => ("own", json!({}), true),
+            (&Method::POST, [_, _, _, _, "resources", id, "reservations"]) if uuid(id) => {
+                let Some(fields) = payload.as_object() else {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                };
+                if fields
+                    .keys()
+                    .any(|k| !["starts_at", "ends_at"].contains(&k.as_str()))
+                {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                }
+                let mut data = payload.clone();
+                data["resource_id"] = json!(id);
+                ("reserve", data, true)
+            }
+            (&Method::DELETE, [_, _, _, _, "reservations", id])
+                if uuid(id) && payload.as_object().is_some_and(|o| o.is_empty()) =>
+            {
+                ("cancel", json!({"reservation_id":id}), true)
             }
             _ => return fail(StatusCode::NOT_FOUND, "NOT_FOUND"),
         };
@@ -290,8 +358,12 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
         }
         rpc(
             &c,
-            "school_gpu_admin",
-            json!({"p_school_id":parts[2],"p_action":action,"p_payload":data}),
+            if action.starts_with("diagnostic_"){ "school_gpu_diagnostic_admin" } else if resource {
+                "school_gpu_resource_api"
+            } else {
+                "school_gpu_admin"
+            },
+            json!({"p_school_id":parts[2],"p_action":action.strip_prefix("diagnostic_").unwrap_or(action),"p_payload":data}),
             Some(&auth),
             false,
         )
@@ -299,6 +371,16 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     } else {
         return fail(StatusCode::NOT_FOUND, "NOT_FOUND");
     };
+    let result = result.map(|mut v| {
+        if path.ends_with("/diagnostics")
+            && let Some(key) = c.diagnostics.as_ref()
+        {
+            v["central_signing_public_key"] = json!(hex(key.verifying_key().as_bytes()));
+            v["capability"] = json!("DIAGNOSTICS_ONLY");
+            v["execution_ready"] = json!(false);
+        }
+        v
+    });
     match result {
         Ok(v) => (
             [
@@ -327,6 +409,7 @@ mod tests {
                 os: "ubuntu".into(),
                 gpus: vec![GpuHealth {
                     index: 0,
+                    hardware_uuid: None,
                     name: "GPU".into(),
                     memory_total_mib: 100,
                     memory_used_mib: 50,
@@ -373,6 +456,7 @@ mod tests {
         use tower::ServiceExt;
         let app = router(Config {
             enabled: false,
+            diagnostics: None,
             backend_url: "http://127.0.0.1:1".into(),
             anon_key: "not-a-secret".into(),
             service_key: "not-a-secret".into(),

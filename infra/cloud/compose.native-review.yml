@@ -1,0 +1,27 @@
+# Standalone disabled fixture. Never merge into or stop the production Compose project.
+services:
+  school-api:
+    image: cbgpu/native-school-api:cloud-review
+    build:
+      context: ${CBGPU_CLOUD_CONTEXT:?generate a private source-only context first}
+      dockerfile: Dockerfile
+      args:
+        CBGPU_PACKAGE: cbgpu-schools
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true
+    environment:
+      CBGPU_MULTISCHOOL_V1: "false"
+      CBGPU_SCHOOLS_LISTEN: "127.0.0.1:3546"
+      CBGPU_SCHOOLS_BACKEND_URL: "http://127.0.0.1:1"
+      CBGPU_SCHOOLS_ANON_KEY: "synthetic-review-key-no-production-access"
+      CBGPU_HEALTH_PORT: "3546"
+    # Deliberately no host ports, production volume mounts, Docker socket or credentials.
+    healthcheck:
+      test: [CMD, /cbgpu-healthcheck]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
