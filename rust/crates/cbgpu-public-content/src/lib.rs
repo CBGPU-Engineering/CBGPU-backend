@@ -55,6 +55,7 @@ const CONTEST_FIELDS: &[&str] = &[
     "title",
     "description",
     "organizer",
+    "organizer_school_names",
     "school_id",
     "school_name",
     "event_start_at",
@@ -104,6 +105,14 @@ fn project(value: &Value, fields: &[&str]) -> Option<Value> {
     let mut out = serde_json::Map::new();
     for field in fields {
         if let Some(value) = object.get(*field) {
+            if *field == "organizer_school_names"
+                && !value.is_null()
+                && !value
+                    .as_str()
+                    .is_some_and(|text| text.len() <= 20000 && !text.chars().any(char::is_control))
+            {
+                continue;
+            }
             if *field == "ads_enabled" && !value.is_boolean() {
                 continue;
             }
@@ -472,5 +481,23 @@ mod tests {
             json!({"items":[{"id":"public","title":"Owner published"}],"total":1})
         );
         task.abort();
+    }
+}
+
+#[cfg(test)]
+mod organizer_names_tests {
+    use super::*;
+    #[test]
+    fn accepted_school_names_are_scalar_only_without_private_actor_data() {
+        let row=project(&json!({"id":"fixture","organizer_school_names":"Synthetic School B","invited_by":"private-owner","invitations":[{"status":"INVITED"}]}),CONTEST_FIELDS).unwrap();
+        assert_eq!(row["organizer_school_names"], "Synthetic School B");
+        assert!(row.get("invited_by").is_none());
+        assert!(row.get("invitations").is_none());
+        let row = project(
+            &json!({"id":"fixture","organizer_school_names":{"private":"actor"}}),
+            CONTEST_FIELDS,
+        )
+        .unwrap();
+        assert!(row.get("organizer_school_names").is_none());
     }
 }
