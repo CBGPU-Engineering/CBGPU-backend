@@ -21,19 +21,25 @@ cutover. Never copy secret values into this document.
   Materials release `2d9` is live with scoped authorization. Existing files,
   encryption keys and history were preserved; materials admission is unfenced.
   This does not establish a completed Rust deployment-control handoff or S3 move.
-- Web release `e3` is serving verified public HTTPS traffic at this snapshot.
-  Git main `20cd` is the linear reconciliation with the same exact source tree;
-  its final immutable build is pending. Android downloads remain outside each
-  immutable web release and must be preserved through release packaging.
+- Web release `20cd21420ddb947699bba0e7022e74b4378f7283` is live, with exact
+  health SHA verified and GitHub main updated through a normal linear push. Its
+  source tree matches the preceding `e3` release. Android downloads remain outside
+  each immutable web release and were preserved through release packaging.
 - The `770207c` school timetable warm cron ran successfully against real school
   data: 34 cells across five days. Its private credential-file setting must remain
   server-only and survive subsequent delivery.
-- The delivery unit now points to the reviewed `9971a9c` native binary, including
-  warm-environment preservation. The watcher remains paused pending final web
-  SHA adoption and verification; this snapshot does not claim it has resumed.
+- The delivery unit uses the reviewed `9971a9c` native binary, including warm
+  environment preservation. Web state adopted `20cd` without changing backend
+  delivery state. The watcher has resumed (`paused=false`) and its timer is active.
+- The LaTeX gateway-only transition is live (`e03` runtime, source `9db29f6`).
+  The reviewed freeze verified all old gateway threads stopped and zero TCP
+  connections/receive queues before replacing only the idle gateway. Mongo
+  retained seven projects, nine users and matching ID/owner fingerprints. Compiler
+  PID `3095423` was untouched. New-school LaTeX compilation remains denied by the
+  explicit CBsh resource policy; a live gateway is not a cross-school compute grant.
 - The operating immutable Python AI service and root GPU controller remain
-  unchanged. Scoped GPU execution, external GPU sharing and the first LaTeX
-  gateway transition remain pending. Existing notebook kernels were not reset.
+  unchanged. Scoped GPU execution and external GPU sharing remain pending.
+  No AI, GPU, CE, Mongo or Redis restart or notebook-kernel reset occurred.
 - PostgreSQL, SQLite handoff sources, uploads, material bytes, project artifacts,
   encryption/signing keys and required configuration are persistent data.
   Email, GitHub, Firebase and school providers remain external dependencies.

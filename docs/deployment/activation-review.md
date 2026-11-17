@@ -24,15 +24,21 @@ public DTO privacy, missing-Bearer 401 and anonymous private-row/schema denial;
 it did not create an operating test account or send a provider email.
 
 Scoped Node.js deployment control `1b70506` and Materials `2d9` are live. Their files,
-keys and history were retained; materials admission is unfenced. Web `e3` is live;
-Git main `20cd` has the same exact tree through a linear reconciliation, with its
-final immutable build pending at this snapshot. The `770207c` timetable warm cron
+keys and history were retained; materials admission is unfenced. Web `20cd21420ddb947699bba0e7022e74b4378f7283` is live with exact health SHA
+verified and a normal linear GitHub main push. Its source tree matches the
+preceding `e3` release. The `770207c` timetable warm cron
 completed against actual school data (34 cells, five days). The `9971a9c` delivery
-binary/unit has been updated, but its watcher remains paused until final SHA
-adoption and verification.
+binary/unit is active; web state adopted `20cd` while backend state stayed
+unchanged. The watcher is resumed (`paused=false`) with its timer active.
 
 AI and the root GPU controller remain on their prior operating runtimes.
-The first LaTeX gateway transition remains pending. No GPU controller/kernel
+The LaTeX gateway-only transition is live (`e03` runtime/source `9db29f6`).
+Its reviewed freeze proved all old gateway threads stopped, zero TCP connections
+and empty receive queues before replacing only the idle gateway. Mongo retained
+seven projects, nine users and identical ID/owner fingerprints; compiler PID
+`3095423` was untouched. The private receipt is
+`aux/gateway-only-1794929656259` (`READY`). New-school LaTeX compilation remains
+denied by the explicit CBsh policy. No GPU, AI, CE, Mongo or Redis restart, kernel
 reset, external GPU sharing or AWS migration is implied. Dependency advisories
 and remaining runtime handoffs are separate work; this is not an all-Rust or
 security-clean completion claim.
@@ -190,7 +196,7 @@ owner must be resolved before proposing an operating change.
 | AI | Active immutable Python release `59ffb2b3ab4ac013b0cb4055e517d661848ef191`, port 3550; native unit absent/inactive | Rust source and Python retirement in the current repository do not establish a live Rust cutover. Preserve the immutable release and delivery hold. |
 | Deployment control | Scoped Node.js compatibility release `1b70506` live on Nov18 | Existing deployment files/keys/history retained; this is not a completed native PostgreSQL business-control handoff. |
 | Materials | Scoped release `2d9` live on Nov18; admission unfenced | Existing material bytes, keys and history preserved. This activation does not migrate bytes to S3. |
-| LaTeX | First gateway transition still pending on Nov18 | Preserve current projects and runtime until the separately reviewed handoff completes. |
+| LaTeX | Gateway-only `e03` / source `9db29f6` live on Nov18 | Idle gateway replaced after reviewed freeze/drain; seven Mongo projects and nine users retained with matching ID/owner fingerprints. Compiler unchanged; new-school compilation remains denied. |
 | GPU HTTP gateway | Active native user service with compatibility upstream | An authenticated HTTP ingress does not replace root controller ownership, fence every direct Jupyter/SSH route, or prove scoped runtime flags are enabled. |
 
 Fresh AI preflight observed 1,407 jobs, 25 conversations, 104 messages, 20 hashed
@@ -262,7 +268,8 @@ admission has actually been fenced.
   remain unimplemented; signed GPU enrollment enables inventory only.
 - **Further material-storage and LaTeX handoffs need separate review.** The Nov18
   scoped materials release is live, but its activation does not perform an S3
-  migration. The first LaTeX gateway transition remains pending. Verify the operating origin,
+  migration. The gateway-only LaTeX transition is live, while its compiler and CBsh-only
+  compute policy remain unchanged. Verify the operating origin,
   current writer, PostgreSQL state/roles, image source and shared-file access
   before changing flags. Materials migration requires an explicit validated
   inventory and genuine writer fence; it preserves source objects. LaTeX
