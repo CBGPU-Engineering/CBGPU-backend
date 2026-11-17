@@ -61,6 +61,10 @@ jobs:
         run: |
           cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-contest-teams --test awards_race -- --ignored
           cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-compose-worker --test cpu_diagnostics_pg -- --ignored
+      - name: Native portal cookie, principal, revocation and read-only import contracts
+        run: |
+          docker pull postgres:17-alpine
+          cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-portal-auth --test postgres -- --ignored
       - name: Build static ingress binary
         env:
           CBGPU_SOURCE_SHA: ${{ github.sha }}

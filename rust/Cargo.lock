@@ -828,6 +828,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbgpu-portal-auth"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "cbgpu-deploy-control",
+ "hmac",
+ "rand 0.8.8",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tower",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "cbgpu-public-content"
 version = "0.1.0"
 dependencies = [
