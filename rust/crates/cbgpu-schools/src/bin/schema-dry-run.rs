@@ -324,6 +324,8 @@ fn main() -> Result<()> {
         "20261117063714_school_resource_contexts.sql",
         "20261117065015_effective_school_feature_policy.sql",
         "20261117080536_guest_scoped_material_read.sql",
+        "20261117081449_eduset_contributor_membership_scope.sql",
+        "20261117082550_public_contest_banner_alias.sql",
     ];
     let sources = migrations
         .iter()
@@ -503,6 +505,44 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(
             repo.join("schema/tests/schools/effective-features.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/eduset-contributors.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/public-banner-assets.sql"),
         )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
