@@ -105,6 +105,9 @@ fn tenant_onboarding_resources_and_message_scopes() {
         "20261117013206_multi_school_features_messaging.sql",
         "20261117015504_explicit_public_school_content.sql",
         "20261117023150_school_scoped_guest_access.sql",
+        "20261117030138_school_life_source_registry.sql",
+        "20261117033941_self_session_status.sql",
+        "20261117035112_scoped_profile_projections.sql",
     ] {
         let text =
             std::fs::read_to_string(root.join("supabase/migrations").join(migration)).unwrap();
@@ -112,6 +115,8 @@ fn tenant_onboarding_resources_and_message_scopes() {
         db.sql(&text);
     }
     db.sql(&std::fs::read_to_string(root.join("schema/tests/schools/contract.sql")).unwrap());
+    db.sql(&std::fs::read_to_string(root.join("schema/tests/schools/life.sql")).unwrap());
     db.sql(&std::fs::read_to_string(root.join("schema/tests/schools/resources.sql")).unwrap());
     db.sql(&std::fs::read_to_string(root.join("schema/tests/schools/public.sql")).unwrap());
+    db.sql(&std::fs::read_to_string(root.join("schema/tests/schools/profiles.sql")).unwrap());
 }

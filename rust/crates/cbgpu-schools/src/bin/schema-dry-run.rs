@@ -1,4 +1,5 @@
 //! Explicit read-only operational snapshot -> network-isolated, same-image disposable clone.
+use sha2::{Digest, Sha256};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::{
     fs::{self, File, OpenOptions},
@@ -58,7 +59,7 @@ fn command(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
 fn snapshot(db: &str) -> Result<Vec<u8>> {
     let sql = r#"CREATE TEMP TABLE account_check(nsp text,tbl text,rows bigint,digest text);
 DO $$DECLARE r record;nr bigint;hash text;projection text;BEGIN FOR r IN SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND(n.nspname='public' OR(n.nspname='auth' AND c.relname IN('users','sessions'))) ORDER BY 1,2 LOOP
-projection:=CASE WHEN r.nspname='public' AND r.relname='profiles' THEN 'to_jsonb(t)-ARRAY[''account_type'',''account_status'',''school_id'',''affiliation_verified'',''verified_at'',''department'',''organization'',''required_school_year'',''required_grade'']' WHEN r.nspname='public' AND r.relname IN('contests','research_notes','shared_materials') THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'']' WHEN r.nspname='public' AND r.relname='cpu_projects' THEN 'to_jsonb(t)-''school_id''' ELSE 'to_jsonb(t)' END;
+projection:=CASE WHEN r.nspname='public' AND r.relname='profiles' THEN 'to_jsonb(t)-ARRAY[''account_type'',''account_status'',''school_id'',''affiliation_verified'',''verified_at'',''department'',''organization'',''required_school_year'',''required_grade'']' WHEN r.nspname='public' AND r.relname IN('contests','research_notes','shared_materials') THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'']' WHEN r.nspname='public' AND r.relname='contest_submissions' THEN 'to_jsonb(t)-ARRAY[''student_id_consent'',''student_id_consented_at'']' WHEN r.nspname='public' AND r.relname='study_posts' THEN 'to_jsonb(t)-ARRAY[''school_id'',''access_scope'',''allowed_school_ids'']' WHEN r.nspname='public' AND r.relname='cpu_projects' THEN 'to_jsonb(t)-''school_id''' ELSE 'to_jsonb(t)' END;
 EXECUTE format('SELECT count(*),md5(coalesce(string_agg(v::text,E''\n'' ORDER BY v::text),''''))FROM(SELECT %s v FROM %I.%I t)x',projection,r.nspname,r.relname) INTO nr,hash;
 INSERT INTO account_check VALUES(r.nspname,r.relname,nr,hash);END LOOP;END$$;
 COPY(SELECT * FROM account_check ORDER BY nsp,tbl)TO STDOUT WITH CSV;"#;
@@ -302,6 +303,7 @@ fn main() -> Result<()> {
     let migrations = [
         "20261116084450_account_access_rollover.sql",
         "20261116092500_account_resource_boundaries.sql",
+        "20261116142026_ai_corpus_policy_reader.sql",
         "20261116233927_account_contest_execution_guard.sql",
         "20261117011230_multi_school_identity_onboarding.sql",
         "20261117012655_multi_school_resource_boundaries.sql",
@@ -309,11 +311,29 @@ fn main() -> Result<()> {
         "20261117015504_explicit_public_school_content.sql",
         "20261117020000_school_gpu_enrollment.sql",
         "20261117023150_school_scoped_guest_access.sql",
+        "20261117030138_school_life_source_registry.sql",
+        "20261117032752_private_resource_rpc_boundaries.sql",
+        "20261117033941_self_session_status.sql",
+        "20261117035112_scoped_profile_projections.sql",
+        "20261117040558_contest_identity_snapshot_consent.sql",
+        "20261117043016_fresh_authenticated_resource_policies.sql",
     ];
+    let sources = migrations
+        .iter()
+        .map(|file| {
+            Ok((
+                *file,
+                fs::read(repo.join("supabase/migrations").join(file))?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let hashes=sources.iter().map(|(file,bytes)|serde_json::json!({"file":file,"sha256":format!("{:x}",Sha256::digest(bytes))})).collect::<Vec<_>>();
+    private_file(&backup.join("migration-hashes.json"))?
+        .write_all(&serde_json::to_vec_pretty(&hashes)?)?;
     for _ in 0..2 {
-        for file in migrations {
+        for (_, bytes) in &sources {
             let mut sql = b"SET ROLE supabase_admin;\n".to_vec();
-            sql.extend(fs::read(repo.join("supabase/migrations").join(file))?);
+            sql.extend_from_slice(bytes);
             command(
                 &[
                     "exec",
@@ -367,6 +387,25 @@ fn main() -> Result<()> {
             "ON_ERROR_STOP=1",
         ],
         Some(&fs::read(repo.join("schema/tests/schools/business.sql"))?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/read-boundaries.sql"),
+        )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
     let directory_sql = format!(

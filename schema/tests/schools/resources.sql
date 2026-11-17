@@ -9,7 +9,7 @@ insert into public.shared_materials(uploader_id,status,title) values('00000000-0
 select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000002","session_id":"10000000-0000-4000-8000-000000000002"}',false);
 -- School owner administration does not turn EXTERNAL into a GPU-enabled student.
 select public.assert_true(not cbgpu_accounts.can_user_use_resource(auth.uid(),'gpu','cbsh'),'B owner cannot borrow CBshGPU');
-select public.assert_true(not cbgpu_schools.features_allowed((select id from school_b),array['school_life']),'CBsh-specific module cannot be enabled for B');
+select public.assert_true(not cbgpu_schools.features_allowed((select id from school_b),array['cbsh_eduset']),'CBsh-specific module cannot be enabled for B');
 set role authenticated;
 select public.assert_true((select count(*)=1 from public.contests),'contest listing isolated actual SELECT');
 select public.assert_true((select count(*)=0 from public.research_notes),'shared notes isolated actual SELECT');

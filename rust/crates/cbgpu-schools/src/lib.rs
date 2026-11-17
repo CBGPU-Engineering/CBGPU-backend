@@ -71,7 +71,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             && path.first() == Some(&"v1")
             && path.get(1) == Some(&"schools")
             && path.len() <= 3;
-    let auth = bearer(&request);
+    let auth = if public { None } else { bearer(&request) };
     if !public && auth.is_none() {
         return failure(
             StatusCode::UNAUTHORIZED,
@@ -164,6 +164,12 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         }
         (["v1", "schools", school, "guest-requests", id, "review"], &Method::POST) => {
             Some(("guest_review", json!({"school_id":school,"id":id})))
+        }
+        (["v1", "schools", school, "life-sources"], &Method::GET) => {
+            Some(("life_sources", json!({"school_id":school})))
+        }
+        (["v1", "admin", "schools", school, "life-sources"], &Method::PATCH) => {
+            Some(("life_configure", json!({"school_id":school})))
         }
         _ => None,
     };
@@ -278,13 +284,28 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         "guest_list" => ("cbgpu_school_guest_api", "list"),
         "guest_create" => ("cbgpu_school_guest_api", "create"),
         "guest_review" => ("cbgpu_school_guest_api", "review"),
+        "life_sources" => ("cbgpu_school_life_sources", action),
+        "life_configure" => ("cbgpu_school_life_configure", action),
         _ => (rpc, action),
+    };
+    let rpc_body = match action {
+        "life_sources" => json!({"p_school_id":payload["school_id"]}),
+        "life_configure" => {
+            let school = payload["school_id"].clone();
+            let mut settings = payload.clone();
+            settings
+                .as_object_mut()
+                .expect("route payload object")
+                .remove("school_id");
+            json!({"p_school_id":school,"p_payload":settings})
+        }
+        _ => json!({"action":rpc_action,"payload":payload}),
     };
     let mut call = config
         .client
         .post(format!("{}/rest/v1/rpc/{rpc}", config.backend_url))
         .header("apikey", &config.anon_key)
-        .json(&json!({"action":rpc_action,"payload":payload}));
+        .json(&rpc_body);
     if let Some(auth) = auth {
         call = call.header("authorization", auth);
     } else {

@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     body::Body,
-    http::{Request, StatusCode},
+    http::{HeaderMap, Request, StatusCode},
     routing::{get, post},
 };
 use cbgpu_schools::{Config, router};
@@ -60,7 +60,7 @@ async fn disabled_default_and_identity_spoof_are_denied() {
 }
 #[tokio::test]
 async fn public_projection_query_and_private_error_sanitization() {
-    let mock=Router::new().route("/auth/v1/user",get(||async{Json(json!({"id":"trusted"}))})).route("/rest/v1/rpc/cbgpu_school_api",post(|Json(v):Json<Value>|async move{if v["action"]=="directory"{assert_eq!(v["payload"]["q"],"Science school");assert_eq!(v["payload"]["limit"],"5");(StatusCode::OK,Json(json!({"items":[],"total":0})))}else{(StatusCode::BAD_REQUEST,Json(json!({"code":"XX000","message":"postgres://private-secret@database.internal"})))}}));
+    let mock=Router::new().route("/auth/v1/user",get(||async{Json(json!({"id":"trusted"}))})).route("/rest/v1/rpc/cbgpu_school_api",post(|headers:HeaderMap,Json(v):Json<Value>|async move{if v["action"]=="directory"{assert_eq!(headers["authorization"],"Bearer fixture-anon");assert_eq!(v["payload"]["q"],"Science school");assert_eq!(v["payload"]["limit"],"5");(StatusCode::OK,Json(json!({"items":[],"total":0})))}else{(StatusCode::BAD_REQUEST,Json(json!({"code":"XX000","message":"postgres://private-secret@database.internal"})))}}));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
@@ -69,6 +69,7 @@ async fn public_projection_query_and_private_error_sanitization() {
         .clone()
         .oneshot(
             Request::get("/v1/schools?q=Science%20school&limit=5")
+                .header("authorization", "Bearer expired-do-not-use")
                 .body(Body::empty())
                 .unwrap(),
         )
