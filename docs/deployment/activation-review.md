@@ -25,11 +25,13 @@ Preparation baseline on 2026-11-17 (subsequent commits require a fresh manifest)
 | LaTeX source | `e890ac67fea6f7ccdebcfbfc85f592429cc58dc7` |
 | Materials source | `6bfefb4dfce2e9380f95a51efd19c72ebfca9750` |
 
-The private clone `school-schema-clone-20261117-051` has a `PASSED` marker,
+The private clone `school-schema-clone-20261117-058` has a `PASSED` marker,
 identical before/after preservation fingerprints, owner/ACL fidelity and
-migration replay twice. Its **26 frozen migration SHA-256 values** matched
+migration replay twice. Its **27 frozen migration SHA-256 values** matched
 current source at capture. The machine-readable review includes each value;
 no database dump, fingerprints, account records or credentials belong in Git.
+The review also compares the frozen inventory with the current rehearsal
+candidate list: adding a candidate invalidates an older matching subset.
 The marker is local evidence, not a signed authorization. Neither it nor a clean
 repository proves that operating schema or service flags have changed.
 
@@ -45,7 +47,7 @@ published checkout and regenerate the manifest rather than assuming equivalence.
 cd /home/cbgpu/CBGPU-Engineering/CBGPU-backend-rust
 /home/cbgpu/.cargo/bin/cargo run --offline --manifest-path rust/Cargo.toml -p cbgpu-cutover -- review \
   --repo /home/cbgpu/CBGPU-Engineering/CBGPU-backend-rust \
-  --proof /home/cbgpu/.local/share/cbgpu-rust/school-schema-clone-20261117-051 \
+  --proof /home/cbgpu/.local/share/cbgpu-rust/school-schema-clone-20261117-058 \
   --web-repo /tmp/cbgpu-web-external-contest-api \
   --gpu-repo /home/cbgpu/CBGPU-Engineering/CBGPU-gpu-daemon \
   --latex-repo /home/cbgpu/CBGPU-Engineering/CBGPU-latex \
@@ -156,3 +158,24 @@ admission has actually been fenced.
 The next concrete user-facing action can be running the read-only review command
 above. An approval request must identify the separately reviewed operating
 change; this pack does not request or assume that approval.
+
+
+### Equipment follow-up rehearsal
+
+Candidate `20261117093022_equipment_operator_school_authority.sql` is included
+in clone 058. Staff authority requires fresh identity, active verified internal
+CBsh membership, current fabrication permission and the exact printer assignment
+or laser role. A fabrication guest grant permits requests and catalog access,
+not staff operations; an old retained assignment does not restore staff access.
+The paired portal admission change is web commit `31ca577`.
+
+The rehearsal exercises actual legacy job policies and start-print RPC, invalid
+initial operator states, owner cancellation after resource revocation, inventory
+writes, cross-printer job/file isolation, role/school/session revocation and
+explicit platform oversight separately from equipment-portal admission. Own
+historical jobs/files and assignments are retained. No production policy changed.
+
+Storage RLS gates new object reads/signature authorization. Already-issued signed
+URLs remain capabilities until their original expiry; a policy change alone does
+not revoke them. No signing-key rotation, object deletion or claim of immediate
+revocation of existing URLs is part of this candidate.

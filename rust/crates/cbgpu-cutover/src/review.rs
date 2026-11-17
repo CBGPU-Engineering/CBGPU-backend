@@ -212,6 +212,30 @@ pub fn generate(repos: &BTreeMap<String, PathBuf>, proof: &Path, inspect: bool) 
         all &= matched;
         verified.push(json!({"file":name,"tested_sha256":expected,"current_sha256":current,"matches":matched}));
     }
+    // A newly added candidate must invalidate an older otherwise-matching
+    // proof. Historical source migrations outside this explicit rehearsal list
+    // remain inventoried, but are not falsely described as newly tested.
+    let declaration = String::from_utf8(read(
+        &backend.join("rust/crates/cbgpu-schools/src/bin/schema-dry-run.rs"),
+        1024 * 1024,
+    )?)
+    .map_err(|_| "Invalid candidate migration declaration")?;
+    let block = declaration
+        .split_once("let migrations = [")
+        .and_then(|(_, s)| s.split_once("];").map(|(s, _)| s))
+        .ok_or("Candidate migration declaration unavailable")?;
+    let candidates = block
+        .split('"')
+        .enumerate()
+        .filter(|(index, _)| index % 2 == 1)
+        .map(|(_, name)| name.to_owned())
+        .collect::<std::collections::BTreeSet<_>>();
+    if candidates.is_empty() || candidates.iter().any(|name| !file_name(name)) {
+        return Err("Invalid candidate migration declaration".into());
+    }
+    let candidate_inventory_matches = candidates == seen;
+    let unproven_candidates = candidates.difference(&seen).cloned().collect::<Vec<_>>();
+    all &= candidate_inventory_matches;
     let observations = if inspect {
         vec![
             unit("cbgpu-daemon.service", false),
@@ -229,7 +253,7 @@ pub fn generate(repos: &BTreeMap<String, PathBuf>, proof: &Path, inspect: bool) 
         vec![]
     };
     Ok(
-        json!({"format_version":1,"mode":"activation-review-only","mutations_executed":false,"automatic_activation_supported":false,"ready_for_activation":false,"captured_at_unix":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_|"Invalid clock")?.as_secs(),"sources":revisions,"migration_inventory":inventory,"clone":{"passed_marker":marker,"baseline_preserved":baseline,"frozen_source_matches":all,"checked_migrations":verified},"host_inspection_executed":inspect,"host_observations":observations,"operating_database_migration_state":"UNVERIFIED","orphan_writer_absence":"UNVERIFIED","blockers":["Explicit reviewed production schema/release authorization is still required","Scoped GPU approve intentionally refuses; a reviewed controller ownership/fencing transition is not implemented","Stopped service metadata is not proof of no orphan writers or admission fencing","AI native import requires a genuinely drained and runtime-masked legacy writer plus verified private backup","Cross-school remote inference is not implemented; signed enrollment is inventory only","Rollback after new native writes requires a verified no-new-write fence and compatible reverse import; never restore an old whole database over current user records"]}),
+        json!({"format_version":1,"mode":"activation-review-only","mutations_executed":false,"automatic_activation_supported":false,"ready_for_activation":false,"captured_at_unix":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_|"Invalid clock")?.as_secs(),"sources":revisions,"migration_inventory":inventory,"clone":{"passed_marker":marker,"baseline_preserved":baseline,"frozen_source_matches":all,"candidate_inventory_matches":candidate_inventory_matches,"unproven_candidates":unproven_candidates,"checked_migrations":verified},"host_inspection_executed":inspect,"host_observations":observations,"operating_database_migration_state":"UNVERIFIED","orphan_writer_absence":"UNVERIFIED","blockers":["Explicit reviewed production schema/release authorization is still required","Scoped GPU approve intentionally refuses; a reviewed controller ownership/fencing transition is not implemented","Stopped service metadata is not proof of no orphan writers or admission fencing","AI native import requires a genuinely drained and runtime-masked legacy writer plus verified private backup","Cross-school remote inference is not implemented; signed enrollment is inventory only","Rollback after new native writes requires a verified no-new-write fence and compatible reverse import; never restore an old whole database over current user records"]}),
     )
 }
 pub fn run(args: &[String]) -> Result<Value> {
@@ -343,6 +367,13 @@ mod tests {
             );
             let sql = source.join("supabase/migrations/20261117000000_fixture.sql");
             std::fs::write(&sql, "select 1;\n").unwrap();
+            let declaration = source.join("rust/crates/cbgpu-schools/src/bin/schema-dry-run.rs");
+            std::fs::create_dir_all(declaration.parent().unwrap()).unwrap();
+            std::fs::write(
+                declaration,
+                "let migrations = [\"20261117000000_fixture.sql\"]; ",
+            )
+            .unwrap();
             std::fs::write(
                 proof.join("migration-hashes.json"),
                 json!([{"file":"20261117000000_fixture.sql","sha256":digest(&sql).unwrap()}])
@@ -390,6 +421,24 @@ mod tests {
         assert_eq!(
             generate(&f.repos, &f.proof, false).unwrap()["clone"]["baseline_preserved"],
             false
+        );
+    }
+    #[test]
+    fn adding_a_candidate_invalidates_an_older_matching_proof() {
+        let f = Fixture::new();
+        let declaration =
+            f.repos["backend"].join("rust/crates/cbgpu-schools/src/bin/schema-dry-run.rs");
+        std::fs::write(
+            declaration,
+            "let migrations = [\"20261117000000_fixture.sql\",\"20261117000001_new.sql\"]; ",
+        )
+        .unwrap();
+        let result = generate(&f.repos, &f.proof, false).unwrap();
+        assert_eq!(result["clone"]["frozen_source_matches"], false);
+        assert_eq!(result["clone"]["candidate_inventory_matches"], false);
+        assert_eq!(
+            result["clone"]["unproven_candidates"],
+            json!(["20261117000001_new.sql"])
         );
     }
     #[test]
