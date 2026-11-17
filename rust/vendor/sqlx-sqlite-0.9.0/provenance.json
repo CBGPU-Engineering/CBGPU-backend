@@ -10,7 +10,6 @@
   ],
   "unmodified_file_sha256": {
     ".cargo_vcs_info.json": "34f4ec6fd11a78aa8ef5214c49a5c2d5dffd80079196c13797887f36a88b9cab",
-    "Cargo.lock": "aa84ca06b7b49982d0242cc5e4154e67bc2608434000da2e750864fbc8ff06f9",
     "Cargo.toml.orig": "af4193e1d9d8e9f63c85bf2468cdb24f4e9b7c217bd0745082fecf1a7369b0c6",
     "Cargo.toml.upstream": "d659405cf1a18299845d699b4ab681a3d341805556c4a837d70f5f1c3589bb9a",
     "LICENSE-APACHE": "154397a08d0cb342110281129971868cd562542d0780b0d10722788cd11a1399",
@@ -66,5 +65,8 @@
     "src/types/uint.rs": "323ceaae2608521a410a4be9635ce8654c98b06914faac0aba1743caf78439d1",
     "src/types/uuid.rs": "42beb2e273bcb48426d4f7f0ee01ec6f7d80a38417a202269fe6d4bf45c794d1",
     "src/value.rs": "0d067051b2f86c53ed4e12f5c4fad27bbb3e4a4fb020e37b08415806c9b164d4"
-  }
+  },
+  "archive_files_not_included": [
+    "Cargo.lock"
+  ]
 }

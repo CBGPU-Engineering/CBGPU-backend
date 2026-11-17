@@ -47,6 +47,8 @@ to the exact registry `libsqlite3-sys` 0.39.1 with column metadata enabled.
 provenance file records the official archive checksum. No SQLite C source is
 vendored here. Remove this manifest adaptation when an upstream release supports
 the patched binding. The workspace requires Rust 1.94 or later.
+The upstream library's unused lockfile is excluded; the application's reviewed
+workspace lockfile determines all dependencies.
 
 See [the SQLite advisory](https://rustsec.org/advisories/RUSTSEC-2026-0459.html)
 and [the RSA advisory](https://rustsec.org/advisories/RUSTSEC-2023-0071.html).

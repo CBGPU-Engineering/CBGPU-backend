@@ -11,11 +11,13 @@ const provenance = JSON.parse(readFileSync(path.join(root, 'provenance.json'), '
   version: string;
   archive_url: string;
   archive_sha256: string;
+  archive_files_not_included: string[];
   unmodified_file_sha256: Record<string, string>;
 };
 assert.equal(provenance.version, '0.9.0');
 assert.equal(provenance.archive_url, 'https://static.crates.io/crates/sqlx-sqlite/sqlx-sqlite-0.9.0.crate');
 assert.match(provenance.archive_sha256, /^[a-f0-9]{64}$/);
+assert.deepEqual(provenance.archive_files_not_included, ['Cargo.lock']);
 const digest = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 const files: string[] = [];
 function visit(directory: string) {
