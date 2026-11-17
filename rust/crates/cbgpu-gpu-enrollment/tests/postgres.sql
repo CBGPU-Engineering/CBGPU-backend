@@ -1,0 +1,31 @@
+create function public.assert_gpu(ok boolean,msg text) returns void language plpgsql as $$begin if ok is distinct from true then raise exception '%',msg;end if;end$$;
+update cbgpu_schools.memberships set school_roles='{}' where user_id='00000000-0000-4000-8000-000000000001';
+-- A verified member with a school-scoped GPU role, never implicit platform-admin access.
+update cbgpu_schools.memberships set school_roles=array['GPU_ADMIN'] where user_id='00000000-0000-4000-8000-000000000004' and school_id='cbsh';
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000004","session_id":"10000000-0000-4000-8000-000000000004","role":"authenticated"}',false);
+create temp table token as select public.school_gpu_admin('cbsh','mint','{"name":"Synthetic node"}') data;
+select public.assert_gpu((select data->>'sharing_enabled'='false' from token),'private default');
+select public.assert_gpu((select count(*)=1 from cbgpu_schools.gpu_enrollments),'only hash persisted');
+create temp table enrolled as select public.school_gpu_enroll((select data->>'token' from token),repeat('a',64)) data;
+do $$begin begin perform public.school_gpu_enroll((select data->>'token' from token),repeat('b',64));raise exception 'reuse accepted';exception when insufficient_privilege then null;end;end$$;
+select public.assert_gpu((select status='OFFLINE' and sharing_enabled=false from cbgpu_schools.gpu_nodes),'enroll no fake online');
+select set_config('request.jwt.claims','{"role":"service_role"}',false);
+select public.school_gpu_store_report((select (data->>'node_id')::uuid from enrolled),1,1,extract(epoch from now())::bigint,'{"agent_version":"0.1.0","os":"ubuntu","gpus":[{"index":0,"name":"FixtureGPU","memory_total_mib":100,"memory_used_mib":50,"utilization_percent":10}]}');
+do $$begin begin perform public.school_gpu_store_report((select (data->>'node_id')::uuid from enrolled),1,1,extract(epoch from now())::bigint,'{"agent_version":"0.1.0","os":"ubuntu","gpus":[{"index":0,"name":"FixtureGPU","memory_total_mib":100,"memory_used_mib":50,"utilization_percent":10}]}');raise exception 'replay accepted';exception when insufficient_privilege then null;end;end$$;
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000001","session_id":"10000000-0000-4000-8000-000000000001","role":"authenticated"}',false);
+do $$begin begin perform public.school_gpu_admin('cbsh','list');raise exception 'platform admin implicitly permitted';exception when insufficient_privilege then null;end;end$$;
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000004","session_id":"10000000-0000-4000-8000-000000000004","role":"authenticated"}',false);
+select public.school_gpu_admin('cbsh','revoke',jsonb_build_object('node_id',(select data->>'node_id' from enrolled)));
+select set_config('request.jwt.claims','{"role":"service_role"}',false);
+do $$begin begin perform public.school_gpu_node_identity((select (data->>'node_id')::uuid from enrolled));raise exception 'revoked node identity accepted';exception when insufficient_privilege then null;end;end$$;
+set role authenticated;
+do $$begin begin perform public.school_gpu_node_identity('00000000-0000-4000-8000-000000000001');raise exception 'identity RPC exposed';exception when insufficient_privilege then null;end;begin perform count(*) from cbgpu_schools.gpu_enrollments;raise exception 'token hashes exposed';exception when insufficient_privilege then null;end;end$$;
+reset role;
+-- Expired or revoked issuer sessions cannot consume outstanding capabilities.
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000004","session_id":"10000000-0000-4000-8000-000000000004","role":"authenticated"}',false);
+create temp table expired_token as select public.school_gpu_admin('cbsh','mint','{"name":"Expired"}') data;
+update cbgpu_schools.gpu_enrollments set expires_at=now()-interval '1 second' where node_id=(select (data->>'node_id')::uuid from expired_token);
+do $$begin begin perform public.school_gpu_enroll((select data->>'token' from expired_token),repeat('a',64));raise exception 'expired token accepted';exception when insufficient_privilege then null;end;end$$;
+create temp table issuer_revoked as select public.school_gpu_admin('cbsh','mint','{"name":"Revoked issuer"}') data;
+delete from auth.sessions where id='10000000-0000-4000-8000-000000000004';
+do $$begin begin perform public.school_gpu_enroll((select data->>'token' from issuer_revoked),repeat('a',64));raise exception 'revoked issuer session accepted';exception when insufficient_privilege then null;end;begin perform public.school_gpu_admin('cbsh','list');raise exception 'revoked admin session accepted';exception when insufficient_privilege then null;end;end$$;
