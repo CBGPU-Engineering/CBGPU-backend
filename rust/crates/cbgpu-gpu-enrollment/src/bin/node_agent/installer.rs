@@ -81,19 +81,37 @@ fn safe_path(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn private_dir(path: &Path) -> Result<()> {
+fn ensure_owned_dir(path: &Path, private: bool) -> Result<()> {
     safe_path(path)?;
-    fs::create_dir_all(path)?;
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    // DirBuilder preserves every pre-existing directory's permissions.
+    builder.create(path)?;
+    let m = fs::symlink_metadata(path)?;
+    if !m.is_dir() {
+        return Err("Expected an owned regular directory".into());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        let m = fs::metadata(path)?;
         if m.uid() != unsafe { libc::geteuid() } {
             return Err("Directory belongs to another user".into());
         }
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        if private && m.permissions().mode() & 0o077 != 0 {
+            return Err("Existing identity/binary directory must already be private; permissions were not changed".into());
+        }
     }
+    #[cfg(not(unix))]
+    let _ = private;
     Ok(())
+}
+fn private_dir(path: &Path) -> Result<()> {
+    ensure_owned_dir(path, true)
 }
 pub fn prepare_identity_parent(path: &Path) -> Result<()> {
     safe_path(path)?;
@@ -171,7 +189,8 @@ pub fn apply(plan: &Plan, commands: &impl Commands) -> Result<()> {
     if plan.unit.exists() {
         return Err("Unit already exists; no replacement allowed".into());
     }
-    private_dir(plan.unit.parent().ok_or("Missing unit parent")?)?;
+    private_dir(plan.identity.parent().ok_or("Missing identity parent")?)?;
+    ensure_owned_dir(plan.unit.parent().ok_or("Missing unit parent")?, false)?;
     private_dir(plan.binary.parent().ok_or("Missing binary parent")?)?;
     if plan.binary.exists() {
         if fs::read(&plan.binary)? != plan.bytes {
@@ -302,5 +321,60 @@ mod tests {
         assert!(safe_path(Path::new("relative")).is_err());
         assert_eq!(retry_seconds(0), 5);
         assert_eq!(retry_seconds(100), 300);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn existing_public_directory_is_never_chmodded_for_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp();
+        fs::create_dir(&d).unwrap();
+        fs::set_permissions(&d, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(prepare_identity_parent(&d.join("identity.json")).is_err());
+        assert_eq!(
+            fs::metadata(&d).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert!(!d.join("identity.json").exists());
+        fs::remove_dir(&d).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn existing_user_unit_directory_permissions_are_preserved() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp();
+        let units = d.join(".config/systemd/user");
+        fs::create_dir_all(&units).unwrap();
+        fs::set_permissions(&units, fs::Permissions::from_mode(0o755)).unwrap();
+        let e = d.join("elf");
+        fs::write(&e, b"\x7fELFfixture").unwrap();
+        let identity = d.join(".config/cbgpu-node/identity.json");
+        prepare_identity_parent(&identity).unwrap();
+        let p = plan(&d, &e, &identity).unwrap();
+        let f = Fake {
+            calls: RefCell::new(vec![]),
+            existing: false,
+        };
+        apply(&p, &f).unwrap();
+        assert_eq!(
+            fs::metadata(&units).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert_eq!(
+            fs::metadata(identity.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(p.binary.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        fs::remove_dir_all(d).unwrap();
     }
 }
