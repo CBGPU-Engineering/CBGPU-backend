@@ -1,6 +1,13 @@
 name: GPU Node Setup packages
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Immutable source commit supplied by the release workflow
+        required: false
+        type: string
+        default: ""
   push:
     branches: [main]
     paths:
@@ -17,6 +24,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
@@ -43,6 +52,8 @@ jobs:
       RUSTFLAGS: '-C target-feature=+crt-static'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
