@@ -27,6 +27,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("GPU registry must bind private loopback".into());
     }
     let config = Config {
+        notebooks: if flag(std::env::var("CBGPU_GPU_NOTEBOOKS_ENABLED").ok().as_deref())? {
+            let value = secret("CBGPU_GPU_NOTEBOOK_SIGNING_KEY_FILE")?;
+            Some(std::sync::Arc::new(ed25519_dalek::SigningKey::from_bytes(
+                &cbgpu_gpu_enrollment::unhex::<32>(&value).ok_or("Invalid notebook signing key")?,
+            )))
+        } else {
+            None
+        },
         diagnostics: match std::env::var("CBGPU_GPU_DIAGNOSTICS_ENABLED")
             .ok()
             .as_deref()

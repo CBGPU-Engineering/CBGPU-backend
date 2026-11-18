@@ -17,6 +17,7 @@ use std::sync::Arc;
 pub struct Config {
     pub enabled: bool,
     pub diagnostics: Option<Arc<ed25519_dalek::SigningKey>>,
+    pub notebooks: Option<Arc<ed25519_dalek::SigningKey>>,
     pub backend_url: String,
     pub anon_key: String,
     pub service_key: String,
@@ -208,7 +209,7 @@ pub fn router(config: Config) -> Router {
 }
 async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     if request.uri().path() == "/health" {
-        return Json(json!({"ok":true,"enabled":c.enabled,"implementation":"native-rust","execution":false,"sharing":false,"diagnostics_enabled":c.diagnostics.is_some(),"execution_ready":false})).into_response();
+        return Json(json!({"ok":true,"enabled":c.enabled,"implementation":"native-rust","execution":false,"sharing":false,"diagnostics_enabled":c.diagnostics.is_some(),"execution_ready":false,"notebooks_enabled":c.notebooks.is_some(),"notebook_signing_public_key":c.notebooks.as_ref().map(|k|hex(k.verifying_key().as_bytes()))})).into_response();
     }
     if !c.enabled {
         return fail(StatusCode::NOT_FOUND, "FEATURE_DISABLED");
@@ -219,6 +220,9 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     let auth = bearer(&request);
     if request.uri().query().is_some() {
         return fail(StatusCode::BAD_REQUEST, "QUERY_NOT_SUPPORTED");
+    }
+    if path.starts_with("/v1/gpu/notebooks/") {
+        return notebooks::device(&c, request).await;
     }
     if path.starts_with("/v1/gpu/commands/") {
         return commands::device(&c, request).await;
@@ -321,6 +325,41 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
             {
                 ("diagnostic_list", json!({"node_id":id}), false)
             }
+            (&Method::GET, [_, _, _, _, "reservations", id, "notebook"])
+                if uuid(id) && c.notebooks.is_some() =>
+            {
+                ("notebook_status", json!({"reservation_id":id}), false)
+            }
+            (&Method::POST, [_, _, _, _, "reservations", id, op])
+                if uuid(id)
+                    && ["launch", "stop", "session"].contains(op)
+                    && c.notebooks.is_some() =>
+            {
+                let allowed = if *op == "launch" {
+                    vec!["client_request_id", "temporary_storage_consent"]
+                } else if *op == "stop" {
+                    vec!["client_request_id"]
+                } else {
+                    vec![]
+                };
+                if !payload
+                    .as_object()
+                    .is_some_and(|o| o.keys().all(|k| allowed.contains(&k.as_str())))
+                {
+                    return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+                }
+                let mut data = payload.clone();
+                data["reservation_id"] = json!(id);
+                (
+                    match *op {
+                        "launch" => "notebook_launch",
+                        "stop" => "notebook_stop",
+                        _ => "notebook_session",
+                    },
+                    data,
+                    false,
+                )
+            }
             (&Method::GET, [_, _, _, _, "resources"]) => ("list", json!({}), true),
             (&Method::GET, [_, _, _, _, "reservations"]) => ("own", json!({}), true),
             (&Method::POST, [_, _, _, _, "resources", id, "reservations"]) if uuid(id) => {
@@ -359,18 +398,37 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
         }
         rpc(
             &c,
-            if action.starts_with("diagnostic_"){ "school_gpu_diagnostic_admin" } else if resource {
+            if action.starts_with("notebook_"){ "school_gpu_notebook_api" } else if action.starts_with("diagnostic_"){ "school_gpu_diagnostic_admin" } else if resource {
                 "school_gpu_resource_api"
             } else {
                 "school_gpu_admin"
             },
-            json!({"p_school_id":parts[2],"p_action":action.strip_prefix("diagnostic_").unwrap_or(action),"p_payload":data}),
+            json!({"p_school_id":parts[2],"p_action":action.strip_prefix("notebook_").or_else(||action.strip_prefix("diagnostic_")).unwrap_or(action),"p_payload":data}),
             Some(&auth),
             false,
         )
         .await
     } else {
         return fail(StatusCode::NOT_FOUND, "NOT_FOUND");
+    };
+    let result = if path.ends_with("/enrollments")
+        && method == Method::POST
+        && let Some(notebook_key) = c.notebooks.as_ref()
+    {
+        match result {
+            Ok(mut v) => match rpc(&c, "school_gpu_notebook_trust", json!({}), None, true).await {
+                Ok(policy) => {
+                    if policy["enabled"].as_bool() == Some(true) {
+                        v["notebook_trust"] = json!({"protocol":3,"server_public_key":hex(notebook_key.verifying_key().as_bytes()),"approved_image_digest":policy["image_digest"]});
+                    }
+                    Ok(v)
+                }
+                Err(_) => Ok(v),
+            },
+            Err(e) => Err(e),
+        }
+    } else {
+        result
     };
     let result = result.map(|mut v| {
         if path.ends_with("/diagnostics")
@@ -458,6 +516,7 @@ mod tests {
         let app = router(Config {
             enabled: false,
             diagnostics: None,
+            notebooks: None,
             backend_url: "http://127.0.0.1:1".into(),
             anon_key: "not-a-secret".into(),
             service_key: "not-a-secret".into(),

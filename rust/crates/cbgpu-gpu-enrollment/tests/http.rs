@@ -45,6 +45,7 @@ async fn only_verified_inventory_reaches_privileged_store() {
     let app = router(Config {
         enabled: true,
         diagnostics: None,
+        notebooks: None,
         backend_url: format!("http://{address}"),
         anon_key: "synthetic-anon".into(),
         service_key: "synthetic-service".into(),
@@ -145,6 +146,7 @@ async fn resource_reservation_target_is_path_bound_and_never_service_role() {
     let native = router(Config {
         enabled: true,
         diagnostics: None,
+        notebooks: None,
         backend_url: format!("http://{addr}"),
         anon_key: "synthetic-anon".into(),
         service_key: "synthetic-service".into(),

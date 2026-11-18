@@ -159,3 +159,27 @@ verify every envelope before work. Successful results contain only bounded GPU
 UUID/index/name/memory/utilization fields. Failures contain only one of
 `NVIDIA_UNAVAILABLE`, `INVALID_INVENTORY`, or `DIAGNOSTIC_TIMEOUT`; raw stdout,
 stderr, paths, credentials, scripts and arbitrary shell arguments are rejected.
+
+## Notebook execution candidate (SQL52)
+
+`CBGPU_GPU_NOTEBOOKS_ENABLED=1` and a private persistent
+`CBGPU_GPU_NOTEBOOK_SIGNING_KEY_FILE` enable the protocol-v3 HTTP surface. Both
+are separate from inventory and diagnostic settings. SQL52 defaults its private
+execution policy to disabled with no approved image digest. Enabling HTTP alone
+therefore does not admit a job. A reviewed immutable image digest, genuine signed
+node Docker/NVIDIA preflight, current hardware inventory, school feature and
+fresh membership/explicit guest authorization are independently required.
+
+A reservation owner explicitly acknowledges temporary storage and launches one
+idempotent job per reservation. Running jobs retain a 45-second signed lease,
+renewed every 10 seconds; the node must stop its own managed generation when the
+lease or reservation deadline expires. STOPPING remains occupied until the node
+confirms removal. A failed stop never makes the GPU available. Jobs never target
+legacy GPU1–4 or accept shell commands, mounts, images or ports from a user.
+
+The same-origin gateway exchanges a fresh owner session for an opaque HttpOnly
+cookie. The service-only `school_gpu_notebook_session(token,job_id)` checks the
+exact stored Auth session, job, booking, node version and fresh authority on each
+HTTP request and WebSocket heartbeat. No JWT is stored in a job, URL or cookie
+grant record. This is a source candidate until the paired node executor and relay
+are exercised together; registry ONLINE alone still proves no notebook service.

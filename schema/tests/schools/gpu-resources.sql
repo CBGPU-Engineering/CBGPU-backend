@@ -12,7 +12,8 @@ set local role authenticated;
 do $$declare x jsonb;begin x:=public.school_gpu_resource_api('fixture-gpu-b','list');if x#>>'{items,0,state}'<>'NONRUNNABLE' or x#>>'{items,0,execution_enabled}'<>'false' or x->>'execution_transport_available'<>'false' then raise exception 'INVENTED_GPU_AVAILABILITY';end if;end$$;
 reset role;
 -- Trusted isolated fixture enables the future protocol only to exercise reservation SQL; no executor exists.
-update cbgpu_schools.gpu_resources set execution_enabled=true,executor_protocol=1 where node_id='fb430000-0000-4000-8000-000000000001';
+update cbgpu_schools.gpu_notebook_policy set enabled=true,image_digest='registry.fixture/notebook@sha256:'||repeat('a',64);
+insert into cbgpu_schools.gpu_executor_capabilities(node_id,credential_version,protocol,image_digest,hardware_uuids,ready,relay_seen_at,expires_at)values('fb430000-0000-4000-8000-000000000001',1,3,'registry.fixture/notebook@sha256:'||repeat('a',64),array['GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'],true,clock_timestamp(),clock_timestamp()+interval'90seconds');
 set local role authenticated;
 do $$declare rid uuid;x jsonb;begin select (i->>'id')::uuid into rid from jsonb_array_elements(public.school_gpu_resource_api('fixture-gpu-b','list')->'items')i;
  x:=public.school_gpu_resource_api('fixture-gpu-b','reserve',jsonb_build_object('resource_id',rid,'starts_at',now()+interval '10 minutes','ends_at',now()+interval '20 minutes'));
