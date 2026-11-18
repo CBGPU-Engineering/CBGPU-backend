@@ -187,6 +187,13 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         }
         (["v1", "schools", school, "members"], &Method::GET) => Some(("members", {
             let mut fields = query_fields.clone();
+            // The UI's "all statuses" value is empty, whereas the SQL oracle
+            // uses absence/null for an unrestricted status filter.
+            for key in ["q", "status"] {
+                if fields.get(key).and_then(Value::as_str) == Some("") {
+                    fields.remove(key);
+                }
+            }
             fields.insert("school_id".into(), json!(school));
             Value::Object(fields)
         })),

@@ -684,3 +684,54 @@ async fn platform_school_inventory_is_private_and_forwards_only_caller_authority
     assert_eq!(mutation.status(), 404);
     server.abort();
 }
+
+#[tokio::test]
+async fn school_member_empty_filters_mean_all_and_nonempty_filters_are_preserved() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|| async { Json(json!({"id":"caller"})) }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_school_api",
+            post(|headers: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer fixture");
+                assert_eq!(v["action"], "members");
+                assert_eq!(v["payload"]["school_id"], "school-b");
+                if let Some(q) = v["payload"].get("q") {
+                    assert_eq!(q, "Kim");
+                    assert_eq!(v["payload"]["status"], "ACTIVE");
+                } else {
+                    assert!(v["payload"].get("status").is_none());
+                }
+                Json(json!({"items":[],"total":0}))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let app = router(config(true, format!("http://{address}")));
+    for query in ["?q=&status=", "?q=Kim&status=ACTIVE", ""] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(format!("/v1/schools/school-b/members{query}"))
+                    .header("authorization", "Bearer fixture")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+    let response = app
+        .oneshot(
+            Request::get("/v1/schools/school-b/members?q=&status=")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401);
+    task.abort();
+}
