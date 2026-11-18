@@ -1164,6 +1164,14 @@ impl<R: Runtime> Agent<R> {
                         "CBGPU_SESSION_ORACLE_MODE",
                         "CBGPU_INTERNAL_NETWORK_MODE",
                         "CBGPU_PUBLIC_BROWSING_V1",
+                        "CBGPU_GPU_REGISTRY_ENABLED",
+                        "CBGPU_GPU_REGISTRY_URL",
+                        "CBGPU_GPU_CONTROL_PLANE_ORIGIN",
+                        "CBGPU_GPU_AGENT_MANIFEST",
+                        "CBGPU_GPU_NOTEBOOKS_ENABLED",
+                        "CBGPU_NOTEBOOK_RELAY_URL",
+                        "CBGPU_NOTEBOOK_BOOTSTRAP_KEY_FILE",
+                        "CBGPU_NOTEBOOK_EDGE_KEY_FILE",
                     ]
                     .contains(&k.as_str())
             })
@@ -1171,6 +1179,30 @@ impl<R: Runtime> Agent<R> {
             .collect::<String>();
         atomic(&directory.join(".env.production.local"), saved.as_bytes())?;
         let next = directory.join("node_modules/next/dist/bin/next");
+        let transport = directory.join("scripts/serve.mts");
+        // Do not follow a release symlink to an unrelated server entry point.
+        let custom_transport =
+            fs::symlink_metadata(&transport).is_ok_and(|m| m.file_type().is_file());
+        let mut preview_env = env.clone();
+        let preview_args = if custom_transport {
+            preview_env.insert("HOSTNAME".into(), "127.0.0.1".into());
+            preview_env.insert("PORT".into(), "3002".into());
+            argv(&[
+                "/usr/bin/node",
+                transport.to_str().ok_or("Invalid transport path")?,
+            ])
+        } else {
+            argv(&[
+                "/usr/bin/node",
+                next.to_str().ok_or("Invalid Next path")?,
+                "start",
+                directory.to_str().ok_or("Invalid release path")?,
+                "--hostname",
+                "127.0.0.1",
+                "--port",
+                "3002",
+            ])
+        };
         let mut checks = vec![Check {
             url: "http://127.0.0.1:3002/api/health".into(),
             commit: Some(sha.into()),
@@ -1188,20 +1220,7 @@ impl<R: Runtime> Agent<R> {
                 host: Some(host.into()),
             })
         }
-        self.runtime.preview(
-            &argv(&[
-                "/usr/bin/node",
-                next.to_str().ok_or("Invalid Next path")?,
-                "start",
-                directory.to_str().ok_or("Invalid release path")?,
-                "--hostname",
-                "127.0.0.1",
-                "--port",
-                "3002",
-            ]),
-            &env,
-            &checks,
-        )?;
+        self.runtime.preview(&preview_args, &preview_env, &checks)?;
         let unit = fs::read_to_string(self.settings.join("cbgpu-frontend.service"))
             .map_err(|_| error("Cannot read frontend service"))?;
         let unit = unit
@@ -1218,18 +1237,23 @@ impl<R: Runtime> Agent<R> {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let unit = unit_update(
-            &unit,
-            &directory,
-            &format!(
+        let command = if custom_transport {
+            format!("/usr/bin/node {}", transport.display())
+        } else {
+            format!(
                 "/usr/bin/node {} start --hostname 127.0.0.1 --port 3000",
                 next.display()
-            ),
-            &BTreeMap::from([
-                ("NEXT_BUILD_DIR".into(), ".next-production".into()),
-                ("CBGPU_RELEASE_SHA".into(), sha.into()),
-            ]),
-        )?;
+            )
+        };
+        let mut unit_env = BTreeMap::from([
+            ("NEXT_BUILD_DIR".into(), ".next-production".into()),
+            ("CBGPU_RELEASE_SHA".into(), sha.into()),
+        ]);
+        if custom_transport {
+            unit_env.insert("HOSTNAME".into(), "127.0.0.1".into());
+            unit_env.insert("PORT".into(), "3000".into());
+        }
+        let unit = unit_update(&unit, &directory, &command, &unit_env)?;
         if self.repo_candidate(repo)?.0 != sha {
             return Err(error(
                 "DEFERRED: Obsolete web build cancelled; newer green main selected",
@@ -2087,6 +2111,9 @@ mod tests {
     struct FakeRuntime {
         commands: Vec<Vec<String>>,
         builds: usize,
+        web_serve: bool,
+        web_serve_symlink: bool,
+        previews: Vec<(Vec<String>, BTreeMap<String, String>)>,
         restarts: usize,
         api_posts: Vec<Value>,
         fail_build: bool,
@@ -2139,6 +2166,15 @@ mod tests {
             if args.iter().any(|a| a == "worktree") && args.iter().any(|a| a == "add") {
                 let destination = PathBuf::from(&args[args.len() - 2]);
                 fs::create_dir_all(destination.join("node_modules/next/dist/bin")).unwrap();
+                if self.web_serve || self.web_serve_symlink {
+                    fs::create_dir_all(destination.join("scripts")).unwrap();
+                    let path = destination.join("scripts/serve.mts");
+                    if self.web_serve_symlink {
+                        std::os::unix::fs::symlink("/outside/release/serve.mts", path).unwrap();
+                    } else {
+                        fs::write(path, "// synthetic release transport").unwrap();
+                    }
+                }
                 fs::create_dir_all(destination.join("careers")).unwrap();
                 fs::create_dir_all(destination.join("developer")).unwrap();
                 fs::write(
@@ -2214,6 +2250,7 @@ mod tests {
             env: &BTreeMap<String, String>,
             checks: &[Check],
         ) -> Result<()> {
+            self.previews.push((args.to_vec(), env.clone()));
             if args.first().is_some_and(|a| a.contains("cbgpu-careers")) {
                 assert_eq!(env["CAREERS_ENABLE_OUTBOX"], "0");
                 assert!(!env.contains_key("CAREERS_MAIL_ENV"));
@@ -2330,6 +2367,96 @@ mod tests {
         );
         assert!(!saved.contains("NEXT_PUBLIC_CBGPU_TIMETABLE_WARM"));
         assert!(saved.contains("NEXT_PUBLIC_CBGPU_CENTRAL_CPU_V1=0\n"));
+    }
+    #[test]
+    fn web_transport_preview_activation_preserves_reviewed_private_configuration() {
+        let (_tmp, mut agent) = fixture("web");
+        agent.runtime.web_serve = true;
+        let config = [
+            ("CBGPU_GPU_REGISTRY_ENABLED", "1"),
+            ("CBGPU_GPU_REGISTRY_URL", "http://127.0.0.1:3548"),
+            ("CBGPU_GPU_CONTROL_PLANE_ORIGIN", "https://cbgpu.com"),
+            ("CBGPU_GPU_AGENT_MANIFEST", "/private/manifest.json"),
+            ("CBGPU_GPU_NOTEBOOKS_ENABLED", "1"),
+            ("CBGPU_NOTEBOOK_RELAY_URL", "http://127.0.0.1:3550"),
+            (
+                "CBGPU_NOTEBOOK_BOOTSTRAP_KEY_FILE",
+                "/private/bootstrap-key",
+            ),
+            ("CBGPU_NOTEBOOK_EDGE_KEY_FILE", "/private/edge-key"),
+        ];
+        let mut input = fs::read_to_string(&agent.config.frontend_env).unwrap();
+        for (key, value) in config {
+            input.push_str(&format!("{key}={value}\n"));
+        }
+        fs::write(&agent.config.frontend_env, input).unwrap();
+        agent.poll(Some("web")).unwrap();
+        let release = agent
+            .root
+            .join("releases/web")
+            .join("a".repeat(40))
+            .join("web");
+        let (args, env) = &agent.runtime.previews[0];
+        assert_eq!(
+            args,
+            &argv(&[
+                "/usr/bin/node",
+                release.join("scripts/serve.mts").to_str().unwrap()
+            ])
+        );
+        assert_eq!(env["PORT"], "3002");
+        assert_eq!(env["HOSTNAME"], "127.0.0.1");
+        assert_eq!(env["NEXT_BUILD_DIR"], ".next-production");
+        let unit = fs::read_to_string(agent.settings.join("cbgpu-frontend.service")).unwrap();
+        assert!(unit.contains(&format!(
+            "ExecStart=/usr/bin/node {}",
+            release.join("scripts/serve.mts").display()
+        )));
+        assert!(unit.contains("Environment=PORT=3000"));
+        assert!(unit.contains("Environment=HOSTNAME=127.0.0.1"));
+        assert!(!unit.contains("/next/dist/bin/next"));
+        let saved = fs::read_to_string(release.join(".env.production.local")).unwrap();
+        for (key, value) in config {
+            assert!(saved.contains(&format!("{key}={value}\n")));
+            assert!(!saved.contains(&format!("NEXT_PUBLIC_{key}=")));
+        }
+        assert!(!saved.contains("UNRELATED_PRIVATE_KEY"));
+    }
+    #[test]
+    fn web_legacy_and_symlink_entrypoint_keep_exact_next_cli_fallback() {
+        for symlink in [false, true] {
+            let (_tmp, mut agent) = fixture("web");
+            agent.runtime.web_serve_symlink = symlink;
+            agent.poll(Some("web")).unwrap();
+            let release = agent
+                .root
+                .join("releases/web")
+                .join("a".repeat(40))
+                .join("web");
+            let (args, env) = &agent.runtime.previews[0];
+            assert_eq!(
+                args,
+                &argv(&[
+                    "/usr/bin/node",
+                    release
+                        .join("node_modules/next/dist/bin/next")
+                        .to_str()
+                        .unwrap(),
+                    "start",
+                    release.to_str().unwrap(),
+                    "--hostname",
+                    "127.0.0.1",
+                    "--port",
+                    "3002"
+                ])
+            );
+            assert!(!env.contains_key("PORT"));
+            let unit = fs::read_to_string(agent.settings.join("cbgpu-frontend.service")).unwrap();
+            assert!(unit.contains(
+                "/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000"
+            ));
+            assert!(!unit.contains("scripts/serve.mts"));
+        }
     }
     #[test]
     fn backend_component_rollout_keeps_unrelated_units_and_previews_without_mail() {
