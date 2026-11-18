@@ -2598,7 +2598,7 @@ mod tests {
         a.runtime.changes = vec![
             "deploy/server.mts".into(),
             "ai/server.py".into(),
-            "supabase/migrations/community.sql".into(),
+            "docs/community.md".into(),
         ];
         let careers = fs::read(a.settings.join("cbgpu-careers.service")).unwrap();
         a.poll(Some("backend")).unwrap();

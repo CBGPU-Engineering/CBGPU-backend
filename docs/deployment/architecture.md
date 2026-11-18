@@ -41,8 +41,10 @@ only. It does not mark the aggregate legacy backend, AI, GPU, native portal,
 Schools API or database as deployed at that revision.
 
 Unrelated school/community schema and documentation history does not inflate
-this service's managed change count. Deployment shared dependencies, native
-worker/CLI changes and deployment/central-CPU schema changes remain review holds.
+this service's managed change count and do not trigger a restart when its code
+is unchanged. When deployment-control code does change, **any** accompanying
+migration requires explicit database/schema review, regardless of its filename.
+Shared dependencies and native worker/CLI changes also remain review holds.
 Unit or worker drift also holds. No unsupported unit is reverted to Node.
 Actual deployment state, environment/key files and artifact references remain
 in place. The actual pinned SQLite database is snapshotted, then a bounded

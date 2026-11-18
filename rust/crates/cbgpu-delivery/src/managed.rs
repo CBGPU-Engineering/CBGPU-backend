@@ -70,9 +70,22 @@ pub fn plan(paths: &[String]) -> Result<DeployPlan> {
     if paths.iter().any(|p| !safe_relative(p)) {
         return Err("Unsafe changed path".into());
     }
-    // These inputs affect how this control plane executes or admits customer jobs.
-    // Schema changes outside deployment tables are independent; known shared runtime
-    // dependency/worker changes need an explicit new reviewed baseline.
+    let managed: Vec<_> = paths
+        .iter()
+        .filter(|p| p.starts_with("deploy/") && !p.ends_with(".test.mts") && !p.ends_with(".md"))
+        .cloned()
+        .collect();
+    // Independent schema/AI history never triggers a service restart. If the
+    // service's code does change, ANY migration requires explicit DB review;
+    // do not infer authorization compatibility from a filename.
+    if managed.is_empty() {
+        return Ok(DeployPlan::Unchanged);
+    }
+    if paths.iter().any(|p| p.starts_with("supabase/migrations/")) {
+        return Ok(DeployPlan::Hold(
+            "Managed deploy code and database changes require an explicit reviewed baseline",
+        ));
+    }
     if paths.iter().any(|p| {
         ["package.json", "package-lock.json", "tooling/contracts.mts"].contains(&p.as_str())
             || p.starts_with("rust/compat/")
@@ -80,10 +93,6 @@ pub fn plan(paths: &[String]) -> Result<DeployPlan> {
             || p.starts_with("rust/crates/cbgpu-compose-worker/")
             || p.starts_with("rust/crates/cbgpu-domains/")
             || p.starts_with("rust/crates/cbgpu-core/")
-            || (p.starts_with("supabase/migrations/")
-                && ["central_cpu", "deploy", "resource_boundaries"]
-                    .iter()
-                    .any(|part| p.contains(part)))
             || p.starts_with("deploy/migrations/")
             || p.starts_with("schema/deploy")
     }) {
@@ -91,11 +100,6 @@ pub fn plan(paths: &[String]) -> Result<DeployPlan> {
             "Reviewed deploy dependency/worker/schema baseline required",
         ));
     }
-    let managed: Vec<_> = paths
-        .iter()
-        .filter(|p| p.starts_with("deploy/") && !p.ends_with(".test.mts") && !p.ends_with(".md"))
-        .cloned()
-        .collect();
     if managed.len() >= 300 {
         return Ok(DeployPlan::Hold(
             "Managed deployment-control change set needs review",
@@ -122,8 +126,11 @@ mod tests {
         ]);
         assert_eq!(plan(&p).unwrap(), DeployPlan::Unchanged);
         p.push("deploy/server.mts".into());
+        assert!(matches!(plan(&p).unwrap(), DeployPlan::Hold(_)));
+        let mut docs: Vec<_> = (0..900).map(|n| format!("docs/{n}.md")).collect();
+        docs.extend(["ai/server.py".into(), "deploy/server.mts".into()]);
         assert_eq!(
-            plan(&p).unwrap(),
+            plan(&docs).unwrap(),
             DeployPlan::Update(vec!["deploy/server.mts".into()])
         );
     }
@@ -135,7 +142,10 @@ mod tests {
             "rust/crates/cbgpu-compose-worker/src/main.rs",
             "deploy/migrations/new.sql",
         ] {
-            assert!(matches!(plan(&[p.into()]).unwrap(), DeployPlan::Hold(_)));
+            assert!(matches!(
+                plan(&["deploy/server.mts".into(), p.into()]).unwrap(),
+                DeployPlan::Hold(_)
+            ));
         }
         assert!(plan(&["../unsafe".into()]).is_err());
     }
