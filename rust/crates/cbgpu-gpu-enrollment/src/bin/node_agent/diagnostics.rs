@@ -41,7 +41,9 @@ pub struct Nvidia {
 impl Default for Nvidia {
     fn default() -> Self {
         Self {
-            binary: "/usr/bin/nvidia-smi".into(),
+            binary: cbgpu_gpu_enrollment::nvidia_path::trusted()
+                .map(PathBuf::from)
+                .unwrap_or_default(),
             timeout: Duration::from_secs(5),
         }
     }

@@ -14,6 +14,11 @@ pub trait Commands {
 pub struct RealCommands;
 impl Commands for RealCommands {
     fn output(&self, program: &str, args: &[&str]) -> Result<(bool, String)> {
+        let program = if program == "/usr/bin/nvidia-smi" {
+            cbgpu_gpu_enrollment::nvidia_path::trusted()?
+        } else {
+            program
+        };
         let o = Command::new(program).args(args).output()?;
         if o.stdout.len() > 65536 {
             return Err("Diagnostic output too large".into());

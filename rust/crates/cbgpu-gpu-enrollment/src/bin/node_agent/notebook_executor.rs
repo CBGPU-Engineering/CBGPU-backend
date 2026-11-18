@@ -133,7 +133,7 @@ impl Docker for LocalDocker {
     }
     async fn gpu_processes(&self) -> Result<Vec<GpuProcess>> {
         use std::process::Stdio;
-        let child = tokio::process::Command::new("/usr/bin/nvidia-smi")
+        let child = tokio::process::Command::new(cbgpu_gpu_enrollment::nvidia_path::trusted()?)
             .args([
                 "--query-compute-apps=gpu_uuid,pid",
                 "--format=csv,noheader,nounits",

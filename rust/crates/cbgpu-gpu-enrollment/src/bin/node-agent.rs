@@ -135,7 +135,7 @@ fn endpoint(value: &str) -> Result<String, Box<dyn std::error::Error>> {
     Ok(value.trim_end_matches('/').into())
 }
 fn collect() -> Result<Health, Box<dyn std::error::Error>> {
-    let output = std::process::Command::new("/usr/bin/nvidia-smi")
+    let output = std::process::Command::new(cbgpu_gpu_enrollment::nvidia_path::trusted()?)
         .args([
             "--query-gpu=index,name,memory.total,memory.used,utilization.gpu,uuid",
             "--format=csv,noheader,nounits",
