@@ -148,6 +148,19 @@ impl std::fmt::Debug for Frame {
         f.write_str("NotebookRelayFrame(private payload redacted)")
     }
 }
+pub fn decode_frame(text: &str) -> Result<Frame, &'static str> {
+    if text.len() > MAX_RELAY_MESSAGE {
+        return Err("FRAME_TOO_LARGE");
+    }
+    serde_json::from_str(text).map_err(|_| "INVALID_FRAME")
+}
+pub fn encode_frame(frame: &Frame) -> Result<String, &'static str> {
+    let text = serde_json::to_string(frame).map_err(|_| "INVALID_FRAME")?;
+    if text.len() > MAX_RELAY_MESSAGE {
+        return Err("FRAME_TOO_LARGE");
+    }
+    Ok(text)
+}
 pub fn headers_valid(headers: &[(String, String)]) -> bool {
     headers.len() <= 32
         && headers.iter().all(|(k, v)| {
