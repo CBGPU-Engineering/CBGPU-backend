@@ -351,6 +351,7 @@ fn main() -> Result<()> {
         "20261117154700_platform_school_central_cpu_allocations.sql",
         "20261117233327_school_community_threaded_replies.sql",
         "20261118001500_platform_school_directory.sql",
+        "20261118022253_platform_gpu_inventory_authority.sql",
     ];
     let sources = migrations
         .iter()
@@ -387,7 +388,7 @@ fn main() -> Result<()> {
             )?;
         }
     }
-    command(&["exec","-i",&clone.0,"psql","-h","/tmp","-U","cbgpu_clone_bootstrap","-d","postgres","-v","ON_ERROR_STOP=1"],Some(b"DO $$BEGIN IF (SELECT count(*) FROM cbgpu_schools.memberships WHERE school_id='cbsh')<>(SELECT count(*) FROM auth.users) THEN RAISE EXCEPTION 'LEGACY_MEMBERSHIP_COUNT_MISMATCH'; END IF; IF EXISTS(SELECT 1 FROM cbgpu_schools.memberships m LEFT JOIN public.profiles p ON p.id=m.user_id WHERE p.id IS NULL AND(m.verified OR cardinality(m.school_roles)>0 OR m.membership_type<>'EXTERNAL')) THEN RAISE EXCEPTION 'PROFILELESS_PRIVILEGE_ESCALATION'; END IF; END$$;"))?;
+    command(&["exec","-i",&clone.0,"psql","-h","/tmp","-U","cbgpu_clone_bootstrap","-d","postgres","-v","ON_ERROR_STOP=1"],Some(b"DO $$BEGIN IF NOT EXISTS(SELECT 1 FROM cbgpu_schools.migration_state WHERE key='legacy-cbsh-v1') OR EXISTS(SELECT 1 FROM auth.users u WHERE u.created_at<=(SELECT completed_at FROM cbgpu_schools.migration_state WHERE key='legacy-cbsh-v1') AND NOT EXISTS(SELECT 1 FROM cbgpu_schools.memberships m WHERE m.user_id=u.id AND m.school_id='cbsh')) THEN RAISE EXCEPTION 'LEGACY_MEMBERSHIP_COUNT_MISMATCH'; END IF; IF EXISTS(SELECT 1 FROM cbgpu_schools.memberships m LEFT JOIN public.profiles p ON p.id=m.user_id WHERE p.id IS NULL AND(m.verified OR cardinality(m.school_roles)>0 OR m.membership_type<>'EXTERNAL')) THEN RAISE EXCEPTION 'PROFILELESS_PRIVILEGE_ESCALATION'; END IF; END$$;"))?;
     command(
         &[
             "exec",
@@ -1011,6 +1012,25 @@ fn main() -> Result<()> {
         ],
         Some(&fs::read(
             repo.join("schema/tests/schools/platform-directory.sql"),
+        )?),
+    )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/platform-gpu-inventory.sql"),
         )?),
     )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;

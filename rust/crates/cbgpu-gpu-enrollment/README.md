@@ -8,8 +8,12 @@ or grant compute permissions. It is not a distributed inference implementation.
 ## Security and storage
 
 A fresh school `SCHOOL_OWNER`, `SCHOOL_ADMIN` or `GPU_ADMIN` can mint a 10-minute,
-one-use enrollment token. A platform administrator without one of those school
-roles has no implicit permission. Only a SHA-256 hash is stored. Redemption checks
+one-use enrollment token. The additive platform-inventory authority migration also permits a fresh,
+confirmed, approved ACTIVE platform administrator to mint/list/revoke inventory
+for an APPROVED school. This does not create membership, assign school roles,
+permit GPU reservations/execution, or enable sharing. Pending/suspended/banned
+accounts and LISTED schools remain denied. Redemption rechecks the original
+issuer session and current inventory authority. Only a SHA-256 hash is stored. Redemption checks
 the issuer's current session, current school role and approved-school state again.
 The node generates its Ed25519 key locally and saves it before token consumption;
 the server stores only the public key. Signed typed reports bind node ID,
@@ -36,6 +40,7 @@ The registry defaults to loopback `127.0.0.1:3548` and
 `CBGPU_GPU_REGISTRY_ENABLED=false`; no service or route is installed by this source.
 Activation needs the prior school/account migrations, additive migration
 `20261117020000_school_gpu_enrollment.sql`, protected TLS routing/rate limiting,
+and the additive platform inventory authority when platform management is used,
 and private mode-600 `CBGPU_GPU_REGISTRY_ANON_KEY_FILE` and
 `CBGPU_GPU_REGISTRY_SERVICE_KEY_FILE`. The optional backend URL defaults to
 `http://127.0.0.1:54321`. Never put the service credential on a school node.
