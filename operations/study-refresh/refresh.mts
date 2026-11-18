@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Local operator job. Secrets never enter command arguments, logs or browser output.
+import{verificationObserver,waitForNormalVerification,VerificationError}from'./verification.mts';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -43,13 +44,13 @@ async function main(){
  const browser=await puppeteer.launch({args:chromium.args,executablePath:await chromium.executablePath(),headless:true});
  let next;
  try{
-  const page=await browser.newPage();page.setDefaultTimeout(20000);
+  const page=await browser.newPage();page.setDefaultTimeout(20000);const verification=verificationObserver(page);
   phase='login_form';
   await page.goto('https://cbsh.edu-set.com/signin',{waitUntil:'domcontentloaded',timeout:25000});
   await page.waitForSelector('input[name="id"]');await page.type('input[name="id"]',login.EDUSET_USERNAME);await page.type('input[name="password"]',login.EDUSET_PASSWORD);
   // Only accept the site's normal managed verification. No challenge bypass or solver.
   phase='human_verification';
-  await page.waitForFunction(()=>!!document.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]')?.value,{timeout:25000});
+  await waitForNormalVerification(page,verification);
   phase='login_result';
   await page.click('button[type="submit"]');await page.waitForFunction(()=>!!localStorage.getItem('accessToken'),{timeout:20000});
   next=await page.evaluate(()=>localStorage.getItem('accessToken'));
@@ -65,6 +66,6 @@ async function main(){
  const result=await db.from('eduset_settings').update({access_token_enc:Buffer.concat([iv,enc.getAuthTag(),body]).toString('base64'),updated_at:new Date().toISOString(),updated_by:null,expires_at:expires}).eq('id',1).eq('access_token_enc',row.access_token_enc).select('id');
  if(result.error)throw Error('save_failed');
  write(result.data?.length?'renewed':'superseded',{connection_expires_at:expires});
- }catch(error){const safe=new Set(['invalid_token','school_account_mismatch','replacement_not_newer','active_release_missing','shared_connection_missing','credentials_permissions','school_rejected_token','school_response_invalid','save_failed']);write('needs_attention',{reason:safe.has(error.message)?error.message:phase==='human_verification'?'human_verification_required':'login_or_verification_failed',phase,retry_after:new Date(Date.now()+6*3600000).toISOString()});process.exitCode=1;}
+ }catch(error){const safe=new Set(['invalid_token','school_account_mismatch','replacement_not_newer','active_release_missing','shared_connection_missing','credentials_permissions','school_rejected_token','school_response_invalid','save_failed','verification_browser_unavailable','verification_network_failed','verification_page_failed','verification_widget_unavailable','verification_not_completed']);write('needs_attention',{reason:safe.has(error.message)?error.message:phase==='human_verification'?'verification_not_completed':'login_or_verification_failed',phase,...(error instanceof VerificationError?{verification:error.diagnostic}:{}),retry_after:new Date(Date.now()+6*3600000).toISOString()});process.exitCode=1;}
 }
 if(import.meta.url===pathToFileURL(process.argv[1]||'').href)await main();

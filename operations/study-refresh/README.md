@@ -39,3 +39,26 @@ Status is written without credentials or tokens to
 `~/.local/share/cbgpu-study-monitor/refresh-status.json`.
 Run `node --test operations/study-refresh/refresh.test.mts` for renewal policy tests.
 Disable automation with `systemctl --user disable --now cbgpu-study-refresh.timer`.
+
+### Verification diagnostics
+
+A 25-second wait without a normal response does **not** prove that a human was
+asked to solve a challenge. The worker observes only aggregate SDK HTTP failures,
+failed challenge requests, browser connectivity, page-error counts, widget-frame
+presence, and whether the normal response field exists/is ready. It does not log
+URLs, input values, cookies, credentials, or challenge responses, and it never
+intercepts or modifies the site's network requests or verification callbacks.
+
+`verification_network_failed`, `verification_browser_unavailable`,
+`verification_page_failed`, and `verification_widget_unavailable` identify
+observable technical failures. `verification_not_completed` means the normal
+widget did not finish within the bounded wait; the cause may still require
+legitimate operator action. It is not an automatic-renewal guarantee. The
+six-hour retry cooldown, compare-and-swap token replacement, and read-only token
+validation remain unchanged. Historical `human_verification_required` statuses
+have no network evidence and cannot retroactively distinguish these causes.
+
+Run `node --test operations/study-refresh/*.test.mts` for synthetic verification
+and renewal-policy tests. Install `verification.mts` alongside `refresh.mts` when
+an operator separately approves deploying this source revision; updating source
+does not update an existing installed `.mjs` worker.
