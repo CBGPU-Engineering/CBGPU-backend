@@ -198,7 +198,7 @@ pub fn notebook_uri(job: &str, uri: &str) -> bool {
         return false;
     };
     url.host_str() == Some("relay.invalid")
-        && url.pathname().starts_with(&prefix)
+        && url.path().starts_with(&prefix)
         && url.fragment().is_none()
 }
 #[cfg(test)]
