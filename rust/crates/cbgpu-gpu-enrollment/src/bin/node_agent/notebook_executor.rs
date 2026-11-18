@@ -1,4 +1,4 @@
-//! Opt-in notebook sandbox. Docker API is pinned to a local Unix socket; no shell or host paths.
+//! Opt-in notebook sandbox. Docker API is pinned to a local Unix socket; no shell or user-supplied host paths.
 use super::{
     notebook_docker_stream::{self, Pipe},
     notebook_http,

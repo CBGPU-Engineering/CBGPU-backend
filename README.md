@@ -78,3 +78,49 @@ Original component history was extracted from platform commit
 `f41d879f6b0a10192fa36235e370372a78ec7331`. Complete history and retired files
 remain available in Git; duplicate history maps and archived executable copies
 are not maintained in the current source tree.
+
+## School GPU notebooks
+
+New school nodes can report inventory, accept school-scoped reservations and run
+an explicitly enabled Jupyter executor. Inventory enrollment alone never grants
+compute access or adds a node to the shared AI pool. The existing four-GPU
+controller is independent of this executor.
+
+The initial executor supports Ubuntu x86_64 with an existing NVIDIA driver,
+Docker access and NVIDIA Container Toolkit. Prepare the approved image before
+redeeming the short-lived enrollment file. The default notebook allocation is
+2 CPU cores and 8 GiB RAM; 16 GiB host RAM is recommended. Runtime checks reject
+unsupported GPU passthrough, insufficient host capacity, foreign GPU processes,
+expired leases and another executor's owned container.
+
+Administrators download the enrollment and private notebook policy files from
+school administration. The installer uses private files rather than credentials
+in shell arguments:
+
+```bash
+chmod 600 /absolute/enrollment.json /absolute/notebook-policy.json
+./cbgpu-node-linux-x86_64 setup --install-user-service --notebooks /absolute/notebook-policy.json
+```
+
+The installer asks for the enrollment path and identity location. Notebook mode
+is opt-in, uses a separate owned user service, and never installs a driver,
+changes Docker group membership or stops an existing school controller. Existing
+inventory service upgrades require an explicit operator action. Check user
+service lingering if the node must remain online after logout.
+
+Notebook containers have no external network or published host ports. A
+read-only, verified static node executable provides a fixed local stdio tunnel;
+no CBGPU account token, node signing key or Docker socket enters the container.
+Files are temporary and must be downloaded before the reservation ends.
+
+The central `cbgpu-notebook-relay` verifies live reservation and session authority
+for HTTP and periodically for WebSockets. A one-use POST bootstrap installs a
+host-only job cookie on `notebooks.cbgpu.com`. Untrusted notebook HTML must never
+be served on a CBGPU login origin. The web deployment needs its explicit
+WebSocket dispatcher; an external Next HTTP rewrite alone is insufficient.
+
+Notebook SQL is additive and initially disabled. Apply it only after backup and
+clone validation, then configure the reviewed image digest and persistent
+signing key. GPU sharing remains disabled. Physical GPU passthrough must pass
+on each enrolled server before its resources become reservable. CPU transport
+fixtures do not establish physical GPU compatibility.
