@@ -22,8 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !listen.ip().is_loopback() {
         return Err("Relay must bind private loopback".into());
     }
-    let backend =
-        std::env::var("CBGPU_GPU_BACKEND_URL").unwrap_or_else(|_| "http://127.0.0.1:54321".into());
+    let backend = std::env::var("CBGPU_GPU_REGISTRY_BACKEND_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:54321".into());
     let endpoint = url::Url::parse(&backend)?;
     if !matches!(endpoint.host_str(), Some("127.0.0.1" | "localhost"))
         || endpoint.scheme() != "http"
@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let authority = Arc::new(PostgresAuthority {
         backend,
-        service_key: secret("CBGPU_GPU_SERVICE_ROLE_KEY_FILE")?,
+        service_key: secret("CBGPU_GPU_REGISTRY_SERVICE_KEY_FILE")?,
         client: reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
