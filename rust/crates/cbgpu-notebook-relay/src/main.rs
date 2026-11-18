@@ -42,6 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         backend,
         service_key: secret("CBGPU_GPU_REGISTRY_SERVICE_KEY_FILE")?,
         client: reqwest::Client::builder()
+            .no_proxy()
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
@@ -57,9 +58,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(listen).await?;
     eprintln!("{{\"service\":\"cbgpu-notebook-relay\",\"event\":\"ready\"}}");
     axum::serve(listener, cbgpu_notebook_relay::router(gateway))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown())
         .await?;
     Ok(())
+}
+
+async fn shutdown() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Install termination handler");
+        tokio::select! {_ = tokio::signal::ctrl_c()=>{},_ = term.recv()=>{}}
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
