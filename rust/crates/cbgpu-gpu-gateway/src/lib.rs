@@ -223,7 +223,8 @@ fn secure(h: &mut HeaderMap) {
         "strict-transport-security",
         "max-age=31536000".parse().unwrap(),
     );
-    h.insert("referrer-policy", "no-referrer".parse().unwrap());
+    // Keep same-origin form POST origins intact without disclosing notebook paths.
+    h.insert("referrer-policy", "strict-origin".parse().unwrap());
     h.insert("x-content-type-options", "nosniff".parse().unwrap());
 }
 fn hop(headers: &mut HeaderMap, upgrade: bool) {
