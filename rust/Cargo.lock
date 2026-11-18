@@ -853,6 +853,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbgpu-notebook-relay"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "cbgpu-notebook-protocol",
+ "chrono",
+ "ed25519-dalek",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.28.0",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "cbgpu-ops"
 version = "0.1.0"
 dependencies = [
