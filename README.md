@@ -124,3 +124,15 @@ clone validation, then configure the reviewed image digest and persistent
 signing key. GPU sharing remains disabled. Physical GPU passthrough must pass
 on each enrolled server before its resources become reservable. CPU transport
 fixtures do not establish physical GPU compatibility.
+
+### GPU node downloads and release drafts
+
+Reviewed connector and desktop setup packages are available in
+[GPU Node & Setup releases](https://github.com/CBGPU-Engineering/CBGPU-backend/releases/tag/gpu-node-v0.1.0-beta.1).
+The Windows EXE currently provides environment checks; Windows GPU installation remains disabled.
+
+Maintainers can push a new `gpu-node-vX.Y.Z-beta.N`, `-alpha.N` or `-rc.N` tag.
+The release workflow builds the static node and both desktop packages from that exact commit,
+runs the CPU-only Jupyter sandbox check and native package checks, and creates a **draft**.
+Review its `PROVENANCE.json`, `SHA256SUMS` and support limits before publishing. Existing
+releases and assets are never overwritten; no private runtime files are included.

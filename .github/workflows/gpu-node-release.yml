@@ -1,0 +1,110 @@
+name: GPU Node prerelease draft
+on:
+  push:
+    tags: ['gpu-node-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable prerelease tag, for example gpu-node-v0.1.0-beta.2
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: gpu-node-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  source:
+    if: github.repository == 'CBGPU-Engineering/CBGPU-backend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.source }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22
+      - id: source
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/gpu-node-release.mts resolve
+      - run: node --test scripts/gpu-node-release.test.mts
+  node:
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 4
+      RELEASE_SOURCE_SHA: ${{ needs.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22
+      - run: rustup toolchain install 1.100.0 --profile minimal --component clippy && rustup default 1.100.0 && rustup target add x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-gpu-enrollment
+      - run: cargo clippy --locked --manifest-path rust/Cargo.toml -p cbgpu-gpu-enrollment --all-targets -- -D warnings
+      - run: cargo build --locked --release --target x86_64-unknown-linux-musl --manifest-path rust/Cargo.toml -p cbgpu-gpu-enrollment --bin node-agent
+      - run: rust/target/x86_64-unknown-linux-musl/release/node-agent --help
+      - name: Verify the actual Jupyter sandbox on a disposable CPU-only container
+        run: |
+          docker pull quay.io/jupyter/pytorch-notebook@sha256:83066a1f1108f35cfea7b0f93ae24bb70d6e55c8eeff82b4f9a86dae4496f77b
+          export CBGPU_NOTEBOOK_STATIC_ELF="$PWD/rust/target/x86_64-unknown-linux-musl/release/node-agent"
+          export CBGPU_NOTEBOOK_STATIC_SHA256="$(sha256sum "$CBGPU_NOTEBOOK_STATIC_ELF" | cut -d ' ' -f 1)"
+          cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-gpu-enrollment --test notebook_docker_live production_sandbox_env_token_and_startup_are_verified_on_pinned_image -- --ignored --exact
+      - run: node scripts/gpu-node-release.mts node rust/target/x86_64-unknown-linux-musl/release/node-agent release-artifacts/node
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cbgpu-school-node-linux-x86_64
+          path: release-artifacts/node/*
+  setup:
+    needs: source
+    uses: ./.github/workflows/node-setup.yml
+    with:
+      source_ref: ${{ needs.source.outputs.commit }}
+  draft:
+    needs: [source, node, setup]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.source.outputs.tag }}
+      RELEASE_SOURCE_SHA: ${{ needs.source.outputs.commit }}
+      RELEASE_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-input
+          pattern: cbgpu-*-linux-x86_64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-input/cbgpu-node-setup-windows-x86_64
+          name: cbgpu-node-setup-windows-x86_64
+      - name: Validate source, checksums and public-only bundle
+        run: |
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$RELEASE_SOURCE_SHA"
+          node scripts/gpu-node-release.mts bundle release-input release-bundle
+      - name: Create a new immutable draft for maintainer review
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'A release already exists; refusing to overwrite or upload assets.' >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --target "$RELEASE_SOURCE_SHA" --draft --prerelease --latest=false --title "GPU Node & Setup $RELEASE_TAG" --notes-file release-bundle/RELEASE-NOTES.md release-bundle/*
