@@ -1,5 +1,6 @@
 //! Optional school GPU inventory. No scheduling, commands, execution or sharing endpoints.
 pub mod commands;
+pub mod notebooks;
 use axum::{
     Json, Router,
     body::to_bytes,
