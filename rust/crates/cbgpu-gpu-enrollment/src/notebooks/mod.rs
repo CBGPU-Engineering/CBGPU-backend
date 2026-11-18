@@ -135,3 +135,39 @@ pub async fn device(c: &Config, request: Request) -> Response {
     )
         .into_response()
 }
+
+/// Only the authenticated job owner can exchange a job URL for a fresh notebook grant.
+/// School/reservation/owner are resolved by the SQL authority, never browser parameters.
+pub async fn owner_session(c: &Config, request: Request, job: &str) -> Response {
+    if c.notebooks.is_none() {
+        return fail(StatusCode::NOT_FOUND, "NOTEBOOKS_DISABLED");
+    }
+    if request.method() != "POST" || request.uri().query().is_some() {
+        return fail(StatusCode::BAD_REQUEST, "INVALID_ROUTE");
+    }
+    let Some(auth) = crate::bearer(&request) else {
+        return fail(StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED");
+    };
+    let bytes = match to_bytes(request.into_body(), 1024).await {
+        Ok(b) => b,
+        Err(_) => return fail(StatusCode::PAYLOAD_TOO_LARGE, "INVALID_BODY"),
+    };
+    if !bytes.is_empty()
+        && !serde_json::from_slice::<serde_json::Value>(&bytes)
+            .is_ok_and(|v| v.as_object().is_some_and(|o| o.is_empty()))
+    {
+        return fail(StatusCode::BAD_REQUEST, "INVALID_BODY");
+    }
+    match rpc(
+        c,
+        "school_gpu_notebook_owner_session",
+        json!({"p_job_id":job}),
+        Some(&auth),
+        false,
+    )
+    .await
+    {
+        Ok(value) => ([("Cache-Control", "private, no-store")], Json(value)).into_response(),
+        Err(status) => fail(status, "NOTEBOOK_SESSION_DENIED"),
+    }
+}

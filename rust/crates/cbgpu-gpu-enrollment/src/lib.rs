@@ -243,6 +243,11 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     if request.uri().query().is_some() {
         return fail(StatusCode::BAD_REQUEST, "QUERY_NOT_SUPPORTED");
     }
+    if let ["v1", "gpu", "notebooks", job, "session"] = parts.as_slice()
+        && uuid(job)
+    {
+        return notebooks::owner_session(&c, request, job).await;
+    }
     if path.starts_with("/v1/gpu/notebooks/") {
         return notebooks::device(&c, request).await;
     }

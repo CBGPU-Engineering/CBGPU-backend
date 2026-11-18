@@ -27,7 +27,10 @@ SELECT public.school_gpu_notebook_device('fc530000-0000-4000-8000-000000000001',
 SELECT public.school_gpu_notebook_device('fc530000-0000-4000-8000-000000000001',1,5,extract(epoch FROM now())::bigint,'result',(SELECT v FROM nb WHERE k='result'));
 SELECT public.school_gpu_notebook_device('fc530000-0000-4000-8000-000000000001',1,6,extract(epoch FROM now())::bigint,'renew',(SELECT v-'result'FROM nb WHERE k='result'));
 RESET ROLE;SELECT set_config('request.jwt.claims','{"sub":"fc510000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fc520000-0000-4000-8000-000000000001"}',true);SET LOCAL ROLE authenticated;
-INSERT INTO nb VALUES('session',public.school_gpu_notebook_api('fixture-notebook','session','{"reservation_id":"fc550000-0000-4000-8000-000000000001"}'));
+INSERT INTO nb VALUES('session',public.school_gpu_notebook_owner_session((SELECT(v#>>'{job,id}')::uuid FROM nb WHERE k='job')));
+SELECT set_config('request.jwt.claims','{"sub":"fc510000-0000-4000-8000-000000000003","role":"authenticated","session_id":"fc520000-0000-4000-8000-000000000003"}',true);
+DO $$BEGIN BEGIN PERFORM public.school_gpu_notebook_owner_session((SELECT(v#>>'{job,id}')::uuid FROM nb WHERE k='job'));RAISE EXCEPTION'FOREIGN_JOB_BOOTSTRAP';EXCEPTION WHEN no_data_found THEN NULL;END;END$$;
+SELECT set_config('request.jwt.claims','{"sub":"fc510000-0000-4000-8000-000000000001","role":"authenticated","session_id":"fc520000-0000-4000-8000-000000000001"}',true);
 DO $$BEGIN IF(SELECT(v->>'expires_at')::timestamptz FROM nb WHERE k='session')<now()+interval'59 minutes'OR(SELECT(v->>'expires_at')::timestamptz FROM nb WHERE k='session')>now()+interval'1hour'THEN RAISE EXCEPTION'COOKIE_NOT_BOUND_TO_BOOKING';END IF;END$$;
 RESET ROLE;SELECT set_config('request.jwt.claims','{"role":"service_role"}',true);SET LOCAL ROLE service_role;
 DO $$DECLARE x jsonb;BEGIN x:=public.school_gpu_notebook_session((SELECT v->>'cookie_token'FROM nb WHERE k='session'),(SELECT(v#>>'{job,id}')::uuid FROM nb WHERE k='job'));IF x->>'valid'<>'true'THEN RAISE EXCEPTION'OWN_SESSION_DENIED';END IF;x:=public.school_gpu_notebook_session((SELECT v->>'cookie_token'FROM nb WHERE k='session'),gen_random_uuid());IF x->>'valid'<>'false'THEN RAISE EXCEPTION'CROSS_JOB_COOKIE';END IF;END$$;

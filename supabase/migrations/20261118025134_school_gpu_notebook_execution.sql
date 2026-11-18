@@ -135,4 +135,11 @@ CREATE OR REPLACE FUNCTION public.school_gpu_notebook_relay(p_node_id uuid,p_ver
  INSERT INTO cbgpu_schools.gpu_executor_capabilities(node_id,credential_version,relay_seen_at)VALUES(p_node_id,p_version,CASE WHEN p_connected THEN clock_timestamp()END)ON CONFLICT(node_id)DO UPDATE SET relay_seen_at=CASE WHEN p_connected THEN clock_timestamp()END WHERE cbgpu_schools.gpu_executor_capabilities.credential_version=p_version;
  RETURN jsonb_build_object('ok',FOUND);END$$;
 REVOKE ALL ON FUNCTION public.school_gpu_notebook_relay(uuid,bigint,boolean)FROM PUBLIC,anon,authenticated;GRANT EXECUTE ON FUNCTION public.school_gpu_notebook_relay(uuid,bigint,boolean)TO service_role;
+CREATE OR REPLACE FUNCTION public.school_gpu_notebook_owner_session(p_job_id uuid)RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE j cbgpu_schools.gpu_notebook_jobs;BEGIN
+ IF NOT public.cbgpu_personal_project_identity()THEN RAISE EXCEPTION'AUTHENTICATION_REQUIRED'USING ERRCODE='42501';END IF;
+ SELECT * INTO j FROM cbgpu_schools.gpu_notebook_jobs WHERE id=p_job_id AND owner_id=auth.uid();
+ IF NOT FOUND THEN RAISE EXCEPTION'NOTEBOOK_NOT_FOUND'USING ERRCODE='P0002';END IF;
+ RETURN public.school_gpu_notebook_api(j.school_id,'session',jsonb_build_object('reservation_id',j.reservation_id));END$$;
+REVOKE ALL ON FUNCTION public.school_gpu_notebook_owner_session(uuid)FROM PUBLIC,anon,service_role;GRANT EXECUTE ON FUNCTION public.school_gpu_notebook_owner_session(uuid)TO authenticated;
 COMMIT;
