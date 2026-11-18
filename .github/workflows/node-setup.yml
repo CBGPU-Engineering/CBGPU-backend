@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
-      - run: rustup toolchain install 1.100.0 --profile minimal && rustup default 1.100.0 && rustup target add x86_64-unknown-linux-musl
+      - run: rustup toolchain install 1.100.0 --profile minimal --component clippy && rustup default 1.100.0 && rustup target add x86_64-unknown-linux-musl
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node rust/crates/cbgpu-node-setup/build-web.mts
@@ -43,7 +43,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
-      - run: rustup toolchain install 1.100.0 --profile minimal; rustup default 1.100.0
+      - run: rustup toolchain install 1.100.0 --profile minimal --component clippy; rustup default 1.100.0
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node rust/crates/cbgpu-node-setup/build-web.mts
       - run: cargo test --locked --manifest-path rust/crates/cbgpu-node-setup/Cargo.toml
