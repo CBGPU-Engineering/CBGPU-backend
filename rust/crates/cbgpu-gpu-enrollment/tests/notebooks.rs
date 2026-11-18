@@ -112,3 +112,81 @@ async fn signed_node_binding_and_user_launch_never_trust_owner_payload() {
     }
     task.abort();
 }
+
+#[tokio::test]
+async fn identity_service_outages_are_not_permanent_node_revocation() {
+    for (status, body, expected) in [
+        (
+            StatusCode::UNAUTHORIZED,
+            json!({"code":"PGRST303","message":"JWT expired"}),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            StatusCode::FORBIDDEN,
+            json!({"code":"42501","message":"SERVICE_REQUIRED"}),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"message":"unavailable"}),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            StatusCode::FORBIDDEN,
+            json!({"code":"42501","message":"NODE_UNAVAILABLE"}),
+            StatusCode::FORBIDDEN,
+        ),
+    ] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().fallback(move || {
+                    let body = body.clone();
+                    async move { (status, Json(body)) }
+                }),
+            )
+            .await
+            .unwrap()
+        });
+        let config = Config {
+            enabled: true,
+            diagnostics: None,
+            notebooks: Some(Arc::new(SigningKey::from_bytes(&[5; 32]))),
+            backend_url: format!("http://{address}"),
+            anon_key: "anon".into(),
+            service_key: "service".into(),
+            client: reqwest::Client::new(),
+        };
+        let path = "/v1/gpu/notebooks/claim";
+        let request = NodeRequest {
+            protocol: 3,
+            node_id: "11111111-1111-4111-8111-111111111111".into(),
+            credential_version: 1,
+            sequence: 1,
+            issued_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+            method: "POST".into(),
+            path: path.into(),
+            payload: Payload::Claim {},
+        };
+        let signature = sign_node_request(&request, &SigningKey::from_bytes(&[4; 32]));
+        let response = router(config)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .body(Body::from(
+                        serde_json::to_vec(&SignedNodeRequest { request, signature }).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        task.abort();
+    }
+}

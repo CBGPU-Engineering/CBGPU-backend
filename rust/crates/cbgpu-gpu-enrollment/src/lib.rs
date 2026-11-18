@@ -181,6 +181,28 @@ async fn rpc(
         .send()
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    if !response.status().is_success() && privileged && name == "school_gpu_node_identity" {
+        // Only the exact policy denial is node revocation. Expired service credentials,
+        // unavailable schema and malformed provider errors must remain retryable outages.
+        let mut error = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        {
+            if error.len() + chunk.len() > 8192 {
+                return Err(StatusCode::SERVICE_UNAVAILABLE);
+            }
+            error.extend_from_slice(&chunk);
+        }
+        let denied = serde_json::from_slice::<Value>(&error)
+            .is_ok_and(|v| v["code"] == "42501" && v["message"] == "NODE_UNAVAILABLE");
+        return Err(if denied {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        });
+    }
     if !response.status().is_success() {
         return Err(if response.status().is_server_error() {
             StatusCode::SERVICE_UNAVAILABLE
