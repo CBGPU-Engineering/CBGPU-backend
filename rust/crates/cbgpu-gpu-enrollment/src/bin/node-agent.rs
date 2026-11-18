@@ -3,6 +3,8 @@
 mod diagnostic_client;
 #[path = "node_agent/diagnostics.rs"]
 mod diagnostics;
+#[path = "node_agent/installer.rs"]
+mod installer;
 use cbgpu_gpu_enrollment::{GpuHealth, Health, Report, hex, unhex};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
@@ -162,11 +164,92 @@ async fn post(
     Ok(r.json().await?)
 }
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().is_some_and(|s| s == "--help") {
         println!(
-            "Ubuntu inventory only. init <https-origin> <private-token-file> <absolute-new-identity-file>; report <private-identity-file> [--diagnostics <private-server-trust-json>]; run <private-identity-file> [--diagnostics <private-server-trust-json>]. Diagnostics are opt-in DIAGNOSTICS_ONLY, not notebook-ready. No drivers, services, jobs, sharing or daemon changes."
+            "Ubuntu inventory only. init <https-origin> <private-token-file> <absolute-new-identity-file>; report <private-identity-file> [--diagnostics <private-server-trust-json>]; run <private-identity-file> [--diagnostics <private-server-trust-json>]. Diagnostics are opt-in DIAGNOSTICS_ONLY, not notebook-ready. diagnose; setup [--install-user-service] (interactive private-file enrollment); install-user-service <private-identity-file> [--apply] (default PLAN only). Optional user service reports inventory, never executes jobs. Boot/logout continuity requires separately verified lingering. No root controller or driver changes."
         );
+        return Ok(());
+    }
+    if args.first().is_some_and(|s| s == "diagnose") && args.len() == 1 {
+        println!(
+            "{}",
+            installer::diagnose(
+                &std::fs::read_to_string("/etc/os-release").unwrap_or_default(),
+                std::env::consts::ARCH,
+                &installer::RealCommands
+            )
+        );
+        return Ok(());
+    }
+    let mut install_after_setup = false;
+    if args.first().is_some_and(|s| s == "setup") {
+        use std::io::{IsTerminal, Write};
+        if !(args.len() == 1 || (args.len() == 2 && args[1] == "--install-user-service"))
+            || !std::io::stdin().is_terminal()
+        {
+            return Err(
+                "Interactive setup requires a terminal; use init with private files for automation"
+                    .into(),
+            );
+        }
+        println!(
+            "CBGPU signed inventory setup. No jobs, drivers or existing controllers are changed. Credentials stay in private files; never paste them here."
+        );
+        fn prompt(label: &str) -> Result<String, Box<dyn std::error::Error>> {
+            print!("{label}: ");
+            std::io::stdout().flush()?;
+            let mut value = String::new();
+            std::io::stdin().read_line(&mut value)?;
+            Ok(value.trim().into())
+        }
+        let origin = prompt("Registry HTTPS origin (for example https://cbgpu.com)")?;
+        let token = prompt("Absolute enrollment JSON file (mode600)")?;
+        let home = std::env::var_os("HOME").ok_or("Home directory unavailable")?;
+        let default = std::path::PathBuf::from(home).join(".config/cbgpu-node/identity.json");
+        let identity = prompt(&format!(
+            "New absolute identity path [{}]",
+            default.display()
+        ))?;
+        let identity = if identity.is_empty() {
+            default
+        } else {
+            identity.into()
+        };
+        installer::prepare_identity_parent(&identity)?;
+        install_after_setup = args.len() == 2;
+        args = vec![
+            "init".into(),
+            origin,
+            token,
+            identity.to_str().ok_or("Invalid identity path")?.into(),
+        ];
+    }
+    if args.first().is_some_and(|s| s == "install-user-service") {
+        if !(args.len() == 2 || (args.len() == 3 && args[2] == "--apply")) {
+            return Err("Use install-user-service <private identity> [--apply]".into());
+        }
+        if !ubuntu() {
+            return Err("Ubuntu user service only".into());
+        }
+        private_read(Path::new(&args[1]))?;
+        let home = std::env::var_os("HOME").ok_or("Home unavailable")?;
+        let plan = installer::plan(
+            Path::new(&home),
+            &std::env::current_exe()?,
+            Path::new(&args[1]),
+        )?;
+        if args.len() == 3 {
+            installer::apply(&plan, &installer::RealCommands)?;
+            println!(
+                "New user inventory service enabled. Logout/boot continuity requires separately verified lingering; no executor installed."
+            );
+        } else {
+            println!(
+                "PLAN ONLY: new unit {}. Re-run with --apply to install this executable and enable only cbgpu-node-inventory.service. User lingering is NOT assumed.",
+                plan.unit.display()
+            );
+        }
         return Ok(());
     }
     if !ubuntu() {
@@ -222,6 +305,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("Registry identity mismatch; key preserved, no report sent".into());
             }
             println!("Private node identity saved. No execution or sharing enabled.");
+            if install_after_setup {
+                let home = std::env::var_os("HOME").ok_or("Home unavailable")?;
+                let plan = installer::plan(Path::new(&home), &std::env::current_exe()?, target)?;
+                installer::apply(&plan, &installer::RealCommands)?;
+                println!(
+                    "User inventory service enabled; boot/logout continuity depends on verified lingering."
+                );
+            } else {
+                println!(
+                    "Next: use install-user-service with the private identity file to review the optional service plan."
+                );
+            }
         }
         Some("report" | "run")
             if args.len() == 2 || (args.len() == 4 && args[2] == "--diagnostics") =>
@@ -229,6 +324,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let path = Path::new(&args[1]);
             let _lock = lock_identity(path)?;
             let mut diagnostics_client = None;
+            let mut failures = 0u32;
             loop {
                 let mut identity: Identity = serde_json::from_str(&private_read(path)?)?;
                 let url = endpoint(&identity.url)?;
@@ -272,12 +368,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let signature = hex(&key.sign(&serde_json::to_vec(&report)?).to_bytes());
                 write(path, &identity, false)?;
-                post(
+                if let Err(error) = post(
                     &client,
                     &format!("{url}/v1/gpu/report"),
                     json!({"report":report,"signature":signature}),
                 )
-                .await?;
+                .await
+                {
+                    if args[0] == "report" {
+                        return Err(error);
+                    }
+                    let delay = installer::retry_seconds(failures);
+                    failures = failures.saturating_add(1);
+                    eprintln!(
+                        "Inventory unavailable; retrying in {delay}s. No execution authority assumed; secret details suppressed."
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    continue;
+                }
+                failures = 0;
                 println!("Signed inventory accepted; no execution or sharing.");
                 if let Some(control) = diagnostics_client.as_mut() {
                     match control
