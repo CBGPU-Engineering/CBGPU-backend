@@ -601,3 +601,86 @@ async fn community_replies_bind_parent_and_keep_scope_server_owned() {
     assert_eq!(r.status(), 401);
     task.abort();
 }
+
+#[tokio::test]
+async fn platform_school_inventory_is_private_and_forwards_only_caller_authority() {
+    let mock = Router::new()
+        .route(
+            "/auth/v1/user",
+            get(|headers: HeaderMap| async move {
+                assert!(
+                    headers["authorization"] == "Bearer platform"
+                        || headers["authorization"] == "Bearer school-owner"
+                );
+                Json(json!({"id":"fixture"}))
+            }),
+        )
+        .route(
+            "/rest/v1/rpc/cbgpu_platform_school_directory",
+            post(|headers: HeaderMap, Json(v): Json<Value>| async move {
+                assert_eq!(headers["apikey"], "fixture-anon");
+                assert!(v.get("action").is_none());
+                if headers["authorization"] == "Bearer school-owner" {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        Json(json!({"code":"42501","message":"PLATFORM_ADMIN_REQUIRED"})),
+                    );
+                }
+                assert_eq!(
+                    v["payload"],
+                    json!({"q":"학교","status":"SUSPENDED","limit":"10","offset":"20"})
+                );
+                (
+                    StatusCode::OK,
+                    Json(
+                        json!({"items":[{"id":"suspended-school","status":"SUSPENDED"}],"total":1}),
+                    ),
+                )
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+    let app = router(config(true, format!("http://{address}")));
+    let path = "/v1/admin/schools?q=%ED%95%99%EA%B5%90&status=SUSPENDED&limit=10&offset=20";
+    let missing = app
+        .clone()
+        .oneshot(Request::get(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 401);
+    let denied = app
+        .clone()
+        .oneshot(
+            Request::get(path)
+                .header("authorization", "Bearer school-owner")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), 403);
+    let allowed = app
+        .clone()
+        .oneshot(
+            Request::get(path)
+                .header("authorization", "Bearer platform")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(allowed.status(), 200);
+    assert_eq!(body(allowed).await["items"][0]["status"], "SUSPENDED");
+    let mutation = app
+        .oneshot(
+            Request::post("/v1/admin/schools")
+                .header("authorization", "Bearer platform")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(mutation.status(), 404);
+    server.abort();
+}

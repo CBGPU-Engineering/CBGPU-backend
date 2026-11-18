@@ -102,6 +102,10 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             .map(|(key, value)| (key.into_owned(), Value::String(value.into_owned())))
             .collect();
     let route = match (path.as_slice(), &method) {
+        (["v1", "admin", "schools"], &Method::GET) => Some((
+            "platform_school_directory",
+            Value::Object(query_fields.clone()),
+        )),
         (["v1", "admin", "central-cpu-pool"], &Method::GET) => {
             Some(("central_cpu_pool_get", json!({})))
         }
@@ -454,6 +458,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             ("cbgpu_school_messenger_api", action)
         }
         "draft_create" => ("cbgpu_school_catalog_application_api", "draft_create"),
+        "platform_school_directory" => ("cbgpu_platform_school_directory", "list"),
         "feature_operator_list" => ("cbgpu_school_feature_operator_api", "list"),
         "feature_operator_review" => ("cbgpu_school_feature_operator_api", "review"),
         "publication_list" => ("cbgpu_public_project_api", "list"),
@@ -472,6 +477,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         _ => (rpc, action),
     };
     let rpc_body = match action {
+        "platform_school_directory" => json!({"payload":payload}),
         "resource_contexts" => json!({}),
         "resource_access" => json!({"target_school":payload["school_id"]}),
         "life_sources" => json!({"p_school_id":payload["school_id"]}),

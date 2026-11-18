@@ -350,6 +350,7 @@ fn main() -> Result<()> {
         "20261117144545_legacy_school_account_preference.sql",
         "20261117154700_platform_school_central_cpu_allocations.sql",
         "20261117233327_school_community_threaded_replies.sql",
+        "20261118001500_platform_school_directory.sql",
     ];
     let sources = migrations
         .iter()
@@ -993,9 +994,53 @@ fn main() -> Result<()> {
             repo.join("schema/tests/schools/community-replies.sql"),
         )?),
     )?;
+    command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        Some(&fs::read(
+            repo.join("schema/tests/schools/platform-directory.sql"),
+        )?),
+    )?;
     let manifest = fs::read_to_string(repo.join("schema/data/neis-high-schools-2026-10-31.json"))?;
+    let additive_sql = format!(
+        "BEGIN; CREATE TEMP TABLE catalog_original_schools AS SELECT id,to_jsonb(s) value FROM cbgpu_schools.schools s; CREATE TEMP TABLE catalog_original_members AS SELECT id,to_jsonb(m)value FROM cbgpu_schools.memberships m; CREATE TEMP TABLE catalog_delta AS SELECT ('{}'::jsonb-'schools'-'school_count')||jsonb_build_object('schools',coalesce(jsonb_agg(item),'[]'::jsonb),'school_count',count(*)) payload FROM jsonb_array_elements('{}'::jsonb->'schools')item WHERE NOT EXISTS(SELECT 1 FROM cbgpu_schools.schools s WHERE s.official_id=item->>'official_id'); GRANT SELECT ON catalog_delta TO cbgpu_school_directory_importer; SET LOCAL ROLE cbgpu_school_directory_importer; SELECT cbgpu_schools.import_official_directory(payload) FROM catalog_delta; SELECT cbgpu_schools.import_official_directory(payload) FROM catalog_delta; RESET ROLE; DO $$BEGIN IF EXISTS(SELECT id,value FROM catalog_original_schools EXCEPT SELECT id,to_jsonb(s) FROM cbgpu_schools.schools s) OR EXISTS(SELECT id,value FROM catalog_original_members EXCEPT SELECT id,to_jsonb(m) FROM cbgpu_schools.memberships m) OR EXISTS(SELECT 1 FROM cbgpu_schools.schools s WHERE NOT EXISTS(SELECT FROM catalog_original_schools old WHERE old.id=s.id)AND(s.status<>'LISTED' OR cardinality(s.features)>0 OR s.verified_at IS NOT NULL OR EXISTS(SELECT FROM cbgpu_schools.memberships m WHERE m.school_id=s.id)OR EXISTS(SELECT FROM cbgpu_schools.gpu_nodes n WHERE n.school_id=s.id))) THEN RAISE EXCEPTION 'ADDITIVE_DIRECTORY_CHANGED_OR_GRANTED_EXISTING_STATE'; END IF; END$$; SELECT jsonb_build_object('before_schools',(SELECT count(*) FROM catalog_original_schools),'additions',(SELECT(payload->>'school_count')::int FROM catalog_delta),'after_schools',(SELECT count(*) FROM cbgpu_schools.schools),'old_rows_and_memberships_unchanged',true,'new_permissions',false); ROLLBACK;",
+        manifest.replace('\'', "''"),
+        manifest.replace('\'', "''")
+    );
+    let additive_proof = command(
+        &[
+            "exec",
+            "-i",
+            &clone.0,
+            "psql",
+            "-h",
+            "/tmp",
+            "-U",
+            "cbgpu_clone_bootstrap",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-qAt",
+        ],
+        Some(additive_sql.as_bytes()),
+    )?;
+    private_file(&backup.join("catalog-additive-proof.txt"))?.write_all(&additive_proof)?;
     let directory_sql = format!(
-        "BEGIN; SELECT cbgpu_schools.import_official_directory('{}'::jsonb); SELECT cbgpu_schools.import_official_directory('{}'::jsonb); DO $$BEGIN IF (SELECT count(*) FROM cbgpu_schools.schools)<>2408 OR (SELECT count(*) FROM cbgpu_schools.schools WHERE official_id='8000075' AND id='cbsh' AND status='APPROVED')<>1 OR EXISTS(SELECT 1 FROM cbgpu_schools.schools WHERE id<>'cbsh' AND(status<>'LISTED' OR cardinality(features)>0 OR verified_at IS NOT NULL)) THEN RAISE EXCEPTION 'OFFICIAL_DIRECTORY_PRIVILEGE_OR_IDENTITY_CHANGE'; END IF; END$$; ROLLBACK;",
+        "BEGIN; CREATE TEMP TABLE original_school_permissions AS SELECT id,configuration,features,status,verified_at,brand_color,logo_path,revision FROM cbgpu_schools.schools; SELECT cbgpu_schools.import_official_directory('{}'::jsonb); SELECT cbgpu_schools.import_official_directory('{}'::jsonb); DO $$BEGIN IF (SELECT count(*) FROM cbgpu_schools.schools WHERE official_id IN(SELECT x->>'official_id' FROM jsonb_array_elements('{}'::jsonb->'schools')x))<>2477 OR EXISTS(SELECT id,configuration,features,status,verified_at,brand_color,logo_path,revision FROM original_school_permissions EXCEPT SELECT id,configuration,features,status,verified_at,brand_color,logo_path,revision FROM cbgpu_schools.schools) OR EXISTS(SELECT 1 FROM cbgpu_schools.schools s WHERE NOT EXISTS(SELECT 1 FROM original_school_permissions p WHERE p.id=s.id)AND(s.status<>'LISTED' OR cardinality(s.features)>0 OR s.verified_at IS NOT NULL)) THEN RAISE EXCEPTION 'OFFICIAL_DIRECTORY_PRIVILEGE_OR_IDENTITY_CHANGE'; END IF; END$$; ROLLBACK;",
+        manifest.replace('\'', "''"),
         manifest.replace('\'', "''"),
         manifest.replace('\'', "''")
     );

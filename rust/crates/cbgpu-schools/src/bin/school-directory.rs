@@ -73,7 +73,7 @@ fn normalize(bytes: &[u8]) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
     let mut excluded = Vec::new();
     for row in csv.records() {
         let row = row?;
-        if row.get(kind) != Some("고등학교") {
+        if !matches!(row.get(kind), Some("고등학교" | "각종학교(고)")) {
             continue;
         }
         let get = |i| row.get(i).unwrap_or("").trim();
@@ -99,7 +99,7 @@ fn normalize(bytes: &[u8]) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
         }
         schools.push(json!({
             "official_id":official_id,"official_name":get(name),"display_name":get(name),
-            "type":"HIGH_SCHOOL","region":get(region),"address":get(address),
+            "type":"HIGH_SCHOOL","source_kind":get(kind),"region":get(region),"address":get(address),
             "contact_phone":get(phone),"education_office_code":get(office),
             "homepage_url":homepage.and_then(|i|official_homepage(get(i))),
             "status":"LISTED","features":[],"verified_at":null
@@ -172,7 +172,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if cbsh.len() != 1 {
         return Err("Existing Chungbuk Science High School must match exactly once".into());
     }
-    let manifest = json!({"format_version":1,"scope":"KOREAN_HIGH_SCHOOLS","source":url,"source_as_of":format!("{:04}-{:02}-{:02}",date.0,date.1,date.2),"source_sha256":format!("{:x}",Sha256::digest(&bytes)),"license_url":format!("{ORIGIN}/portal/data/service/selectServicePage.do?infId={DATASET}&infSeq=2"),"school_count":schools.len(),"schools":schools,"excluded":excluded});
+    let manifest = json!({"format_version":1,"normalization_version":2,"scope":"KOREAN_HIGH_SCHOOLS","included_source_kinds":["고등학교","각종학교(고)"],"source":url,"source_as_of":format!("{:04}-{:02}-{:02}",date.0,date.1,date.2),"source_sha256":format!("{:x}",Sha256::digest(&bytes)),"license_url":format!("{ORIGIN}/portal/data/service/selectServicePage.do?infId={DATASET}&infSeq=2"),"school_count":schools.len(),"schools":schools,"excluded":excluded});
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -189,6 +189,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn includes_explicit_high_school_alternatives_but_not_middle_or_unspecified_kinds() {
+        let input = "행정표준코드,학교명,학교종류명,시도명,도로명주소,전화번호,시도교육청코드\n8000550,단재고등학교,각종학교(고),충청북도,청주시,043-000,M10\n1234567,일반고등학교,고등학교,충청북도,청주시,043-000,M10\n1234568,대안중학교,각종학교(중),충청북도,청주시,043-000,M10\n1234569,일반중학교,중학교,충청북도,청주시,043-000,M10\n1234570,미분류학교,각종학교,충청북도,청주시,043-000,M10\n";
+        let (bytes, _, _) = EUC_KR.encode(input);
+        let (schools, excluded) = normalize(&bytes).unwrap();
+        assert_eq!(schools.len(), 2);
+        assert!(excluded.is_empty());
+        assert!(schools.iter().any(|s| s["official_id"] == "8000550"
+            && s["source_kind"] == "각종학교(고)"
+            && s["status"] == "LISTED"
+            && s["features"] == json!([])
+            && s["verified_at"].is_null()));
+    }
     #[test]
     fn official_homepage_is_metadata_not_an_arbitrary_proxy_destination() {
         assert_eq!(
