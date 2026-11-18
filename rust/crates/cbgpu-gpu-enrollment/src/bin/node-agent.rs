@@ -5,6 +5,22 @@ mod diagnostic_client;
 mod diagnostics;
 #[path = "node_agent/installer.rs"]
 mod installer;
+#[path = "node_agent/notebook_client.rs"]
+mod notebook_client;
+#[path = "node_agent/notebook_docker_stream.rs"]
+mod notebook_docker_stream;
+#[path = "node_agent/notebook_executor.rs"]
+mod notebook_executor;
+#[path = "node_agent/notebook_gpu_probe.rs"]
+mod notebook_gpu_probe;
+#[path = "node_agent/notebook_http.rs"]
+mod notebook_http;
+#[path = "node_agent/notebook_relay.rs"]
+mod notebook_relay;
+#[path = "node_agent/notebook_runtime.rs"]
+mod notebook_runtime;
+#[path = "node_agent/notebook_stdio.rs"]
+mod notebook_stdio;
 use cbgpu_gpu_enrollment::{GpuHealth, Health, Report, hex, unhex};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
@@ -167,7 +183,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().is_some_and(|s| s == "--help") {
         println!(
-            "Ubuntu inventory only. init <https-origin> <private-token-file> <absolute-new-identity-file>; report <private-identity-file> [--diagnostics <private-server-trust-json>]; run <private-identity-file> [--diagnostics <private-server-trust-json>]. Diagnostics are opt-in DIAGNOSTICS_ONLY, not notebook-ready. diagnose; setup [--install-user-service] (interactive private-file enrollment); install-user-service <private-identity-file> [--apply] (default PLAN only). Optional user service reports inventory, never executes jobs. Boot/logout continuity requires separately verified lingering. No root controller or driver changes."
+            "Ubuntu node agent (inventory by default). init <https-origin> <private-token-file> <absolute-new-identity-file>; report <private-identity-file> [--diagnostics <private-server-trust-json>]; run <private-identity-file> [--diagnostics <private-server-trust-json>]. Diagnostics are opt-in DIAGNOSTICS_ONLY, not notebook-ready. diagnose; setup [--install-user-service] (interactive private-file enrollment); install-user-service <private-identity-file> [--apply] (default PLAN only). Optional user service reports inventory, never executes jobs. Boot/logout continuity requires separately verified lingering. No root controller or driver changes. Explicit setup: setup --install-user-service --notebooks <private-policy-json>. Separate service plan: install-executor-user-service <identity> <policy> [--apply]. Explicit foreground notebook mode: run <private-identity-file> --notebooks <private-protocol3-policy-json>; requires separately approved Docker access, existing NVIDIA toolkit and pre-pulled approved image. Temporary workspace only. Inventory installation never grants Docker permissions."
         );
         return Ok(());
     }
@@ -183,14 +199,28 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let mut install_after_setup = false;
+    let mut notebook_setup_policy: Option<std::path::PathBuf> = None;
     if args.first().is_some_and(|s| s == "setup") {
         use std::io::{IsTerminal, Write};
-        if !(args.len() == 1 || (args.len() == 2 && args[1] == "--install-user-service"))
+        if !(args.len() == 1
+            || (args.len() == 2 && args[1] == "--install-user-service")
+            || (args.len() == 4 && args[1] == "--install-user-service" && args[2] == "--notebooks"))
             || !std::io::stdin().is_terminal()
         {
             return Err(
                 "Interactive setup requires a terminal; use init with private files for automation"
                     .into(),
+            );
+        }
+        if !ubuntu() {
+            return Err("Ubuntu setup only; no files changed".into());
+        }
+        if args.len() == 4 {
+            let policy = std::path::PathBuf::from(&args[3]);
+            notebook_client::Policy::read(&policy)?;
+            notebook_setup_policy = Some(policy);
+            println!(
+                "Explicit temporary notebook mode: existing Docker/NVIDIA-toolkit access and the approved image are required. No permissions or drivers are installed. Notebook workspace is temporary and removed after the reservation."
             );
         }
         println!(
@@ -217,13 +247,48 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             identity.into()
         };
         installer::prepare_identity_parent(&identity)?;
-        install_after_setup = args.len() == 2;
+        install_after_setup = args.len() == 2 || args.len() == 4;
         args = vec![
             "init".into(),
             origin,
             token,
             identity.to_str().ok_or("Invalid identity path")?.into(),
         ];
+    }
+    if args
+        .first()
+        .is_some_and(|s| s == "install-executor-user-service")
+    {
+        if !(args.len() == 3 || (args.len() == 4 && args[3] == "--apply")) {
+            return Err(
+                "Use install-executor-user-service <private identity> <private policy> [--apply]"
+                    .into(),
+            );
+        }
+        if !ubuntu() {
+            return Err("Ubuntu user service only".into());
+        }
+        private_read(Path::new(&args[1]))?;
+        notebook_client::Policy::read(Path::new(&args[2]))?;
+        let home = std::env::var_os("HOME").ok_or("Home unavailable")?;
+        let plan = installer::executor_plan(
+            Path::new(&home),
+            &std::env::current_exe()?,
+            Path::new(&args[1]),
+            Path::new(&args[2]),
+        )?;
+        if args.len() == 4 {
+            installer::apply(&plan, &installer::RealCommands)?;
+            println!(
+                "Explicit notebook user service enabled; no Docker access or driver permissions granted. Boot/logout continuity still requires verified lingering."
+            );
+        } else {
+            println!(
+                "PLAN ONLY: {}. Add --apply only after reviewing temporary notebook execution and existing Docker/toolkit access.",
+                plan.unit.display()
+            );
+        }
+        return Ok(());
     }
     if args.first().is_some_and(|s| s == "install-user-service") {
         if !(args.len() == 2 || (args.len() == 3 && args[2] == "--apply")) {
@@ -307,10 +372,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("Private node identity saved. No execution or sharing enabled.");
             if install_after_setup {
                 let home = std::env::var_os("HOME").ok_or("Home unavailable")?;
-                let plan = installer::plan(Path::new(&home), &std::env::current_exe()?, target)?;
+                let plan = if let Some(policy) = &notebook_setup_policy {
+                    installer::executor_plan(
+                        Path::new(&home),
+                        &std::env::current_exe()?,
+                        target,
+                        policy,
+                    )?
+                } else {
+                    installer::plan(Path::new(&home), &std::env::current_exe()?, target)?
+                };
                 installer::apply(&plan, &installer::RealCommands)?;
                 println!(
-                    "User inventory service enabled; boot/logout continuity depends on verified lingering."
+                    "Requested user node service enabled; boot/logout continuity depends on verified lingering."
                 );
             } else {
                 println!(
@@ -319,11 +393,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Some("report" | "run")
-            if args.len() == 2 || (args.len() == 4 && args[2] == "--diagnostics") =>
+            if args.len() == 2
+                || (args.len() == 4
+                    && (args[2] == "--diagnostics"
+                        || (args[0] == "run" && args[2] == "--notebooks"))) =>
         {
             let path = Path::new(&args[1]);
             let _lock = lock_identity(path)?;
             let mut diagnostics_client = None;
+            let mut notebook_task = None;
             let mut failures = 0u32;
             loop {
                 let mut identity: Identity = serde_json::from_str(&private_read(path)?)?;
@@ -331,7 +409,32 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let key = SigningKey::from_bytes(
                     &unhex::<32>(&identity.private_key).ok_or("Invalid node key")?,
                 );
-                if args.len() == 4 {
+                if args.len() == 4 && args[2] == "--notebooks" && notebook_task.is_none() {
+                    let identity_path = path.to_owned();
+                    let policy_path = std::path::PathBuf::from(&args[3]);
+                    let origin = url.clone();
+                    let node = identity.node_id.clone();
+                    let version = identity.credential_version;
+                    let notebook_key = key.clone();
+                    notebook_task = Some(tokio::spawn(async move {
+                        if notebook_runtime::run(
+                            &identity_path,
+                            &policy_path,
+                            &origin,
+                            &node,
+                            version,
+                            notebook_key,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            eprintln!(
+                                "Notebook mode stopped safely or needs operator inspection; secrets suppressed."
+                            );
+                        }
+                    }));
+                }
+                if args.len() == 4 && args[2] == "--diagnostics" {
                     if diagnostics_client.is_none() {
                         diagnostics_client = Some(diagnostic_client::Client::open(
                             path,
@@ -414,9 +517,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
-#[tokio::main]
-async fn main() {
-    if run().await.is_err() {
+fn main() {
+    // Must run before constructing Tokio: the sandbox helper needs only two bounded stdio threads.
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if args.as_slice() == ["__notebook-stdio"] {
+        if notebook_stdio::run().is_err() {
+            std::process::exit(1)
+        }
+        return;
+    }
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
+        Ok(r) => r,
+        Err(_) => {
+            eprintln!("Node runtime unavailable");
+            std::process::exit(1)
+        }
+    };
+    if runtime.block_on(run()).is_err() {
         eprintln!(
             "Node operation failed. Check private file permissions, Ubuntu/NVIDIA support, registry availability and enrollment validity; secret details suppressed."
         );

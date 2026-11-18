@@ -113,12 +113,29 @@ fn ensure_owned_dir(path: &Path, private: bool) -> Result<()> {
 fn private_dir(path: &Path) -> Result<()> {
     ensure_owned_dir(path, true)
 }
+pub fn executor_lock(root: &Path) -> std::result::Result<std::fs::File, &'static str> {
+    private_dir(root).map_err(|_| "PRIVATE_FILE_INVALID")?;
+    let mut o = fs::OpenOptions::new();
+    o.create(true).read(true).write(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    let f = o
+        .open(root.join(".executor.lock"))
+        .map_err(|_| "EXECUTOR_ALREADY_RUNNING")?;
+    fs2::FileExt::try_lock_exclusive(&f).map_err(|_| "EXECUTOR_ALREADY_RUNNING")?;
+    Ok(f)
+}
 pub fn prepare_identity_parent(path: &Path) -> Result<()> {
     safe_path(path)?;
     private_dir(path.parent().ok_or("Missing identity directory")?)
 }
 pub struct Plan {
     pub unit: PathBuf,
+    pub service: String,
     pub binary: PathBuf,
     pub identity: PathBuf,
     pub text: String,
@@ -148,11 +165,38 @@ pub fn plan(home: &Path, executable: &Path, identity: &Path) -> Result<Plan> {
     );
     Ok(Plan {
         unit,
+        service: "cbgpu-node-inventory.service".into(),
         binary,
         identity: identity.into(),
         text,
         bytes,
     })
+}
+pub fn executor_plan(
+    home: &Path,
+    executable: &Path,
+    identity: &Path,
+    policy: &Path,
+) -> Result<Plan> {
+    safe_path(policy)?;
+    let mut plan = plan(home, executable, identity)?;
+    plan.service = "cbgpu-node-executor.service".into();
+    plan.unit = home.join(".config/systemd/user").join(&plan.service);
+    plan.text = plan
+        .text
+        .replace(
+            "Description=CBGPU signed inventory reporter (not an executor)",
+            "Description=CBGPU explicitly approved temporary notebook node",
+        )
+        .replace(
+            &format!("run \"{}\"", identity.display()),
+            &format!(
+                "run \"{}\" --notebooks \"{}\"",
+                identity.display(),
+                policy.display()
+            ),
+        );
+    Ok(plan)
 }
 fn create_private(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
     use std::io::Write;
@@ -173,12 +217,34 @@ pub fn apply(plan: &Plan, commands: &impl Commands) -> Result<()> {
     safe_path(&plan.unit)?;
     safe_path(&plan.binary)?;
     safe_path(&plan.identity)?;
+    if ![
+        "cbgpu-node-inventory.service",
+        "cbgpu-node-executor.service",
+    ]
+    .contains(&plan.service.as_str())
+        || plan.unit.file_name().and_then(|v| v.to_str()) != Some(plan.service.as_str())
+    {
+        return Err("Unrecognized node service".into());
+    }
+    if plan.service == "cbgpu-node-executor.service" {
+        for check in ["is-active", "is-enabled"] {
+            if commands
+                .output(
+                    "systemctl",
+                    &["--user", check, "--quiet", "cbgpu-node-inventory.service"],
+                )?
+                .0
+            {
+                return Err("Explicitly stop and disable only your previous inventory user service before installing notebook mode".into());
+            }
+        }
+    }
     let (ok, state) = commands.output(
         "systemctl",
         &[
             "--user",
             "show",
-            "cbgpu-node-inventory.service",
+            &plan.service,
             "--property=LoadState",
             "--value",
         ],
@@ -202,7 +268,7 @@ pub fn apply(plan: &Plan, commands: &impl Commands) -> Result<()> {
     create_private(&plan.unit, plan.text.as_bytes(), false)?;
     for args in [
         vec!["--user", "daemon-reload"],
-        vec!["--user", "enable", "--now", "cbgpu-node-inventory.service"],
+        vec!["--user", "enable", "--now", plan.service.as_str()],
     ] {
         if !commands.output("systemctl", &args)?.0 {
             return Err("Service setup incomplete; private files retained for explicit inspection, no other service changed".into());
@@ -228,7 +294,7 @@ mod tests {
         fn output(&self, p: &str, a: &[&str]) -> Result<(bool, String)> {
             self.calls.borrow_mut().push(format!("{p} {}", a.join(" ")));
             Ok((
-                true,
+                !a.contains(&"--quiet"),
                 if a.contains(&"--property=LoadState") {
                     if self.existing { "loaded" } else { "not-found" }
                 } else {
@@ -374,6 +440,40 @@ mod tests {
                 .mode()
                 & 0o777,
             0o700
+        );
+        fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn executor_service_is_explicit_separate_and_uses_no_privilege_grant() {
+        let d = tmp();
+        fs::create_dir_all(&d).unwrap();
+        let e = d.join("elf");
+        fs::write(&e, b"\x7fELFfixture").unwrap();
+        let p = executor_plan(
+            &d,
+            &e,
+            &d.join(".config/cbgpu-node/identity.json"),
+            &d.join("policy.json"),
+        )
+        .unwrap();
+        assert_eq!(p.service, "cbgpu-node-executor.service");
+        assert!(p.text.contains("--notebooks"));
+        assert!(!p.text.contains("sudo"));
+        assert!(!p.text.contains("SupplementaryGroups"));
+        let f = Fake {
+            calls: RefCell::new(vec![]),
+            existing: false,
+        };
+        apply(&p, &f).unwrap();
+        assert!(
+            !d.join(".config/systemd/user/cbgpu-node-inventory.service")
+                .exists()
+        );
+        assert!(
+            f.calls
+                .borrow()
+                .iter()
+                .all(|c| !c.contains(" stop ") && !c.contains(" disable "))
         );
         fs::remove_dir_all(d).unwrap();
     }
