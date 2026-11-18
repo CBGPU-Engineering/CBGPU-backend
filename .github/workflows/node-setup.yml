@@ -38,6 +38,9 @@ jobs:
   windows:
     runs-on: windows-2025
     timeout-minutes: 20
+    env:
+      # The downloaded installer must run without a separately installed VC++ redistributable.
+      RUSTFLAGS: '-C target-feature=+crt-static'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -51,9 +54,85 @@ jobs:
       - run: cargo build --locked --release --manifest-path rust/crates/cbgpu-node-setup/Cargo.toml
       - shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force release-artifacts/node-setup | Out-Null
           Copy-Item rust/crates/cbgpu-node-setup/target/release/cbgpu-node-setup.exe release-artifacts/node-setup/CBGPU-GPU-Setup-x86_64.exe
           $file = 'release-artifacts/node-setup/CBGPU-GPU-Setup-x86_64.exe'
+          # Read actual IMAGE_IMPORT_DESCRIPTOR names; static CRT strings are not imports.
+          [byte[]]$peBytes = [System.IO.File]::ReadAllBytes((Resolve-Path $file))
+          function Assert-PeRange([long]$Offset, [long]$Length) {
+            if ($Offset -lt 0 -or $Length -lt 0 -or $Offset + $Length -gt $peBytes.Length) {
+              throw 'Invalid PE file range'
+            }
+          }
+          function Read-PeU16([long]$Offset) {
+            Assert-PeRange $Offset 2
+            return [BitConverter]::ToUInt16($peBytes, [int]$Offset)
+          }
+          function Read-PeU32([long]$Offset) {
+            Assert-PeRange $Offset 4
+            return [BitConverter]::ToUInt32($peBytes, [int]$Offset)
+          }
+          if ((Read-PeU16 0) -ne 0x5a4d) { throw 'Installer is not a PE executable' }
+          [long]$peOffset = Read-PeU32 0x3c
+          if ((Read-PeU32 $peOffset) -ne 0x4550) { throw 'Invalid PE signature' }
+          [long]$coffOffset = $peOffset + 4
+          [long]$sectionCount = Read-PeU16 ($coffOffset + 2)
+          [long]$optionalSize = Read-PeU16 ($coffOffset + 16)
+          [long]$optionalOffset = $coffOffset + 20
+          if ((Read-PeU16 $optionalOffset) -ne 0x20b) { throw 'Installer must be a PE32+ x64 executable' }
+          if ((Read-PeU16 $coffOffset) -ne 0x8664) { throw 'Installer must target AMD64' }
+          if ($optionalSize -lt 128 -or $sectionCount -lt 1 -or $sectionCount -gt 96) {
+            throw 'Invalid PE header sizes'
+          }
+          Assert-PeRange $optionalOffset $optionalSize
+          [long]$headersSize = Read-PeU32 ($optionalOffset + 60)
+          [long]$sectionsOffset = $optionalOffset + $optionalSize
+          Assert-PeRange $sectionsOffset ($sectionCount * 40)
+          function Convert-PeRva([long]$Rva) {
+            if ($Rva -lt $headersSize) { Assert-PeRange $Rva 1; return $Rva }
+            for ($i = 0; $i -lt $sectionCount; $i++) {
+              [long]$section = $sectionsOffset + $i * 40
+              [long]$virtualSize = Read-PeU32 ($section + 8)
+              [long]$virtualAddress = Read-PeU32 ($section + 12)
+              [long]$rawSize = Read-PeU32 ($section + 16)
+              [long]$rawOffset = Read-PeU32 ($section + 20)
+              if ($Rva -ge $virtualAddress -and $Rva -lt $virtualAddress + [Math]::Max($virtualSize, $rawSize)) {
+                [long]$delta = $Rva - $virtualAddress
+                if ($delta -ge $rawSize) { throw 'PE import points outside section file data' }
+                Assert-PeRange ($rawOffset + $delta) 1
+                return $rawOffset + $delta
+              }
+            }
+            throw 'PE import RVA has no file mapping'
+          }
+          if ((Read-PeU32 ($optionalOffset + 108)) -lt 2) { throw 'PE import directory is missing' }
+          [long]$importRva = Read-PeU32 ($optionalOffset + 120)
+          [long]$importSize = Read-PeU32 ($optionalOffset + 124)
+          if ($importRva -eq 0 -or $importSize -lt 20) { throw 'PE import directory is empty' }
+          [long]$importsOffset = Convert-PeRva $importRva
+          $imports = [System.Collections.Generic.List[string]]::new()
+          $terminated = $false
+          for ($i = 0; $i -lt 4096 -and ($i + 1) * 20 -le $importSize; $i++) {
+            [long]$descriptor = $importsOffset + $i * 20
+            Assert-PeRange $descriptor 20
+            $fields = @(0, 4, 8, 12, 16 | ForEach-Object { Read-PeU32 ($descriptor + $_) })
+            if (($fields | Where-Object { $_ -ne 0 }).Count -eq 0) { $terminated = $true; break }
+            [long]$nameOffset = Convert-PeRva $fields[3]
+            [long]$end = $nameOffset
+            while ($end -lt $peBytes.Length -and $end - $nameOffset -lt 512 -and $peBytes[$end] -ne 0) { $end++ }
+            if ($end -ge $peBytes.Length -or $end - $nameOffset -ge 512 -or $end -eq $nameOffset) {
+              throw 'Invalid PE import name'
+            }
+            $name = [Text.Encoding]::ASCII.GetString($peBytes, [int]$nameOffset, [int]($end - $nameOffset))
+            if ($name -notmatch '^[a-z0-9_.-]+\.dll$') { throw 'Invalid PE DLL import name' }
+            if ($name -match '^(vcruntime|msvcp|msvcr)[0-9].*\.dll$') {
+              throw "Installer requires a separate Visual C++ redistributable: $name"
+            }
+            $imports.Add($name)
+          }
+          if (-not $terminated -or $imports.Count -eq 0) { throw 'PE import table was not validated' }
+          Write-Host "Verified system DLL imports: $($imports -join ', ')"
           $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
           "$hash  CBGPU-GPU-Setup-x86_64.exe" | Set-Content -Encoding ascii "$file.sha256"
           $process = Start-Process -FilePath (Resolve-Path $file) -ArgumentList '--version' -Wait -PassThru
