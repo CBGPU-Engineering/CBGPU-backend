@@ -4,7 +4,7 @@ A small Rust setup application with a local Korean browser UI. Opening the
 AppImage starts a private, short-lived setup session. It validates downloaded
 node artifacts against the official manifest, imports school enrollment files,
 runs explicitly requested diagnostics, and installs the existing reviewed node
-user service. It never asks for a CBGPU password or changes a driver, Docker
+user service. Its explicit image-preparation button pulls only the fixed public digest through the local Docker socket, using an empty private Docker CLI configuration instead of personal registry credentials. It never asks for a CBGPU password or changes a driver, Docker
 permission, existing identity, or existing service.
 
 Linux installation currently supports Ubuntu x86_64 with an existing NVIDIA

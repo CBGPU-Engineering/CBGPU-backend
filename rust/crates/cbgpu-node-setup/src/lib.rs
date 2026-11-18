@@ -28,13 +28,47 @@ type Answer = Result<Json<Value>, StatusCode>;
 type RunFuture<'a> = Pin<Box<dyn Future<Output = Result<Vec<u8>, ()>> + Send + 'a>>;
 pub trait Runner: Send + Sync {
     fn run<'a>(&'a self, program: &'a Path, args: Vec<String>) -> RunFuture<'a>;
+    fn prepare_image<'a>(&'a self, _config: &'a Path) -> RunFuture<'a> {
+        Box::pin(async { Err(()) })
+    }
 }
 pub struct RealRunner;
 impl Runner for RealRunner {
+    fn prepare_image<'a>(&'a self, config: &'a Path) -> RunFuture<'a> {
+        Box::pin(async move {
+            let mut child = tokio::process::Command::new("/usr/bin/docker")
+                .args(["--host", "unix:///var/run/docker.sock", "--config"])
+                .arg(config)
+                .args(["image", "pull", IMAGE])
+                .env_remove("DOCKER_HOST")
+                .env_remove("DOCKER_CONTEXT")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|_| ())?;
+            let status = tokio::time::timeout(Duration::from_secs(900), child.wait())
+                .await
+                .map_err(|_| ())?
+                .map_err(|_| ())?;
+            if !status.success() {
+                return Err(());
+            }
+            Ok(Vec::new())
+        })
+    }
     fn run<'a>(&'a self, program: &'a Path, args: Vec<String>) -> RunFuture<'a> {
         Box::pin(async move {
             use tokio::io::AsyncReadExt;
-            let mut child = tokio::process::Command::new(program)
+            let mut command = tokio::process::Command::new(program);
+            if program == Path::new("/usr/bin/docker") {
+                command
+                    .args(["--host", "unix:///var/run/docker.sock"])
+                    .env_remove("DOCKER_HOST")
+                    .env_remove("DOCKER_CONTEXT");
+            }
+            let mut child = command
                 .args(args)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -392,6 +426,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/enrollment", post(enrollment))
         .route("/api/policy", post(policy))
         .route("/api/doctor", post(doctor))
+        .route("/api/prepare-image", post(prepare_image))
         .route("/api/install", post(install))
         .layer(DefaultBodyLimit::max(16384))
         .layer(middleware::from_fn_with_state(app.clone(), boundary))
@@ -619,6 +654,56 @@ fn safe_doctor(raw: &[u8]) -> Result<Value, ()> {
         return Err(());
     }
     Ok(Value::Object(out))
+}
+async fn prepare_image(State(app): State<Arc<App>>, Json(consent): Json<Consent>) -> Answer {
+    if !consent.confirmed {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !cfg!(target_os = "linux") || std::env::consts::ARCH != "x86_64" {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+    app.busy()?;
+    tokio::spawn(async move {
+        app.update("preparing_image","고정된 Jupyter 이미지를 준비하고 있습니다. 다운로드 환경에 따라 시간이 걸릴 수 있습니다.");
+        let result = async {
+            let docker = Path::new("/usr/bin/docker");
+            app.runner
+                .run(
+                    docker,
+                    vec![
+                        "version".into(),
+                        "--format".into(),
+                        "{{.Server.Version}}".into(),
+                    ],
+                )
+                .await?;
+            let config = app.private.join("docker-public-image-config");
+            private_dir(&config)?;
+            let file = config.join("config.json");
+            if !file.exists() {
+                write_private(&file, b"{\"auths\":{}}", false)?;
+            }
+            app.runner.prepare_image(&config).await?;
+            app.runner
+                .run(
+                    docker,
+                    vec![
+                        "image".into(),
+                        "inspect".into(),
+                        IMAGE.into(),
+                        "--format".into(),
+                        "{{.Id}}".into(),
+                    ],
+                )
+                .await?;
+            Ok::<(), ()>(())
+        }
+        .await;
+        app.state.lock().unwrap().doctor = None;
+        match result {Ok(())=>app.update("image_ready","Jupyter 이미지가 준비되었습니다. 새 연결 파일을 받고 환경 검사를 진행해 주세요."),Err(())=>app.update("error","이미지를 준비하지 못했습니다. 이 컴퓨터의 Docker 권한, 네트워크와 저장 공간을 확인해 주세요.")}
+        app.state.lock().unwrap().busy = false;
+    });
+    Ok(Json(json!({"accepted":true})))
 }
 async fn doctor(State(app): State<Arc<App>>, Json(consent): Json<Consent>) -> Answer {
     if !consent.confirmed {
@@ -1138,5 +1223,77 @@ mod tests {
         let body = root.into_body().collect().await.unwrap().to_bytes();
         assert!(!String::from_utf8_lossy(&body).contains(&app.access));
         assert!(fake.calls.lock().unwrap().is_empty());
+    }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn public_image_preparation_requires_explicit_action_and_only_fixed_image() {
+        struct ImageRunner {
+            calls: Mutex<Vec<Vec<String>>>,
+        }
+        impl Runner for ImageRunner {
+            fn run<'a>(&'a self, program: &'a Path, args: Vec<String>) -> RunFuture<'a> {
+                assert_eq!(program, Path::new("/usr/bin/docker"));
+                self.calls.lock().unwrap().push(args);
+                Box::pin(async { Ok(Vec::new()) })
+            }
+            fn prepare_image<'a>(&'a self, config: &'a Path) -> RunFuture<'a> {
+                assert_eq!(
+                    std::fs::read(config.join("config.json")).unwrap(),
+                    b"{\"auths\":{}}"
+                );
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push(vec!["reviewed-public-image-pull".into(), IMAGE.into()]);
+                Box::pin(async { Ok(Vec::new()) })
+            }
+        }
+        let home = std::env::temp_dir().join(format!("cbgpu-image-test-{}", random()));
+        std::fs::create_dir(&home).unwrap();
+        let fake = Arc::new(ImageRunner {
+            calls: Mutex::new(vec![]),
+        });
+        let app = Arc::new(App::with_home(19999, &home, fake.clone()).unwrap());
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                "/api/prepare-image",
+                json!({"confirmed":false}),
+                true
+            )
+            .await
+            .status(),
+            400
+        );
+        assert!(fake.calls.lock().unwrap().is_empty());
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                "/api/prepare-image",
+                json!({"confirmed":true}),
+                true
+            )
+            .await
+            .status(),
+            200
+        );
+        for _ in 0..100 {
+            if !app.state.lock().unwrap().busy {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(app.state.lock().unwrap().phase, "image_ready");
+        assert!(app.state.lock().unwrap().doctor.is_none());
+        assert_eq!(
+            *fake.calls.lock().unwrap(),
+            vec![
+                vec!["version", "--format", "{{.Server.Version}}"],
+                vec!["reviewed-public-image-pull", IMAGE],
+                vec!["image", "inspect", IMAGE, "--format", "{{.Id}}"]
+            ]
+        );
     }
 }
