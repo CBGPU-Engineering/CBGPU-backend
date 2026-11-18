@@ -1,5 +1,6 @@
 //! Native delivery policy and transactional filesystem/systemd core.
 //! GitHub CI verification is an authenticated API check, not a commit signature.
+pub mod managed;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -102,12 +103,13 @@ pub fn ci_gate(repo: &str, reference: &Value, runs: &Value) -> Result<(String, S
                 r["head_sha"] == sha
                     && r["head_branch"] == "main"
                     && r["event"] == "push"
-                    && r["status"] == "completed"
-                    && r["conclusion"] == "success"
                     && r["repository"]["full_name"] == repo
             })
         })
         .ok_or("Waiting for successful main-branch push CI")?;
+    if run["status"] != "completed" || run["conclusion"] != "success" {
+        return Err("Waiting for successful main-branch push CI".into());
+    }
     let url = run["html_url"].as_str().ok_or("Missing CI evidence URL")?;
     if !url.starts_with(&format!("https://github.com/{repo}/actions/runs/")) {
         return Err("Unexpected CI evidence URL".into());
@@ -158,13 +160,23 @@ pub fn read_json(path: &Path) -> Result<Value> {
     }
 }
 pub fn visible_state(mut state: Value) -> Value {
-    if let Some(components) = state.get_mut("components").and_then(Value::as_object_mut) {
-        for value in components.values_mut() {
-            if let Some(fields) = value.as_object_mut() {
-                fields.remove("rollback_units");
+    fn redact(v: &mut Value) {
+        match v {
+            Value::Object(m) => {
+                m.remove("rollback_units");
+                for value in m.values_mut() {
+                    redact(value);
+                }
             }
+            Value::Array(a) => {
+                for v in a {
+                    redact(v);
+                }
+            }
+            _ => {}
         }
     }
+    redact(&mut state);
     state
 }
 pub fn lock(root: &Path) -> Result<fs::File> {
@@ -658,6 +670,25 @@ mod tests {
         bad["workflow_runs"][0]["repository"]["full_name"] = json!("other/repo");
         assert!(ci_gate(REPO, &reference, &bad).is_err());
         assert!(ci_gate("other/repo", &reference, &bad).is_err())
+    }
+    #[test]
+    fn newer_failed_rerun_cannot_borrow_older_success() {
+        let (reference, runs) = fixtures();
+        let success = runs["workflow_runs"][0].clone();
+        let mut failed = success.clone();
+        failed["conclusion"] = json!("failure");
+        assert!(ci_gate(REPO, &reference, &json!({"workflow_runs":[failed,success]})).is_err());
+    }
+    #[test]
+    fn scoped_rollback_units_never_appear_in_visible_state() {
+        let v = visible_state(
+            json!({"components":{"backend":{"managed_services":{"deploy":{"rollback_units":{"secret":"private"},"status":"healthy"}}}}}),
+        );
+        assert!(
+            v["components"]["backend"]["managed_services"]["deploy"]
+                .get("rollback_units")
+                .is_none()
+        );
     }
     #[test]
     fn comparison_and_protected_changes_fail_closed() {

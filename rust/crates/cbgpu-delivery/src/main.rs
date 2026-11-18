@@ -1,8 +1,7 @@
 use cbgpu_delivery::{
     Result,
     agent::{Agent, Config, SystemRuntime},
-    atomic, candidate, changed_paths, github, lock, plan_backend, read_json, valid_sha,
-    visible_state,
+    atomic, lock, read_json, visible_state,
 };
 use serde_json::{Value, json};
 use std::{env, path::PathBuf};
@@ -46,38 +45,35 @@ fn run() -> Result<()> {
         )?;
         return Ok(());
     }
+    if args == ["--rollback-managed-deploy"] {
+        let mut agent = Agent {
+            root,
+            settings: home.join(".config/systemd/user"),
+            config,
+            state,
+            runtime: SystemRuntime,
+        };
+        return agent.rollback_managed_deploy();
+    }
+    if args.len() == 2 && args[0] == "--adopt-managed-deploy" {
+        let mut agent = Agent {
+            root,
+            settings: home.join(".config/systemd/user"),
+            config,
+            state,
+            runtime: SystemRuntime,
+        };
+        return agent.adopt_managed_deploy(&PathBuf::from(&args[1]));
+    }
     if args.len() == 2 && args[0] == "--plan" {
-        let component = &args[1];
-        if !["web", "backend"].contains(&component.as_str()) {
-            return Err("Unknown component".into());
-        }
-        let repo = config
-            .repositories
-            .get(component)
-            .ok_or("Repository not configured")?;
-        let (sha, ci) = candidate(repo)?;
-        let old = state["components"][component]["sha"].as_str();
-        let paths = if let Some(old) = old {
-            if !valid_sha(old) {
-                return Err("Invalid previous commit".into());
-            }
-            changed_paths(&github(&format!("repos/{repo}/compare/{old}...{sha}"))?)?
-        } else {
-            Vec::new()
+        let mut agent = Agent {
+            root,
+            settings: home.join(".config/systemd/user"),
+            config,
+            state,
+            runtime: SystemRuntime,
         };
-        let policy = if component == "backend" {
-            plan_backend(
-                &paths,
-                state["components"][component]["approved_infrastructure_sha"] == sha,
-                cbgpu_delivery::agent::busy_backend(&config.runtime_backend)?,
-            )?
-        } else {
-            json!({"status":"validated_policy","apply_supported":true})
-        };
-        println!(
-            "{}",
-            json!({"component":component,"commit":sha,"ci":ci,"paths":paths,"policy":policy})
-        );
+        println!("{}", agent.plan_component(&args[1])?);
         return Ok(());
     }
     let (mut only, mut retry, mut rollback, mut approve) = (None, None, None, None);

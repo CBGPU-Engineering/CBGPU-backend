@@ -134,6 +134,76 @@ fn kill_group(child: &mut Child) {
     }
     let _ = child.wait();
 }
+// Exclusive write transaction blocks enqueue/poll state transitions during the
+// no-active-jobs check and Type=simple control process replacement. No DDL,
+// persistent fence row or customer data change is made.
+fn managed_busy(path: &Path) -> Result<bool> {
+    let db = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|_| error("Cannot read pinned deployment state"))?;
+    for query in [
+        "SELECT count(*) FROM deployments WHERE status IN ('queued','building')",
+        "SELECT count(*) FROM compose_states WHERE status='building'",
+    ] {
+        if db
+            .query_row(query, [], |r| r.get::<_, i64>(0))
+            .map_err(|_| error("Cannot prove deployment queues idle"))?
+            > 0
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+fn managed_writer_fence(path: &Path) -> Result<Connection> {
+    let db = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|_| error("Cannot open pinned deployment state"))?;
+    db.busy_timeout(Duration::from_secs(5))
+        .map_err(|_| error("Cannot bound deployment fence"))?;
+    db.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|_| error("Waiting for deployment state writer"))?;
+    for query in [
+        "SELECT count(*) FROM deployments WHERE status IN ('queued','building')",
+        "SELECT count(*) FROM compose_states WHERE status='building'",
+    ] {
+        if db
+            .query_row(query, [], |r| r.get::<_, i64>(0))
+            .map_err(|_| error("Cannot prove idle deployment queues"))?
+            > 0
+        {
+            return Err(error("Waiting for active user build workers"));
+        }
+    }
+    Ok(db)
+}
+struct ManagedSwitchHost<'a, R> {
+    runtime: &'a mut R,
+    fence: Option<Connection>,
+}
+impl<R: Runtime> Host for ManagedSwitchHost<'_, R> {
+    fn reload(&mut self) -> Result<()> {
+        self.runtime.reload()
+    }
+    fn restart(&mut self, name: &str) -> Result<()> {
+        if name != "cbgpu-deploy.service" {
+            return Err(error("Managed switch cannot restart unrelated service"));
+        }
+        let result = self.runtime.restart(name);
+        if let Some(db) = self.fence.take() {
+            db.execute_batch("ROLLBACK")
+                .map_err(|_| error("Cannot release deployment write fence"))?;
+        }
+        result
+    }
+    fn health(&mut self, check: &Check, recovery: bool) -> Result<()> {
+        self.runtime.health(check, recovery)
+    }
+}
 pub struct SystemRuntime;
 impl Host for SystemRuntime {
     fn reload(&mut self) -> Result<()> {
@@ -449,6 +519,357 @@ impl<R: Runtime> Agent<R> {
         println!("{data}");
         Ok(())
     }
+    pub fn plan_component(&mut self, component: &str) -> Result<Value> {
+        if !["web", "backend"].contains(&component) {
+            return Err(error("Unknown component"));
+        }
+        let repo = self
+            .config
+            .repositories
+            .get(component)
+            .cloned()
+            .ok_or("Repository not configured")?;
+        let (sha, ci) = self.repo_candidate(&repo)?;
+        if component == "backend"
+            && self.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]
+                .is_object()
+        {
+            let b: managed::DeployBaseline = serde_json::from_value(
+                self.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]
+                    .clone(),
+            )
+            .map_err(|_| error("Invalid managed baseline"))?;
+            self.verify_managed(&b)?;
+            let paths = self.paths(&repo, Some(&b.source_sha), &sha)?;
+            let policy = match managed::plan(&paths)? {
+                managed::DeployPlan::Unchanged => json!({"status":"unchanged","managed_changes":0}),
+                managed::DeployPlan::Update(p) => {
+                    json!({"status":"eligible","managed_changes":p.len(),"paths":p})
+                }
+                managed::DeployPlan::Hold(reason) => json!({"status":"held","reason":reason}),
+            };
+            return Ok(
+                json!({"component":"backend","service":"deploy","commit":sha,"ci":ci,"policy":policy,"legacy_backend_sha":self.state["components"]["backend"]["sha"],"held_services":["ai","gpu","native-portals","schools","database","other-services"],"live_changes":false}),
+            );
+        }
+        let old = self.state["components"][component]["sha"]
+            .as_str()
+            .map(str::to_owned);
+        let paths = self.paths(&repo, old.as_deref(), &sha)?;
+        let policy = if component == "backend" {
+            plan_backend(
+                &paths,
+                self.state["components"][component]["approved_infrastructure_sha"] == sha,
+                busy_backend(&self.config.runtime_backend)?,
+            )?
+        } else {
+            json!({"status":"validated_policy","apply_supported":true})
+        };
+        Ok(
+            json!({"component":component,"commit":sha,"ci":ci,"paths":paths,"policy":policy,"live_changes":false}),
+        )
+    }
+    fn file_hash(&mut self, path: &Path) -> Result<String> {
+        let result = self.runtime.execute(
+            &argv(&["sha256sum", path.to_str().ok_or("Invalid pin path")?]),
+            None,
+            None,
+            None,
+            30,
+        )?;
+        let hash = result
+            .split_whitespace()
+            .next()
+            .ok_or("Missing file fingerprint")?;
+        if !managed::hash_valid(hash) {
+            return Err(error("Invalid file fingerprint"));
+        }
+        Ok(hash.into())
+    }
+    fn verify_managed(&mut self, b: &managed::DeployBaseline) -> Result<()> {
+        b.validate()?;
+        if self.file_hash(&self.settings.join("cbgpu-deploy.service"))? != b.unit_sha256 {
+            return Err(error("Managed deployment unit drift; review required"));
+        }
+        let unit = fs::read_to_string(self.settings.join("cbgpu-deploy.service"))
+            .map_err(|_| error("Managed deployment unit missing"))?;
+        if !unit
+            .lines()
+            .any(|l| l.starts_with("ExecStart=/usr/bin/node ") && l.ends_with("/deploy/server.mts"))
+        {
+            return Err(error(
+                "Unsupported deployment-control runtime; no Node fallback",
+            ));
+        }
+        let private = Path::new(&b.data_path)
+            .parent()
+            .and_then(Path::parent)
+            .ok_or("Invalid reviewed deployment state")?;
+        if !unit
+            .lines()
+            .any(|l| l == format!("Environment=CBGPU_DEPLOY_PRIVATE={}", private.display()))
+            || unit
+                .lines()
+                .any(|l| l.starts_with("Type=") && l != "Type=simple")
+        {
+            return Err(error("Managed private-state binding or service type drift"));
+        }
+        for worker in &b.workers {
+            if self.file_hash(Path::new(&worker.path))? != worker.sha256 {
+                return Err(error("Reviewed native worker changed; deployment held"));
+            }
+        }
+        Ok(())
+    }
+    /// Explicit metadata-only operator acknowledgment. Never adopts unsupported units.
+    pub fn rollback_managed_deploy(&mut self) -> Result<()> {
+        let current = self.state["components"]["backend"]["managed_services"]["deploy"].clone();
+        let b: managed::DeployBaseline = serde_json::from_value(current["baseline"].clone())
+            .map_err(|_| error("Managed baseline missing"))?;
+        self.verify_managed(&b)?;
+        let mut old: managed::DeployBaseline =
+            serde_json::from_value(current["previous_baseline"].clone())
+                .map_err(|_| error("Reviewed managed rollback missing"))?;
+        if old
+            .workers
+            .iter()
+            .map(|w| (&w.path, &w.sha256))
+            .collect::<Vec<_>>()
+            != b.workers
+                .iter()
+                .map(|w| (&w.path, &w.sha256))
+                .collect::<Vec<_>>()
+        {
+            return Err(error("Rollback worker pins differ; review required"));
+        }
+        let unit = current["rollback_units"]["cbgpu-deploy.service"]
+            .as_str()
+            .ok_or("Managed rollback unit missing")?;
+        let fence = managed_writer_fence(Path::new(&b.data_path))?;
+        let mut host = ManagedSwitchHost {
+            runtime: &mut self.runtime,
+            fence: Some(fence),
+        };
+        switch(
+            &self.root,
+            &self.settings,
+            &BTreeMap::from([("cbgpu-deploy.service".into(), unit.into())]),
+            vec![Check {
+                url: "http://127.0.0.1:3510/health".into(),
+                commit: Some(old.runtime_sha.clone()),
+                host: None,
+            }],
+            &mut host,
+        )?;
+        drop(host);
+        old.unit_sha256 = self.file_hash(&self.settings.join("cbgpu-deploy.service"))?;
+        let service = &mut self.state["components"]["backend"]["managed_services"]["deploy"];
+        service["baseline"] = json!(old);
+        service["blocked_sha"] = json!(b.source_sha);
+        service["previous_baseline"] = Value::Null;
+        service["rollback_units"] = Value::Null;
+        service["status"] = json!("rolled_back");
+        self.save()?;
+        self.record(
+            "managed_deploy_rolled_back",
+            json!({"legacy_backend_unchanged":true,"data_restored":false}),
+        )
+    }
+    pub fn adopt_managed_deploy(&mut self, file: &Path) -> Result<()> {
+        if self.state["paused"] != true {
+            return Err(error("Pause watcher before reviewing service baseline"));
+        }
+        let b: managed::DeployBaseline = serde_json::from_slice(
+            &fs::read(file).map_err(|_| error("Cannot read reviewed baseline"))?,
+        )
+        .map_err(|_| error("Invalid reviewed baseline"))?;
+        self.verify_managed(&b)?;
+        let repo = "CBGPU-Engineering/CBGPU-backend";
+        let reference =
+            self.runtime
+                .api(&format!("repos/{repo}/git/ref/heads/main"), "GET", None)?;
+        let head = reference["object"]["sha"]
+            .as_str()
+            .filter(|v| valid_sha(v))
+            .ok_or("Invalid main reference")?;
+        let comparison = self.runtime.api(
+            &format!("repos/{repo}/compare/{}...{head}", b.source_sha),
+            "GET",
+            None,
+        )?;
+        if !matches!(comparison["status"].as_str(), Some("ahead" | "identical")) {
+            return Err(error("Reviewed service source is not on main ancestry"));
+        }
+        let runs=self.runtime.api(&format!("repos/{repo}/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha={}&per_page=5",b.source_sha),"GET",None)?;
+        ci_gate(repo, &json!({"object":{"sha":b.source_sha}}), &runs)?;
+        self.runtime.health(
+            &Check {
+                url: "http://127.0.0.1:3510/health".into(),
+                commit: Some(b.runtime_sha.clone()),
+                host: None,
+            },
+            false,
+        )?;
+        let backend = &mut self.state["components"]["backend"];
+        backend["managed_services"]["deploy"] = json!({"baseline":b,"checked_sha":Value::Null,"status":"healthy","reviewed_at":epoch()});
+        self.save()?;
+        self.record(
+            "managed_deploy_baseline_reviewed",
+            json!({"service":"deploy","source":b.source_sha,"legacy_backend_sha_unchanged":true}),
+        )
+    }
+    fn managed_backend_poll(&mut self, repo: &str, sha: &str, ci: &str) -> Result<()> {
+        let current = self.state["components"]["backend"]["managed_services"]["deploy"].clone();
+        let b: managed::DeployBaseline = serde_json::from_value(current["baseline"].clone())
+            .map_err(|_| error("Invalid managed service baseline"))?;
+        self.verify_managed(&b)?;
+        let paths = self.paths(repo, Some(&b.source_sha), sha)?;
+        let plan = managed::plan(&paths)?;
+        let state = &mut self.state["components"]["backend"]["managed_services"]["deploy"];
+        state["checked_sha"] = json!(sha);
+        state["ci"] = json!(ci);
+        state["unsupported_services"] = json!([
+            "ai",
+            "gpu",
+            "native-portals",
+            "schools",
+            "database",
+            "other-services"
+        ]);
+        match plan {
+            managed::DeployPlan::Hold(reason) => {
+                state["status"] = json!("held");
+                state["waiting_for"] = json!(reason);
+                self.save()
+            }
+            managed::DeployPlan::Unchanged => {
+                state["status"] = json!("healthy");
+                state["waiting_for"] = Value::Null;
+                self.state["components"]["backend"]["waiting_for"] = json!(
+                    "Managed deployment control checked; independent runtimes remain separately managed"
+                );
+                self.save()
+            }
+            managed::DeployPlan::Update(_) => {
+                if current["failed_sha"] == sha || current["blocked_sha"] == sha {
+                    return Ok(());
+                }
+                if managed_busy(Path::new(&b.data_path))? {
+                    return Err(error("Waiting for active user build workers"));
+                }
+                if fs2::available_space(&self.root)
+                    .map_err(|_| error("Cannot verify delivery space"))?
+                    < 15 * 1024 * 1024 * 1024
+                {
+                    return Err(error("Less than15GiB free; production unchanged"));
+                }
+                let log = self
+                    .root
+                    .join("logs")
+                    .join(format!("managed-{}.log", event_id()));
+                atomic(&log, b"")?;
+                let directory = self.checkout("backend", repo, sha)?;
+                for name in ["private", ".env", "functions.env", "backups", "releases"] {
+                    let from = self.config.runtime_backend.join(name);
+                    let to = directory.join(name);
+                    if from.exists() && !to.exists() {
+                        std::os::unix::fs::symlink(from, to)
+                            .map_err(|_| error("Cannot link persistent deployment state"))?;
+                    }
+                }
+                // Syntax checks do not launch a second control writer against customer SQLite.
+                self.runtime.build(
+                    &argv(&["/usr/bin/node", "--check", "deploy/server.mts"]),
+                    &directory,
+                    &std::env::vars().collect(),
+                    &log,
+                )?;
+                self.verify_managed(&b)?;
+                let (latest, _) = self.repo_candidate(repo)?;
+                if latest != sha {
+                    return Err(error(
+                        "Obsolete candidate cancelled; newer CI-green main selected",
+                    ));
+                }
+                if managed_busy(Path::new(&b.data_path))? {
+                    return Err(error("Waiting for active user build workers"));
+                }
+                let old = fs::read_to_string(self.settings.join("cbgpu-deploy.service"))
+                    .map_err(|_| error("Cannot read managed unit"))?;
+                let unit = unit_update(
+                    &old,
+                    &directory.join("deploy"),
+                    &format!("/usr/bin/node {}/deploy/server.mts", directory.display()),
+                    &BTreeMap::from([("CBGPU_RELEASE_SHA".into(), sha.into())]),
+                )?;
+                let snapshot = self
+                    .root
+                    .join("snapshots")
+                    .join(format!("managed-deploy-{}", event_id()));
+                fs::create_dir_all(&snapshot)
+                    .map_err(|_| error("Cannot create private managed snapshot"))?;
+                let data = Connection::open_with_flags(
+                    &b.data_path,
+                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+                )
+                .map_err(|_| error("Cannot snapshot pinned deployment state"))?;
+                let saved = snapshot.join("deploy.sqlite");
+                data.backup(
+                    rusqlite::MAIN_DB,
+                    &saved,
+                    None::<fn(rusqlite::backup::Progress)>,
+                )
+                .map_err(|_| error("Cannot snapshot customer deployment state"))?;
+                fs::set_permissions(&saved, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+                    .map_err(|_| error("Cannot protect snapshot"))?;
+                let fence = managed_writer_fence(Path::new(&b.data_path))?;
+                let mut host = ManagedSwitchHost {
+                    runtime: &mut self.runtime,
+                    fence: Some(fence),
+                };
+                let switched = switch(
+                    &self.root,
+                    &self.settings,
+                    &BTreeMap::from([("cbgpu-deploy.service".into(), unit)]),
+                    vec![Check {
+                        url: "http://127.0.0.1:3510/health".into(),
+                        commit: Some(sha.into()),
+                        host: None,
+                    }],
+                    &mut host,
+                );
+                drop(host);
+                match switched {
+                    Ok(before) => {
+                        let mut next = b.clone();
+                        next.source_sha = sha.into();
+                        next.runtime_sha = sha.into();
+                        next.unit_sha256 =
+                            self.file_hash(&self.settings.join("cbgpu-deploy.service"))?;
+                        let state =
+                            &mut self.state["components"]["backend"]["managed_services"]["deploy"];
+                        state["previous_baseline"] = json!(b);
+                        state["rollback_units"] = json!(before);
+                        state["baseline"] = json!(next);
+                        state["release"] = json!(directory);
+                        state["status"] = json!("healthy");
+                        state["waiting_for"] = Value::Null;
+                        state["deployed_at"] = json!(epoch());
+                        self.save()?;
+                        self.record("managed_deploy_succeeded",json!({"service":"deploy","sha":sha,"legacy_backend_sha_unchanged":true,"ci":ci}))
+                    }
+                    Err(e) => {
+                        let state =
+                            &mut self.state["components"]["backend"]["managed_services"]["deploy"];
+                        state["failed_sha"] = json!(sha);
+                        state["status"] = json!("failed");
+                        state["waiting_for"] = json!(e);
+                        self.save()
+                    }
+                }
+            }
+        }
+    }
     fn repo_candidate(&mut self, repo: &str) -> Result<(String, String)> {
         if !allowed_repo(repo) {
             return Err(error("Repository is not allowed"));
@@ -461,19 +882,138 @@ impl<R: Runtime> Agent<R> {
             .filter(|s| valid_sha(s))
             .ok_or("Invalid main commit")?;
         let runs=self.runtime.api(&format!("repos/{repo}/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha={sha}&per_page=5"),"GET",None)?;
-        ci_gate(repo, &reference, &runs)
+        if let Ok(candidate) = ci_gate(repo, &reference, &runs) {
+            return Ok(candidate);
+        }
+        // Select one newest successful ancestor, not a queue of every commit.
+        let recent = self.runtime.api(
+            &format!(
+                "repos/{repo}/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=100"
+            ),
+            "GET",
+            None,
+        )?;
+        let items = recent["workflow_runs"]
+            .as_array()
+            .ok_or("Invalid CI run listing")?;
+        let mut seen = std::collections::BTreeSet::new();
+        for run in items {
+            let Some(candidate) = run["head_sha"].as_str().filter(|s| valid_sha(s)) else {
+                continue;
+            };
+            if !seen.insert(candidate) {
+                continue;
+            }
+            let selected = json!({"object":{"sha":candidate}});
+            if let Ok(evidence) = ci_gate(repo, &selected, &json!({"workflow_runs":[run]})) {
+                let comparison = self.runtime.api(
+                    &format!("repos/{repo}/compare/{candidate}...{sha}"),
+                    "GET",
+                    None,
+                )?;
+                if matches!(comparison["status"].as_str(), Some("ahead" | "identical")) {
+                    return Ok(evidence);
+                }
+            }
+        }
+        Err(error("Waiting for successful main-branch push CI"))
     }
     fn paths(&mut self, repo: &str, previous: Option<&str>, sha: &str) -> Result<Vec<String>> {
         match previous {
-            Some(old) if valid_sha(old) => changed_paths(&self.runtime.api(
-                &format!("repos/{repo}/compare/{old}...{sha}"),
-                "GET",
-                None,
-            )?),
+            Some(old) if valid_sha(old) => {
+                let comparison = self.runtime.api(
+                    &format!("repos/{repo}/compare/{old}...{sha}"),
+                    "GET",
+                    None,
+                )?;
+                if !matches!(comparison["status"].as_str(), Some("ahead" | "identical")) {
+                    return Err(error(
+                        "Main history diverged or candidate is older; rollout refused",
+                    ));
+                }
+                let files = comparison["files"]
+                    .as_array()
+                    .ok_or("Missing comparison files")?;
+                if files.len() < 300 {
+                    return changed_paths(&comparison);
+                }
+                // GitHub truncates comparison files at300. Read both exact trees,
+                // never treat a truncated response as a complete safety decision.
+                let component = if repo.ends_with("/CBGPU-backend") {
+                    "backend"
+                } else {
+                    "web"
+                };
+                let mirror = self.root.join("mirrors").join(format!("{component}.git"));
+                fs::create_dir_all(mirror.parent().unwrap())
+                    .map_err(|_| error("Cannot create mirror parent"))?;
+                if !mirror.exists() {
+                    self.runtime.execute(
+                        &argv(&[
+                            "git",
+                            "init",
+                            "--bare",
+                            mirror.to_str().ok_or("Invalid mirror")?,
+                        ]),
+                        None,
+                        None,
+                        None,
+                        120,
+                    )?;
+                }
+                for exact in [old, sha] {
+                    self.runtime.execute(
+                        &argv(&[
+                            "git",
+                            "--git-dir",
+                            mirror.to_str().ok_or("Invalid mirror")?,
+                            "fetch",
+                            "--depth=1",
+                            &format!("https://github.com/{repo}.git"),
+                            exact,
+                        ]),
+                        None,
+                        None,
+                        None,
+                        180,
+                    )?;
+                }
+                let all = self.runtime.execute(
+                    &argv(&[
+                        "git",
+                        "--git-dir",
+                        mirror.to_str().ok_or("Invalid mirror")?,
+                        "diff",
+                        "--name-only",
+                        "--no-renames",
+                        "-z",
+                        old,
+                        sha,
+                        "--",
+                    ]),
+                    None,
+                    None,
+                    None,
+                    120,
+                )?;
+                if !all.is_empty() && !all.ends_with('\0') {
+                    return Err(error("Incomplete full-tree changed-path output"));
+                }
+                let paths: Vec<_> = all
+                    .split('\0')
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                if paths.len() > 100000 || paths.iter().any(|p| !safe_relative(p)) {
+                    return Err(error("Invalid full-tree change set"));
+                }
+                Ok(paths)
+            }
             Some(_) => Err(error("Invalid previous commit")),
             None => Ok(vec![]),
         }
     }
+
     fn checkout(&mut self, component: &str, repo: &str, sha: &str) -> Result<PathBuf> {
         if !["web", "backend"].contains(&component) || !allowed_repo(repo) || !valid_sha(sha) {
             return Err(error("Invalid release identity"));
@@ -690,6 +1230,11 @@ impl<R: Runtime> Agent<R> {
                 ("CBGPU_RELEASE_SHA".into(), sha.into()),
             ]),
         )?;
+        if self.repo_candidate(repo)?.0 != sha {
+            return Err(error(
+                "DEFERRED: Obsolete web build cancelled; newer green main selected",
+            ));
+        }
         let before = switch(
             &self.root,
             &self.settings,
@@ -1086,6 +1631,34 @@ impl<R: Runtime> Agent<R> {
         Ok(())
     }
     pub fn recover(&mut self) -> Result<bool> {
+        let journal = read_json(&self.root.join("transaction.json"))?;
+        if journal["units"].get("cbgpu-deploy.service").is_some()
+            && self.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]
+                .is_object()
+        {
+            if journal["units"].as_object().is_none_or(|u| u.len() != 1) {
+                return Err(error(
+                    "Mixed legacy recovery needs explicit review; managed scope unchanged",
+                ));
+            }
+            let b: managed::DeployBaseline = serde_json::from_value(
+                self.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]
+                    .clone(),
+            )
+            .map_err(|_| error("Invalid managed recovery baseline"))?;
+            b.validate()?;
+            for w in &b.workers {
+                if self.file_hash(Path::new(&w.path))? != w.sha256 {
+                    return Err(error("Managed recovery worker drift; review required"));
+                }
+            }
+            let fence = managed_writer_fence(Path::new(&b.data_path))?;
+            let mut host = ManagedSwitchHost {
+                runtime: &mut self.runtime,
+                fence: Some(fence),
+            };
+            return recover(&self.root, &self.settings, &mut host);
+        }
         recover(&self.root, &self.settings, &mut self.runtime)
     }
     pub fn approve_backend(&mut self, sha: &str) -> Result<()> {
@@ -1105,6 +1678,14 @@ impl<R: Runtime> Agent<R> {
         self.record("manual_infrastructure_acknowledged", json!({"commit":sha}))
     }
     pub fn rollback(&mut self, component: &str) -> Result<()> {
+        if component == "backend"
+            && self.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]
+                .is_object()
+        {
+            return Err(error(
+                "Managed deploy requires its scoped rollback; legacy backend is unchanged",
+            ));
+        }
         if !["web", "backend"].contains(&component) {
             return Err(error("Unknown rollback component"));
         }
@@ -1164,6 +1745,15 @@ impl<R: Runtime> Agent<R> {
         }
         let map = current.as_object_mut().ok_or("Invalid component state")?;
         map.remove("failed_sha");
+        if component == "backend"
+            && let Some(service) = map
+                .get_mut("managed_services")
+                .and_then(|v| v.get_mut("deploy"))
+                .and_then(Value::as_object_mut)
+        {
+            service.remove("failed_sha");
+            service.remove("blocked_sha");
+        }
         map.remove("blocked_sha");
         map.insert("attempt_at".into(), json!(0));
         self.save()
@@ -1292,14 +1882,41 @@ impl<R: Runtime> Agent<R> {
             self.state["components"][&component]["poll_incident"] = json!(false);
             self.state["components"][&component]["poll_error"] = Value::Null;
             let current = self.state["components"][&component].clone();
-            if current["sha"] == sha
-                || current["blocked_sha"] == sha
-                || current["failed_sha"] == sha
+            if component == "backend"
+                && current["managed_services"]["deploy"]["baseline"].is_object()
             {
+                if let Err(message) = self.managed_backend_poll(&repo, &sha, &ci) {
+                    self.state["components"]["backend"]["managed_services"]["deploy"]["waiting_for"] =
+                        json!(message);
+                    self.save()?;
+                }
+                continue;
+            }
+            if current["sha"] == sha {
+                self.state["components"][&component]["waiting_for"] = Value::Null;
+                self.state["components"][&component]["candidate"] = Value::Null;
+                self.save()?;
+                continue;
+            }
+            if current["blocked_sha"] == sha || current["failed_sha"] == sha {
                 continue;
             }
             let previous = current["sha"].as_str().map(str::to_owned);
             let approved = current["approved_infrastructure_sha"] == sha;
+            if let Some(old) = previous.as_deref() {
+                let relation = self.runtime.api(
+                    &format!("repos/{repo}/compare/{old}...{sha}"),
+                    "GET",
+                    None,
+                )?;
+                if !matches!(relation["status"].as_str(), Some("ahead" | "identical")) {
+                    self.state["components"][&component]["waiting_for"] =
+                        json!("Newer deployed revision retained; no CI fallback rollback");
+                    self.save()?;
+                    continue;
+                }
+            }
+
             let preflight = (|| {
                 if component == "backend" {
                     let paths = self.paths(&repo, previous.as_deref(), &sha)?;
@@ -1478,6 +2095,11 @@ mod tests {
         mail_failure: bool,
         mail_calls: usize,
         changes: Vec<String>,
+        ci_runs: Option<Value>,
+        heads: std::collections::VecDeque<String>,
+        relation: Option<String>,
+        full_diff: Option<String>,
+        behind_pair: Option<String>,
     }
     impl Host for FakeRuntime {
         fn reload(&mut self) -> Result<()> {
@@ -1505,6 +2127,12 @@ mod tests {
             _: u64,
         ) -> Result<String> {
             self.commands.push(args.to_vec());
+            if args.first().is_some_and(|x| x == "sha256sum") {
+                return Ok(format!("{}  fixture", "a".repeat(64)));
+            }
+            if args.iter().any(|x| x == "diff") {
+                return Ok(self.full_diff.clone().unwrap_or_default());
+            }
             if args.get(1).is_some_and(|a| a == "rev-parse") {
                 return Ok("a".repeat(40));
             }
@@ -1534,9 +2162,17 @@ mod tests {
                 return Ok(json!({"id":77}));
             }
             if route.contains("git/ref/") {
-                return Ok(json!({"object":{"sha":"a".repeat(40)}}));
+                let head = if self.heads.len() > 1 {
+                    self.heads.pop_front().unwrap()
+                } else {
+                    self.heads.front().cloned().unwrap_or("a".repeat(40))
+                };
+                return Ok(json!({"object":{"sha":head}}));
             }
             if route.contains("actions/workflows/") {
+                if let Some(runs) = &self.ci_runs {
+                    return Ok(runs.clone());
+                }
                 let repo = if route.contains("CBGPU-backend") {
                     "CBGPU-Engineering/CBGPU-backend"
                 } else {
@@ -1548,7 +2184,7 @@ mod tests {
             }
             if route.contains("/compare/") {
                 return Ok(
-                    json!({"status":"ahead","files":self.changes.iter().map(|p|json!({"filename":p})).collect::<Vec<_>>()}),
+                    json!({"status":if self.behind_pair.as_ref().is_some_and(|p|route.contains(p)){"behind"}else{self.relation.as_deref().unwrap_or("ahead")},"files":self.changes.iter().map(|p|json!({"filename":p})).collect::<Vec<_>>()}),
                 );
             }
             Err(error("Unexpected fake API call"))
@@ -1852,6 +2488,265 @@ mod tests {
         let log = fs::read_to_string(log).unwrap();
         assert!(log.contains("[REDACTED]"));
         assert!(!log.contains("synthetic-secret-value"));
+    }
+    fn managed_fixture() -> (TempDir, Agent<FakeRuntime>) {
+        let (tmp, mut a) = fixture("backend");
+        let private = a.config.runtime_backend.join("private");
+        let db = private.join("frontend-deployments/deploy.sqlite");
+        fs::create_dir_all(db.parent().unwrap()).unwrap();
+        Connection::open(&db).unwrap().execute_batch("CREATE TABLE deployments(id TEXT,status TEXT);CREATE TABLE compose_states(id TEXT,status TEXT);CREATE TABLE projects(id TEXT,secrets TEXT);INSERT INTO projects VALUES('owned','private-ciphertext');").unwrap();
+        fs::write(a.settings.join("cbgpu-deploy.service"),format!("[Service]\nType=simple\nWorkingDirectory=/previous/deploy\nExecStart=/usr/bin/node /previous/deploy/server.mts\nEnvironment=CBGPU_DEPLOY_PRIVATE={}\nEnvironmentFile=/private/preserved.env\n",private.display())).unwrap();
+        let b = managed::DeployBaseline {
+            version: 1,
+            service: "deploy".into(),
+            source_sha: "b".repeat(40),
+            runtime_sha: "b".repeat(40),
+            unit_sha256: "a".repeat(64),
+            data_path: db.display().to_string(),
+            workers: vec![
+                managed::WorkerPin {
+                    path: "/private/cbgpu-front-worker".into(),
+                    sha256: "a".repeat(64),
+                },
+                managed::WorkerPin {
+                    path: "/private/cbgpu-compose-worker".into(),
+                    sha256: "a".repeat(64),
+                },
+            ],
+            reviewed: true,
+        };
+        a.state["components"]["backend"]["managed_services"]["deploy"] =
+            json!({"baseline":b,"status":"healthy"});
+        (tmp, a)
+    }
+    fn ci_run(sha: &str, status: &str, conclusion: &str) -> Value {
+        json!({"head_sha":sha,"head_branch":"main","event":"push","status":status,"conclusion":conclusion,"repository":{"full_name":"CBGPU-Engineering/CBGPU-backend"},"html_url":"https://github.com/CBGPU-Engineering/CBGPU-backend/actions/runs/1"})
+    }
+    #[test]
+    fn latest_green_is_one_ancestor_not_a_commit_queue() {
+        let (_tmp, mut a) = fixture("backend");
+        a.runtime.heads.push_back("c".repeat(40));
+        a.runtime.ci_runs = Some(
+            json!({"workflow_runs":[ci_run(&"c".repeat(40),"in_progress",""),ci_run(&"b".repeat(40),"completed","success"),ci_run(&"a".repeat(40),"completed","success")]}),
+        );
+        assert_eq!(
+            a.repo_candidate("CBGPU-Engineering/CBGPU-backend")
+                .unwrap()
+                .0,
+            "b".repeat(40)
+        );
+        assert_eq!(a.runtime.restarts, 0);
+    }
+    #[test]
+    fn failed_head_fallback_never_rolls_back_a_newer_healthy_release() {
+        let (_tmp, mut a) = fixture("backend");
+        a.runtime.heads.push_back("c".repeat(40));
+        a.runtime.ci_runs = Some(
+            json!({"workflow_runs":[ci_run(&"c".repeat(40),"completed","failure"),ci_run(&"a".repeat(40),"completed","success")]}),
+        );
+        a.runtime.behind_pair = Some(format!("{}...{}", "b".repeat(40), "a".repeat(40)));
+        a.poll(Some("backend")).unwrap();
+        assert_eq!(a.state["components"]["backend"]["sha"], "b".repeat(40));
+        assert_eq!(a.runtime.builds, 0);
+        assert_eq!(a.runtime.restarts, 0);
+    }
+    #[test]
+    fn truncated_api_diff_uses_complete_local_git_trees() {
+        let (_tmp, mut a) = fixture("backend");
+        a.runtime.changes = (0..300).map(|n| format!("docs/{n}.md")).collect();
+        a.runtime.full_diff = Some("docs/a.md\0ai/server.py\0deploy/server.mts\0".into());
+        assert_eq!(
+            a.paths(
+                "CBGPU-Engineering/CBGPU-backend",
+                Some(&"b".repeat(40)),
+                &"a".repeat(40)
+            )
+            .unwrap(),
+            vec!["docs/a.md", "ai/server.py", "deploy/server.mts"]
+        );
+        assert!(
+            a.runtime
+                .commands
+                .iter()
+                .any(|c| c.iter().any(|p| p == "-z"))
+        );
+    }
+    #[test]
+    fn accumulated_unrelated_schema_ai_gpu_commits_do_not_rebase_runtime() {
+        let (_tmp, mut a) = managed_fixture();
+        a.runtime.changes = (0..300)
+            .map(|n| format!("supabase/migrations/{n}_school.sql"))
+            .collect();
+        a.runtime.full_diff = Some(
+            (0..900)
+                .map(|n| format!("supabase/migrations/{n}_school.sql\0"))
+                .collect::<String>()
+                + "ai/server.py\0gpu/server.mts\0",
+        );
+        a.poll(Some("backend")).unwrap();
+        assert_eq!(a.runtime.builds, 0);
+        assert_eq!(a.runtime.restarts, 0);
+        assert_eq!(a.state["components"]["backend"]["sha"], "b".repeat(40));
+        assert_eq!(
+            a.state["components"]["backend"]["managed_services"]["deploy"]["checked_sha"],
+            "a".repeat(40)
+        );
+    }
+    #[test]
+    fn managed_deploy_switch_keeps_worker_units_secrets_and_legacy_baseline() {
+        let (_tmp, mut a) = managed_fixture();
+        a.runtime.changes = vec![
+            "deploy/server.mts".into(),
+            "ai/server.py".into(),
+            "supabase/migrations/community.sql".into(),
+        ];
+        let careers = fs::read(a.settings.join("cbgpu-careers.service")).unwrap();
+        a.poll(Some("backend")).unwrap();
+        assert_eq!(a.runtime.restarts, 1);
+        assert_eq!(
+            fs::read(a.settings.join("cbgpu-careers.service")).unwrap(),
+            careers
+        );
+        assert_eq!(a.state["components"]["backend"]["sha"], "b".repeat(40));
+        assert_eq!(
+            a.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]["source_sha"],
+            "a".repeat(40)
+        );
+        let db = Connection::open(
+            a.config
+                .runtime_backend
+                .join("private/frontend-deployments/deploy.sqlite"),
+        )
+        .unwrap();
+        assert_eq!(
+            db.query_row("SELECT secrets FROM projects", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "private-ciphertext"
+        );
+        assert!(
+            fs::read_to_string(a.settings.join("cbgpu-deploy.service"))
+                .unwrap()
+                .contains("EnvironmentFile=/private/preserved.env")
+        );
+    }
+    #[test]
+    fn managed_unit_drift_or_shared_dependency_never_restarts() {
+        let (_tmp, mut a) = managed_fixture();
+        a.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]["unit_sha256"] =
+            json!("b".repeat(64));
+        a.runtime.changes = vec!["deploy/server.mts".into()];
+        a.poll(Some("backend")).unwrap();
+        assert_eq!(a.runtime.restarts, 0);
+        let (_tmp, mut a) = managed_fixture();
+        a.runtime.changes = vec![
+            "deploy/server.mts".into(),
+            "rust/compat/worker-command.mts".into(),
+        ];
+        a.poll(Some("backend")).unwrap();
+        assert_eq!(a.runtime.restarts, 0);
+    }
+    #[test]
+    fn database_fence_blocks_enqueue_and_never_changes_customer_data() {
+        let (_tmp, a) = managed_fixture();
+        let path = a
+            .config
+            .runtime_backend
+            .join("private/frontend-deployments/deploy.sqlite");
+        let fence = managed_writer_fence(&path).unwrap();
+        let second = Connection::open(&path).unwrap();
+        second.busy_timeout(Duration::from_millis(1)).unwrap();
+        assert!(
+            second
+                .execute("INSERT INTO deployments VALUES('new','queued')", [])
+                .is_err()
+        );
+        drop(fence);
+        second
+            .execute("INSERT INTO deployments VALUES('new','queued')", [])
+            .unwrap();
+        assert!(managed_writer_fence(&path).is_err());
+        assert_eq!(
+            second
+                .query_row("SELECT secrets FROM projects", [], |r| r
+                    .get::<_, String>(0))
+                .unwrap(),
+            "private-ciphertext"
+        );
+    }
+    #[test]
+    fn newer_green_cancels_an_obsolete_prepared_managed_candidate() {
+        let (_tmp, mut a) = managed_fixture();
+        a.runtime.changes = vec!["deploy/server.mts".into()];
+        a.runtime.heads = std::collections::VecDeque::from(["a".repeat(40), "c".repeat(40)]);
+        a.runtime.ci_runs = Some(
+            json!({"workflow_runs":[ci_run(&"c".repeat(40),"completed","success"),ci_run(&"a".repeat(40),"completed","success")]}),
+        );
+        a.poll(Some("backend")).unwrap();
+        assert_eq!(a.runtime.restarts, 0);
+        assert_eq!(
+            a.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]["source_sha"],
+            "b".repeat(40)
+        );
+        assert!(
+            a.state["components"]["backend"]["managed_services"]["deploy"]["waiting_for"]
+                .as_str()
+                .unwrap()
+                .contains("Obsolete")
+        );
+    }
+    #[test]
+    fn reviewed_baseline_is_metadata_only_requires_pause_and_exact_native_pins() {
+        let (tmp, mut a) = managed_fixture();
+        let b = a.state["components"]["backend"]["managed_services"]["deploy"]["baseline"].clone();
+        let file = tmp.path().join("review.json");
+        fs::write(&file, serde_json::to_vec(&b).unwrap()).unwrap();
+        assert!(a.adopt_managed_deploy(&file).is_err());
+        a.state["paused"] = json!(true);
+        a.runtime.ci_runs =
+            Some(json!({"workflow_runs":[ci_run(&"b".repeat(40),"completed","success")]}));
+        a.adopt_managed_deploy(&file).unwrap();
+        assert_eq!(a.runtime.restarts, 0);
+        assert_eq!(a.state["components"]["backend"]["sha"], "b".repeat(40));
+        let mut invalid = b;
+        invalid["workers"][0]["sha256"] = json!("b".repeat(64));
+        fs::write(file.clone(), serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(a.adopt_managed_deploy(&file).is_err());
+    }
+    #[test]
+    fn scoped_rollback_never_uses_legacy_backend_or_restores_customer_database() {
+        let (_tmp, mut a) = managed_fixture();
+        a.runtime.changes = vec!["deploy/server.mts".into()];
+        a.poll(Some("backend")).unwrap();
+        assert!(a.rollback("backend").is_err());
+        a.rollback_managed_deploy().unwrap();
+        assert_eq!(a.runtime.restarts, 2);
+        assert_eq!(a.state["components"]["backend"]["sha"], "b".repeat(40));
+        assert_eq!(
+            a.state["components"]["backend"]["managed_services"]["deploy"]["baseline"]["source_sha"],
+            "b".repeat(40)
+        );
+        let db = Connection::open(
+            a.config
+                .runtime_backend
+                .join("private/frontend-deployments/deploy.sqlite"),
+        )
+        .unwrap();
+        assert_eq!(
+            db.query_row("select count(*) from projects", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+    #[test]
+    fn already_current_green_clears_stale_wait_without_restarting() {
+        let (_tmp, mut a) = fixture("web");
+        a.state["components"]["web"]["sha"] = json!("a".repeat(40));
+        a.state["components"]["web"]["waiting_for"] = json!("Old CI wait");
+        a.poll(Some("web")).unwrap();
+        assert!(a.state["components"]["web"]["waiting_for"].is_null());
+        assert_eq!(a.runtime.restarts, 0);
+        assert_eq!(a.runtime.builds, 0);
     }
 }
 
