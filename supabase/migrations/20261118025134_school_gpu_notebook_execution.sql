@@ -45,8 +45,8 @@ BEGIN
   ELSIF j.idempotency_key<>k THEN RAISE EXCEPTION'RESERVATION_ALREADY_LAUNCHED'USING ERRCODE='23505';END IF;
  ELSIF p_action='session'THEN
   IF j.id IS NULL OR j.status<>'RUNNING'OR NOT cbgpu_schools.gpu_notebook_job_allowed(j)THEN RAISE EXCEPTION'NOTEBOOK_UNAVAILABLE'USING ERRCODE='42501';END IF;
-  tok:=encode(extensions.gen_random_bytes(32),'hex');INSERT INTO cbgpu_schools.gpu_notebook_sessions(token_hash,job_id,user_id,auth_session_id,expires_at)VALUES(pg_catalog.sha256(convert_to(tok,'UTF8')),j.id,uid,(auth.jwt()->>'session_id')::uuid,least(j.ends_at,clock_timestamp()+interval'10 minutes'));
-  RETURN jsonb_build_object('cookie_token',tok,'url','/notebooks/'||j.id::text||'/lab','job_id',j.id,'expires_at',least(j.ends_at,clock_timestamp()+interval'10 minutes'));
+  tok:=encode(extensions.gen_random_bytes(32),'hex');INSERT INTO cbgpu_schools.gpu_notebook_sessions(token_hash,job_id,user_id,auth_session_id,expires_at)VALUES(pg_catalog.sha256(convert_to(tok,'UTF8')),j.id,uid,(auth.jwt()->>'session_id')::uuid,least(j.ends_at,clock_timestamp()+interval'4 hours'));
+  RETURN jsonb_build_object('cookie_token',tok,'url','/notebooks/'||j.id::text||'/lab','job_id',j.id,'expires_at',least(j.ends_at,clock_timestamp()+interval'4 hours'));
  ELSIF p_action<>'status'THEN RAISE EXCEPTION'INVALID_ACTION'USING ERRCODE='22023';END IF;
  RETURN jsonb_build_object('job',CASE WHEN j.id IS NULL THEN NULL ELSE jsonb_build_object('id',j.id,'reservation_id',j.reservation_id,'status',j.status,'ends_at',j.ends_at,'error_code',j.error_code)END,'notebook_url',NULL);
 END$$;

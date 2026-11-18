@@ -178,7 +178,7 @@ confirms removal. A failed stop never makes the GPU available. Jobs never target
 legacy GPU1–4 or accept shell commands, mounts, images or ports from a user.
 
 The same-origin gateway exchanges a fresh owner session for an opaque HttpOnly
-cookie. The service-only `school_gpu_notebook_session(token,job_id)` checks the
+cookie lasting until the booking ends (at most four hours). The service-only `school_gpu_notebook_session(token,job_id)` checks the
 exact stored Auth session, job, booking, node version and fresh authority on each
 HTTP request and WebSocket heartbeat. No JWT is stored in a job, URL or cookie
 grant record. This is a source candidate until the paired node executor and relay
