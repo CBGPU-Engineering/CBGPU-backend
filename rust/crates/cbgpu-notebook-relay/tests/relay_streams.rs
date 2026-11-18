@@ -88,8 +88,16 @@ async fn node(addr: &str, node: &str, version: i64) -> tokio::task::JoinHandle<(
         "x-cbgpu-credential-version",
         version.to_string().parse().unwrap(),
     );
-    let (mut socket, _) = connect_async(request).await.unwrap();
-    let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+    let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), connect_async(request))
+        .await
+        .expect("WS HTTP101 upgrade must complete")
+        .unwrap();
+    let Message::Text(text) = tokio::time::timeout(Duration::from_secs(3), socket.next())
+        .await
+        .expect("signed challenge must flow after WS101")
+        .unwrap()
+        .unwrap()
+    else {
         panic!("challenge")
     };
     let Frame::Challenge { challenge } = decode_frame(&text).unwrap() else {
@@ -488,4 +496,172 @@ async fn bootstrap_exchange_is_private_one_use_job_origin_and_host_bound() {
     assert_eq!(response.status(), 403);
     assert!(response.headers().get("set-cookie").is_none());
     server.abort();
+}
+
+#[tokio::test]
+#[ignore = "Explicit immutable Next artifact; fake authority, own loopback13845 and no production env files"]
+async fn actual_next16_rewrites_authenticated_node_and_notebook_websockets() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let artifact = std::path::PathBuf::from(
+        std::env::var("CBGPU_NEXT_ARTIFACT").expect("explicit reviewed artifact path"),
+    );
+    let build = if artifact.join(".next/BUILD_ID").is_file() {
+        artifact.join(".next")
+    } else {
+        artifact.join(".next-production")
+    };
+    assert!(build.join("BUILD_ID").is_file());
+    let temp =
+        std::env::temp_dir().join(format!("cbgpu-next-relay-proof-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&temp).unwrap();
+    std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for file in ["next.config.ts", "package.json"] {
+        std::fs::copy(artifact.join(file), temp.join(file)).unwrap();
+    }
+    symlink(&build, temp.join(".next")).unwrap();
+    symlink(artifact.join("node_modules"), temp.join("node_modules")).unwrap();
+    let edge = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let key = temp.join("edge-key");
+    std::fs::write(&key, edge).unwrap();
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let (addr, _auth, server) = server(HashMap::from([(JOB.into(), NODE.into())])).await;
+    let port = 13845;
+    {
+        let _available =
+            std::net::TcpListener::bind(("127.0.0.1", port)).expect("fixture port must be free");
+    }
+    let log = std::fs::File::create(temp.join("next.log")).unwrap();
+    std::fs::set_permissions(
+        temp.join("next.log"),
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    struct Next(std::process::Child);
+    impl Drop for Next {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let source = std::env::var("CBGPU_NEXT_SERVER_SOURCE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| artifact.clone());
+    let custom = source.join("scripts/serve.mts").is_file();
+    let mut command = std::process::Command::new("node");
+    if custom {
+        for file in [
+            "scripts/serve.mts",
+            "src/lib/notebookUpgrade.ts",
+            "src/lib/notebookEdge.ts",
+            "src/lib/internalServiceUrl.ts",
+        ] {
+            let destination = temp.join(file);
+            std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+            std::fs::copy(source.join(file), destination).unwrap();
+        }
+        command.arg(temp.join("scripts/serve.mts"));
+    } else {
+        command
+            .arg(artifact.join("node_modules/next/dist/bin/next"))
+            .args([
+                "start",
+                "--hostname",
+                "127.0.0.1",
+                "--port",
+                &port.to_string(),
+            ]);
+    }
+    let child = command
+        .current_dir(&temp)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("HOME", &temp)
+        .env("NODE_ENV", "production")
+        .env("HOSTNAME", "127.0.0.1")
+        .env("PORT", port.to_string())
+        .env("NEXT_TELEMETRY_DISABLED", "1")
+        .env("CBGPU_GPU_NOTEBOOKS_ENABLED", "1")
+        .env("CBGPU_NOTEBOOK_RELAY_URL", format!("http://{addr}"))
+        .env("CBGPU_NOTEBOOK_EDGE_KEY_FILE", &key)
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .unwrap();
+    let _next = Next(child);
+    let next_addr = format!("127.0.0.1:{port}");
+    let mut ready = false;
+    for _ in 0..100 {
+        if let Ok(r) = client()
+            .get(format!("http://{next_addr}/v1/gpu/relay"))
+            .header("host", "cbgpu.com")
+            .send()
+            .await
+            && r.status().as_u16() == 400
+        {
+            ready = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        ready,
+        "Next rewrite startup failure; private test log retained"
+    );
+    let peer = tokio::time::timeout(Duration::from_secs(10), node(&next_addr, NODE, 1))
+        .await
+        .expect("Next must forward node WS upgrade");
+    let request_url = format!("http://{next_addr}/__notebook_gateway/notebooks/{JOB}/lab");
+    let denied = client()
+        .get(&request_url)
+        .header("host", "cbgpu.com")
+        .header("cookie", format!("__Secure-cbgpu-notebook={TOKEN}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), 404);
+    let response = client()
+        .get(&request_url)
+        .header("host", "cbgpu.com")
+        .header("origin", "https://notebooks.cbgpu.com")
+        .header("x-cbgpu-note-edge", edge)
+        .header("cookie", format!("__Secure-cbgpu-notebook={TOKEN}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.text().await.unwrap(), JOB);
+    let mut request =
+        format!("ws://{next_addr}/__notebook_gateway/notebooks/{JOB}/api/kernels/fake/channels")
+            .into_client_request()
+            .unwrap();
+    for (k, v) in [
+        ("host", "cbgpu.com"),
+        ("origin", "https://notebooks.cbgpu.com"),
+        ("x-cbgpu-note-edge", edge),
+        ("cookie", &format!("__Secure-cbgpu-notebook={TOKEN}")),
+    ] {
+        request.headers_mut().insert(
+            axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+            v.parse().unwrap(),
+        );
+    }
+    let (mut browser, _) = tokio::time::timeout(Duration::from_secs(10), connect_async(request))
+        .await
+        .expect("Next must forward notebook WS upgrade")
+        .unwrap();
+    browser
+        .send(Message::Text("through actual Next16".into()))
+        .await
+        .unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(5), browser.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(reply.into_text().unwrap(), "through actual Next16");
+    browser.close(None).await.unwrap();
+    peer.abort();
+    server.abort();
+    std::fs::write(temp.join("PASSED.json"),serde_json::json!({"artifact":artifact,"custom_server_source":source,"actual_next_node_ws":true,"actual_next_notebook_http_ws":true,"synthetic_edge_key_only":true,"production_env_files_read":false,"production_services_changed":false}).to_string()).unwrap();
+    println!("Next relay proof receipt: {}", temp.display());
 }
