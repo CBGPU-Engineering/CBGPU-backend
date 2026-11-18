@@ -376,3 +376,35 @@ async fn native_authority_never_turns_admin_visibility_into_another_users_bookin
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn form_posts_preserve_same_origin_without_allowing_null_or_external_origins() {
+    let f = fixture(10.).await;
+    let client = reqwest::Client::new();
+    let get = client
+        .get(format!("http://{}/1/login", f.address))
+        .header("host", "gpu.cbgpu.com")
+        .header("cookie", cookie(1))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get.status(), 200);
+    assert_eq!(get.headers()["referrer-policy"], "strict-origin");
+    for (origin, status) in [
+        ("https://gpu.cbgpu.com", 200),
+        ("null", 403),
+        ("https://attacker.example", 403),
+    ] {
+        let response = client
+            .post(format!("http://{}/1/login", f.address))
+            .header("host", "gpu.cbgpu.com")
+            .header("cookie", cookie(1))
+            .header("origin", origin)
+            .body("password=synthetic")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "origin={origin}");
+    }
+    drained(&f).await;
+}
