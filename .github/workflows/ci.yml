@@ -81,7 +81,7 @@ jobs:
           docker run --rm -d --name cbgpu-arcade-ci-db -e POSTGRES_PASSWORD=ci-only-password -e POSTGRES_DB=cbgpu_arcade_ci -p 127.0.0.1:55492:5432 postgres:17
           trap 'docker rm -f cbgpu-arcade-ci-db >/dev/null' EXIT
           for attempt in $(seq 1 30); do
-            if docker exec cbgpu-arcade-ci-db pg_isready -U postgres -d cbgpu_arcade_ci; then break; fi
+            if docker exec cbgpu-arcade-ci-db pg_isready -h 127.0.0.1 -U postgres -d cbgpu_arcade_ci; then break; fi
             sleep 1
           done
           ARCADE_TEST_DATABASE_URL=postgresql://postgres:ci-only-password@127.0.0.1:55492/cbgpu_arcade_ci cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-arcade -- --ignored
