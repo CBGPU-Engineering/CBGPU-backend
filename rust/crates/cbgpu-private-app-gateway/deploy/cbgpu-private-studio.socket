@@ -1,0 +1,9 @@
+[Unit]
+Description=Reserved trusted private application ingress
+[Socket]
+ListenStream=127.0.0.1:9000
+NoDelay=true
+Service=cbgpu-private-studio.service
+TriggerLimitIntervalSec=0
+[Install]
+WantedBy=sockets.target

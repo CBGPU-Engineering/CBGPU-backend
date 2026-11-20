@@ -930,6 +930,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbgpu-private-app-gateway"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "cbgpu-edge-policy",
+ "futures-util",
+ "libc",
+ "rand 0.8.8",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "cbgpu-public-content"
 version = "0.1.0"
 dependencies = [
@@ -4340,6 +4360,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
