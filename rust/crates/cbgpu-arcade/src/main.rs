@@ -250,7 +250,7 @@ async fn leaderboard(
         "mines" => json!({"level":q.level.unwrap_or("easy".into())}),
         _ => json!({}),
     };
-    let rows=sqlx::query("with best as (select x.user_id,max(x.score) as score from cbgpu_arcade.sessions x where x.game=$1 and x.params=$2 and x.completed_at is not null and ($3='all' or x.completed_at>=case when $3='week' then date_trunc('week',now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul' else date_trunc('month',now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul' end) and exists(select 1 from auth.users a join public.profiles ap on ap.id=a.id where a.id=x.user_id and a.deleted_at is null and (a.banned_until is null or a.banned_until<=now()) and ap.account_status='ACTIVE') and exists(select 1 from cbgpu_schools.memberships m where m.user_id=x.user_id and m.status='ACTIVE' and m.verified and m.starts_at<=now() and (m.ends_at is null or m.ends_at>now()) and ($4::text is null or m.school_id=$4)) group by x.user_id), ranked as (select b.user_id,b.score,p.display_name,rank() over(order by b.score desc) as rank from best b join cbgpu_arcade.players p on p.user_id=b.user_id and p.participating) select user_id,score,display_name,rank from ranked where rank<=100 or user_id=$5 order by rank,display_name").bind(&q.game).bind(&params).bind(&q.period).bind(&school).bind(u).fetch_all(&s.db).await.map_err(db_err)?;
+    let rows=sqlx::query("with best as (select x.user_id,max(x.score) as score from cbgpu_arcade.sessions x where x.game=$1 and x.params=$2 and x.completed_at is not null and ($3='all' or x.completed_at>=case when $3='week' then date_trunc('week',now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul' else date_trunc('month',now() at time zone 'Asia/Seoul') at time zone 'Asia/Seoul' end) and exists(select 1 from auth.users a join public.profiles ap on ap.id=a.id where a.id=x.user_id and a.deleted_at is null and (a.banned_until is null or a.banned_until<=now()) and ap.account_status='ACTIVE') and ($4::text is null or exists(select 1 from cbgpu_schools.memberships m where m.user_id=x.user_id and m.status='ACTIVE' and m.verified and m.starts_at<=now() and (m.ends_at is null or m.ends_at>now()) and m.school_id=$4)) group by x.user_id), ranked as (select b.user_id,b.score,p.display_name,rank() over(order by b.score desc) as rank from best b join cbgpu_arcade.players p on p.user_id=b.user_id and p.participating) select user_id,score,display_name,rank from ranked where rank<=100 or user_id=$5 order by rank,display_name").bind(&q.game).bind(&params).bind(&q.period).bind(&school).bind(u).fetch_all(&s.db).await.map_err(db_err)?;
     let own_rank = rows
         .iter()
         .find(|r| r.get::<Uuid, _>("user_id") == u)
@@ -290,6 +290,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         key: std::env::var("CBGPU_ARCADE_ANON_KEY")?,
     };
     let app = Router::new()
+        .route("/healthz", get(|| async { Json(json!({"ok":true})) }))
         .route("/v1/arcade/sessions", post(start))
         .route("/v1/arcade/sessions/{id}/submit", post(submit))
         .route("/v1/arcade/player", get(prefs).put(set_prefs))
@@ -297,11 +298,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .with_state(state);
     axum::serve(tokio::net::TcpListener::bind(addr).await?, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown())
         .await?;
     Ok(())
 }
 #[cfg(test)]
 mod tests;
+
+async fn shutdown() {
+    let interrupt = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            s.recv().await;
+        } else {
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {_=interrupt=>{},_=terminate=>{}}
+}
