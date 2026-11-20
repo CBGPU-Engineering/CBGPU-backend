@@ -938,11 +938,13 @@ dependencies = [
  "base64 0.22.1",
  "cbgpu-edge-policy",
  "futures-util",
+ "libc",
  "rand 0.8.8",
  "reqwest",
  "serde",
  "serde_json",
  "subtle",
+ "tempfile",
  "tokio",
  "url",
 ]

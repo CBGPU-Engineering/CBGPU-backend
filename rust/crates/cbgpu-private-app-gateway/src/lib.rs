@@ -162,7 +162,14 @@ async fn proxy(State(g): State<Arc<Gateway>>, request: Request) -> Response {
     let mut headers = HeaderMap::new();
     for (name, value) in upstream.headers() {
         if !hop(name.as_str()) && !skip.contains(name.as_str()) && name != header::SET_COOKIE {
-            headers.append(name, value.clone());
+            headers.append(
+                name,
+                if name == header::LOCATION {
+                    public_location(value, &g.app_authority, &g.auth.host)
+                } else {
+                    value.clone()
+                },
+            );
         }
     }
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -187,6 +194,25 @@ async fn proxy(State(g): State<Arc<Gateway>>, request: Request) -> Response {
     *r.status_mut() = status;
     *r.headers_mut() = headers;
     r
+}
+fn public_location(value: &HeaderValue, app_authority: &str, public_host: &str) -> HeaderValue {
+    let Some(url) = value.to_str().ok().and_then(|v| url::Url::parse(v).ok()) else {
+        return value.clone();
+    };
+    let authority = &url[url::Position::BeforeHost..url::Position::AfterPort];
+    if matches!(url.scheme(), "http" | "https")
+        && url.username().is_empty()
+        && url.password().is_none()
+        && authority == app_authority
+    {
+        HeaderValue::from_str(&format!(
+            "https://{public_host}{}",
+            &url[url::Position::BeforePath..]
+        ))
+        .unwrap_or_else(|_| value.clone())
+    } else {
+        value.clone()
+    }
 }
 pub fn router(g: Arc<Gateway>) -> Router {
     Router::new().fallback(proxy).with_state(g)
@@ -645,5 +671,24 @@ mod tests {
             Err(StatusCode::SERVICE_UNAVAILABLE)
         ));
         task.abort();
+    }
+    #[test]
+    fn local_redirects_preserve_public_origin_without_touching_external_oauth() {
+        let local = HeaderValue::from_static("http://127.0.0.1:8787/auth/callback?code=fixture");
+        assert_eq!(
+            public_location(&local, "127.0.0.1:8787", "workspace.server.cbgpu.com"),
+            "https://workspace.server.cbgpu.com/auth/callback?code=fixture"
+        );
+        for target in [
+            "https://accounts.example/authorize?state=fixture",
+            "/relative",
+            "http://127.0.0.1:9999/other",
+        ] {
+            let value = HeaderValue::from_str(target).unwrap();
+            assert_eq!(
+                public_location(&value, "127.0.0.1:8787", "workspace.server.cbgpu.com"),
+                value
+            );
+        }
     }
 }
