@@ -27,3 +27,9 @@ The HOST `.socket` unit owns `127.0.0.1:9000` independently of the gate process,
 Before changing the failed deployment, snapshot its complete configuration privately, retain the old stopped container and existing volumes, and record reversible port/command changes. Restore by stopping only the replacement, restoring the preserved container and original port publication, and stopping the gate/socket only when rollback intentionally reclaims that port. Never prune the original generated-output recovery backup or application data.
 
 The bridge corrects only the deployment's unsupported launch flags. Local OAuth callback assumptions and third-party application behavior are unchanged; they require separate application review rather than silent proxy rewrites.
+
+## First-party environment persistence
+
+The canonical frontend environment supplies only `CBGPU_STUDIO_PROJECT_ID`, `CBGPU_STUDIO_ADAPTER_URL`, and `CBGPU_STUDIO_PUBLIC_ORIGIN` for the configured Studio. Delivery's source allowlist preserves these names and the existing native deployment API/key-file selectors. Do not put any of these settings or platform credentials in the application container.
+
+A running, previously reviewed delivery binary may predate this allowlist update. Until that binary is separately reviewed and upgraded, retain a private frontend systemd `EnvironmentFile` drop-in containing **only** the three validated Studio settings; it survives immutable web release switches. Keep canonical configuration mirrored and backed up. Updating this source allowlist does not authorize replacing or activating the delivery binary, and no cloud resources are provisioned.

@@ -1152,6 +1152,11 @@ impl<R: Runtime> Agent<R> {
                         "SPOTIFY_CLIENT_SECRET",
                         "SPOTIFY_REDIRECT_URI",
                         "CBGPU_ACCOUNTS_API_URL",
+                        "CBGPU_STUDIO_PROJECT_ID",
+                        "CBGPU_STUDIO_ADAPTER_URL",
+                        "CBGPU_STUDIO_PUBLIC_ORIGIN",
+                        "CBGPU_DEPLOY_API_URL",
+                        "CBGPU_FRONTEND_DEPLOY_KEY_FILE",
                         "CBGPU_MULTISCHOOL_V1",
                         "CBGPU_CENTRAL_CPU_V1",
                         "CBGPU_SCHOOLS_API_URL",
@@ -2373,6 +2378,20 @@ mod tests {
         let (_tmp, mut agent) = fixture("web");
         agent.runtime.web_serve = true;
         let config = [
+            (
+                "CBGPU_STUDIO_PROJECT_ID",
+                "11111111-2222-4333-8444-555555555555",
+            ),
+            ("CBGPU_STUDIO_ADAPTER_URL", "http://127.0.0.1:9000"),
+            (
+                "CBGPU_STUDIO_PUBLIC_ORIGIN",
+                "https://studio-fixture.server.cbgpu.com",
+            ),
+            ("CBGPU_DEPLOY_API_URL", "http://127.0.0.1:3510"),
+            (
+                "CBGPU_FRONTEND_DEPLOY_KEY_FILE",
+                "/private/frontend-deploy-key",
+            ),
             ("CBGPU_GPU_REGISTRY_ENABLED", "1"),
             ("CBGPU_GPU_REGISTRY_URL", "http://127.0.0.1:3548"),
             ("CBGPU_GPU_CONTROL_PLANE_ORIGIN", "https://cbgpu.com"),
