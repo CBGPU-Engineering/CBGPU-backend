@@ -2,7 +2,7 @@
 
 Standalone Axum/Postgres service, default `127.0.0.1:3552`; non-loopback binds are refused. No database migrations run at startup. Do not expose Postgres tables through PostgREST.
 
-Explicitly review/apply `rust/migrations/20261120090000_arcade.sql` to the intended database. It creates only the private `cbgpu_arcade` schema/tables, with RLS and public/anon/authenticated access revoked. The service database role needs usage/select on existing `auth.users`, `public.profiles`, `cbgpu_schools.memberships`, `cbgpu_schools.schools` and CRUD on the new private tables; use a dedicated server role. Never send database credentials to the browser.
+Explicitly review/apply `rust/crates/cbgpu-arcade/migrations/20261120090000_arcade.sql` to the intended database. It creates only the private `cbgpu_arcade` schema/tables, with RLS and public/anon/authenticated access revoked. The service database role needs usage/select on existing `auth.users`, `public.profiles`, `cbgpu_schools.memberships`, `cbgpu_schools.schools` and CRUD on the new private tables; use a dedicated server role. Never send database credentials to the browser.
 
 Environment:
 
@@ -51,4 +51,4 @@ Existing-table RLS still applies: column grants alone do not override it. The in
 
 Unauthenticated `GET /healthz` returns `{ok:true}` as process liveness only; startup requires database connectivity. Graceful shutdown handles SIGINT and Unix SIGTERM.
 
-The separately reviewed `rust/migrations/20261120090001_arcade_service_privileges.sql` implements those exact column grants, role-specific SELECT RLS policies, and ownership transfers, and refuses a preexisting role with elevated cluster privileges. Provision the restricted internal role before executing it. It is independently retryable. The PostgreSQL integration test enables RLS on all four old fixture tables, applies this privilege script twice, and executes API queries through `SET ROLE cbgpu_arcade_service`; forbidden broad-column reads and old-data updates are also checked.
+The separately reviewed `rust/crates/cbgpu-arcade/migrations/20261120090001_arcade_service_privileges.sql` implements those exact column grants, role-specific SELECT RLS policies, and ownership transfers, and refuses a preexisting role with elevated cluster privileges. Provision the restricted internal role before executing it. It is independently retryable. The PostgreSQL integration test enables RLS on all four old fixture tables, applies this privilege script twice, and executes API queries through `SET ROLE cbgpu_arcade_service`; forbidden broad-column reads and old-data updates are also checked.

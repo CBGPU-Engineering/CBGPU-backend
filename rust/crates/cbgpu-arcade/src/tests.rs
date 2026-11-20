@@ -7,14 +7,14 @@ async fn postgres_boundaries() {
     let db = PgPool::connect(&url).await.unwrap();
     sqlx::raw_sql("do $$begin create role anon;exception when duplicate_object then null;end$$;do $$begin create role authenticated;exception when duplicate_object then null;end$$;create schema auth;create table auth.users(id uuid primary key,deleted_at timestamptz,banned_until timestamptz,email text);create table public.profiles(id uuid primary key,account_status text);create schema cbgpu_schools;create table cbgpu_schools.schools(id text primary key,display_name text,official_name text);insert into cbgpu_schools.schools values('test-school','Test school','Test school');create table cbgpu_schools.memberships(user_id uuid,school_id text,status text,verified bool,starts_at timestamptz,ends_at timestamptz);").execute(&db).await.unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../migrations/20261120090000_arcade.sql"
+        "../migrations/20261120090000_arcade.sql"
     ))
     .execute(&db)
     .await
     .unwrap();
     // Reapplying the additive migration must preserve data and avoid duplicate indexes.
     sqlx::raw_sql(include_str!(
-        "../../../migrations/20261120090000_arcade.sql"
+        "../migrations/20261120090000_arcade.sql"
     ))
     .execute(&db)
     .await
@@ -22,7 +22,7 @@ async fn postgres_boundaries() {
     sqlx::raw_sql("do $$begin create role cbgpu_arcade_service login nosuperuser nocreatedb nocreaterole noreplication nobypassrls;exception when duplicate_object then null;end$$;alter table auth.users enable row level security;alter table public.profiles enable row level security;alter table cbgpu_schools.memberships enable row level security;alter table cbgpu_schools.schools enable row level security;").execute(&db).await.unwrap();
     for _ in 0..2 {
         sqlx::raw_sql(include_str!(
-            "../../../migrations/20261120090001_arcade_service_privileges.sql"
+            "../migrations/20261120090001_arcade_service_privileges.sql"
         ))
         .execute(&db)
         .await
