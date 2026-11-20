@@ -569,6 +569,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbgpu-arcade"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "cbgpu-backup"
 version = "0.1.0"
 dependencies = [
