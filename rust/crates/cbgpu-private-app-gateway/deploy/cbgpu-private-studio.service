@@ -1,0 +1,14 @@
+[Unit]
+Description=Owner-authenticated private application gate
+Requires=cbgpu-private-studio.socket
+After=cbgpu-private-studio.socket cbgpu-frontend.service
+StartLimitIntervalSec=0
+[Service]
+ExecStart=%h/.local/lib/cbgpu-private-studio/current/cbgpu-private-app-gateway %h/.config/cbgpu-private-studio/runtime.json
+Restart=always
+RestartSec=1
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+MemoryMax=256M
+TasksMax=128
