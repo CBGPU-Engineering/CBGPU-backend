@@ -16,6 +16,37 @@ struct Config {
     app_authority: SocketAddr,
     host: String,
     project: String,
+    #[serde(default = "authority_default")]
+    authority_origin: String,
+}
+fn authority_default() -> String {
+    "http://127.0.0.1:3000".into()
+}
+fn authority_location(raw: &str, project: &str) -> Result<(String, String), &'static str> {
+    let origin = url::Url::parse(raw).map_err(|_| "invalid authority origin")?;
+    let host = origin.host_str().unwrap_or("");
+    let local =
+        origin.scheme() == "http" && matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1");
+    let first_party = origin.scheme() == "https"
+        && matches!(host, "cbgpu.com" | "app.cbgpu.com")
+        && origin.port().is_none();
+    if (!local && !first_party)
+        || !origin.username().is_empty()
+        || origin.password().is_some()
+        || origin.path() != "/"
+        || origin.query().is_some()
+        || origin.fragment().is_some()
+    {
+        return Err("invalid first-party authority origin");
+    }
+    Ok((
+        format!("{}/api/server/{project}/open", raw.trim_end_matches('/')),
+        if local {
+            "cbgpu.com".into()
+        } else {
+            host.to_string()
+        },
+    ))
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,8 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(5))
         .build()?;
+    let (authority_url, authority_host) = authority_location(&c.authority_origin, &c.project)?;
     let authority = Arc::new(RemoteAuthority {
-        url: format!("http://127.0.0.1:3000/api/server/{}/open", c.project),
+        url: authority_url,
+        host: authority_host,
         client: client.clone(),
     });
     let auth = Arc::new(Auth {
@@ -91,4 +124,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn authority_uses_only_fixed_first_party_or_loopback() {
+        for origin in [
+            "http://127.0.0.1:3000",
+            "http://localhost:3000",
+            "http://[::1]:3000",
+            "https://cbgpu.com",
+            "https://app.cbgpu.com",
+        ] {
+            assert!(authority_location(origin, "fixture").is_ok(), "{origin}")
+        }
+        for origin in [
+            "http://cbgpu.com",
+            "https://attacker.example",
+            "https://cbgpu.com.attacker.example",
+            "https://cbgpu.com/path",
+            "https://cbgpu.com?next=x",
+            "https://user:pass@cbgpu.com",
+            "http://10.0.0.1:3000",
+        ] {
+            assert!(authority_location(origin, "fixture").is_err(), "{origin}")
+        }
+        assert_eq!(
+            authority_location(&authority_default(), "fixture").unwrap(),
+            (
+                "http://127.0.0.1:3000/api/server/fixture/open".into(),
+                "cbgpu.com".into()
+            )
+        );
+    }
 }

@@ -116,15 +116,6 @@ async fn proxy(State(g): State<Arc<Gateway>>, request: Request) -> Response {
             return response(StatusCode::FORBIDDEN, "현재 작업공간에서 요청하세요.");
         }
     }
-    if request
-        .headers()
-        .get(header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .is_some_and(|v| v > 100 * 1024 * 1024)
-    {
-        return response(StatusCode::PAYLOAD_TOO_LARGE, "파일 크기를 확인하세요.");
-    }
     let url = format!(
         "http://{}{}",
         g.upstream,
@@ -645,6 +636,7 @@ mod tests {
         let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let authority = auth::RemoteAuthority {
             url: format!("http://{addr}/api/server/fixture/open"),
+            host: "cbgpu.com".into(),
             client: client(),
         };
         assert!(authority.verify("synthetic-owner").await.unwrap().allowed);

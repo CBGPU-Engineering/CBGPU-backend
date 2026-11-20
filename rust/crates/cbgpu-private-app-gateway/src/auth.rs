@@ -25,6 +25,7 @@ pub trait Authority: Send + Sync {
 }
 pub struct RemoteAuthority {
     pub url: String,
+    pub host: String,
     pub client: reqwest::Client,
 }
 #[async_trait::async_trait]
@@ -33,7 +34,7 @@ impl Authority for RemoteAuthority {
         let r = self
             .client
             .get(&self.url)
-            .header("host", "cbgpu.com")
+            .header("host", &self.host)
             .bearer_auth(token)
             .timeout(Duration::from_secs(5))
             .send()
