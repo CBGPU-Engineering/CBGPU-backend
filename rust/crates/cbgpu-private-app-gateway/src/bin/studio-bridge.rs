@@ -4,6 +4,24 @@ use std::{net::SocketAddr, time::Duration};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
+    if args.len() == 3 && args[1] == "--health" {
+        let address: SocketAddr = args[2].parse()?;
+        if !address.ip().is_loopback() {
+            return Err("health target must be loopback".into());
+        }
+        let r = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .build()?
+            .get(format!("http://{address}/"))
+            .send()
+            .await?;
+        if !r.status().is_success() {
+            return Err("application HTTP health failed".into());
+        }
+        return Ok(());
+    }
+
     if args.len() != 3 {
         return Err("expected container listen and application loopback address".into());
     }
