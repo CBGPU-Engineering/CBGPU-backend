@@ -55,6 +55,14 @@ never blindly retry with a newly read CAS. Only end_time/ends_at changes. Identi
 start time, password, booking ID, controller state and notebook jobs are untouched.
 No clock or privilege decision is accepted from the browser.
 
+The deployed legacy trigger catalog was reviewed read-only: the only application
+UPDATE triggers are `guard_gpu_reservation_write` (validation/overlap) and
+`account_v2_execution` (permission gate). Other UPDATE triggers enforce foreign
+keys. The admin notification trigger is AFTER INSERT only: extending an existing
+row does not send a new-reservation notification or re-run approval. Password
+rotation is in the separate `approve_gpu_reservation` RPC, which this adapter
+never calls. No new extension-notification workflow is added.
+
 Reasons/errors: `AUTHENTICATION_REQUIRED`/`INVALID_SESSION`401,
 `GPU_PERMISSION_REQUIRED` (403), owner-scoped `RESERVATION_NOT_FOUND`404,
 `RESERVATION_EXPIRED`, `RESERVATION_NOT_ACTIVE`, `RESERVATION_CHANGED`,

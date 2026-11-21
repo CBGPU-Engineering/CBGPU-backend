@@ -37,8 +37,13 @@ async fn function(pool: &PgPool, file: &str, name: &str) {
     let start = lower
         .find(&format!("create or replace function {name}("))
         .unwrap();
-    let body = start + source[start..].find("$$").unwrap() + 2;
-    let end = body + source[body..].find("$$;").unwrap() + 3;
+    let (offset, tag) = ["$$", "$cpu$"]
+        .into_iter()
+        .filter_map(|tag| source[start..].find(tag).map(|offset| (offset, tag)))
+        .min_by_key(|(offset, _)| *offset)
+        .unwrap();
+    let body = start + offset + tag.len();
+    let end = body + source[body..].find(&format!("{tag};")).unwrap() + tag.len() + 1;
     sql(pool, &source[start..end]).await;
 }
 async fn legacy(
@@ -153,6 +158,13 @@ async fn extension_permissions_cas_and_direct_writer_races() {
         "cbgpu_schools.gpu_resource_state",
     )
     .await;
+    function(
+        &pool,
+        "20261117154700_platform_school_central_cpu_allocations.sql",
+        "cbgpu_accounts.guard_resource_execution",
+    )
+    .await;
+    sql(&pool,"CREATE TRIGGER account_v2_execution BEFORE UPDATE ON public.reservations FOR EACH ROW EXECUTE FUNCTION cbgpu_accounts.guard_resource_execution();CREATE TABLE fixture_notifications(n int);CREATE FUNCTION fixture_notify_new_booking() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN INSERT INTO fixture_notifications VALUES(1);RETURN NEW;END$$;CREATE TRIGGER fixture_insert_notify AFTER INSERT ON public.reservations FOR EACH ROW EXECUTE FUNCTION fixture_notify_new_booking()").await;
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     sql(
         &pool,
@@ -238,6 +250,12 @@ async fn extension_permissions_cas_and_direct_writer_races() {
     let start = now - Duration::minutes(10);
     let end = now + Duration::minutes(30);
     legacy(&pool, id(1), 1, start, end, 1, "approved").await;
+    let before: serde_json::Value =
+        sqlx::query_scalar("SELECT to_jsonb(r)-'end_time' FROM public.reservations r WHERE id=$1")
+            .bind(id(1))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let preview = transact(&rolepool, caller(1), Scope::Legacy, id(1), None)
         .await
         .unwrap();
@@ -271,6 +289,24 @@ async fn extension_permissions_cas_and_direct_writer_races() {
     .await
     .unwrap();
     assert_eq!(updated["updated"], true);
+    let after: serde_json::Value =
+        sqlx::query_scalar("SELECT to_jsonb(r)-'end_time' FROM public.reservations r WHERE id=$1")
+            .bind(id(1))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        before == after,
+        "all other reservation columns must remain unchanged"
+    );
+    let notifications: i64 = sqlx::query_scalar("SELECT count(*) FROM fixture_notifications")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        notifications, 1,
+        "extension must not fire INSERT notification workflow"
+    );
     let same: (Uuid, DateTime<Utc>, String) = sqlx::query_as(
         "SELECT user_id,start_time,ssh_password FROM public.reservations WHERE id=$1",
     )
