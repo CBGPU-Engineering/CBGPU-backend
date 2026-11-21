@@ -1158,6 +1158,7 @@ impl<R: Runtime> Agent<R> {
                         "CBGPU_DEPLOY_API_URL",
                         "CBGPU_FRONTEND_DEPLOY_KEY_FILE",
                         "CBGPU_MULTISCHOOL_V1",
+                        "CBGPU_ACCOUNT_V2",
                         "CBGPU_CENTRAL_CPU_V1",
                         "CBGPU_SCHOOLS_API_URL",
                         "CBGPU_TIMETABLE_WARM_SECRET_FILE",
@@ -2372,6 +2373,83 @@ mod tests {
         );
         assert!(!saved.contains("NEXT_PUBLIC_CBGPU_TIMETABLE_WARM"));
         assert!(saved.contains("NEXT_PUBLIC_CBGPU_CENTRAL_CPU_V1=0\n"));
+    }
+    #[test]
+    fn persisted_account_flag_preserves_scoped_policy_and_draft_state() {
+        for (account, schools, expected) in [
+            ("0", "0", "false"),
+            ("1", "0", "true"),
+            ("false", "0", "false"),
+            ("true", "0", "true"),
+            ("", "0", "false"),
+            ("invalid", "0", "invalid"),
+            ("0", "1", "true"),
+            ("1", "1", "true"),
+            ("invalid", "1", "invalid"),
+        ] {
+            let (_tmp, mut agent) = fixture("web");
+            agent.runtime.web_serve = true;
+            let input = fs::read_to_string(&agent.config.frontend_env)
+                .unwrap()
+                .replace(
+                    "CBGPU_MULTISCHOOL_V1=0\n",
+                    &format!("CBGPU_MULTISCHOOL_V1={schools}\n"),
+                );
+            fs::write(&agent.config.frontend_env, format!("{input}CBGPU_ACCOUNT_V2={account}\nSERVICE_ROLE_KEY=synthetic-backend-only\nEDUSET_PASSWORD=synthetic-worker-only\nCRON_SECRET=synthetic-worker-invocation\n")).unwrap();
+            agent.poll(Some("web")).unwrap();
+            assert_eq!(agent.runtime.previews[0].1["CBGPU_ACCOUNT_V2"], account);
+            let saved_file = agent
+                .root
+                .join("releases/web")
+                .join("a".repeat(40))
+                .join("web/.env.production.local");
+            let saved = fs::read_to_string(&saved_file).unwrap();
+            assert!(
+                saved
+                    .lines()
+                    .any(|line| line == format!("CBGPU_ACCOUNT_V2={account}"))
+            );
+            for private in [
+                "UNRELATED_PRIVATE_KEY",
+                "SERVICE_ROLE_KEY",
+                "EDUSET_PASSWORD",
+                "CRON_SECRET",
+            ] {
+                assert!(
+                    !saved
+                        .lines()
+                        .any(|line| line.starts_with(&format!("{private}="))),
+                    "unrelated component key entered frontend runtime"
+                );
+            }
+            for secret in [
+                "synthetic-backend-only",
+                "synthetic-worker-only",
+                "synthetic-worker-invocation",
+            ] {
+                assert!(
+                    !saved.contains(secret),
+                    "unrelated component secret entered frontend runtime"
+                );
+            }
+            assert!(!saved.contains("NEXT_PUBLIC_CBGPU_ACCOUNT_V2="));
+            let consumer = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/deploy-access-consumer.mts");
+            let output = Command::new("node")
+                .arg(consumer)
+                .arg(&saved_file)
+                .arg(account)
+                .arg(expected)
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "persisted consumer policy failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
     #[test]
     fn web_transport_preview_activation_preserves_reviewed_private_configuration() {
