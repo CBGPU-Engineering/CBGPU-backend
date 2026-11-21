@@ -27,6 +27,7 @@ async fn signed_node_binding_and_user_launch_never_trust_owner_payload() {
     });
     let central = Arc::new(SigningKey::from_bytes(&[5; 32]));
     let app = router(Config {
+        reservations: None,
         enabled: true,
         diagnostics: None,
         notebooks: Some(central.clone()),
@@ -151,6 +152,7 @@ async fn identity_service_outages_are_not_permanent_node_revocation() {
             .unwrap()
         });
         let config = Config {
+            reservations: None,
             enabled: true,
             diagnostics: None,
             notebooks: Some(Arc::new(SigningKey::from_bytes(&[5; 32]))),
@@ -199,6 +201,7 @@ async fn bootstrap_route_binds_only_job_and_forwards_caller_jwt() {
         axum::serve(listener,Router::new().fallback(|r:Request|async move{assert_eq!(r.uri().path(),"/rest/v1/rpc/school_gpu_notebook_owner_session");assert_eq!(r.headers()["authorization"],"Bearer owner-token");assert_eq!(r.headers()["apikey"],"anon");let body:serde_json::Value=serde_json::from_slice(&to_bytes(r.into_body(),1024).await.unwrap()).unwrap();assert_eq!(body,json!({"p_job_id":"11111111-1111-4111-8111-111111111111"}));Json(json!({"cookie_token":"synthetic-private-grant","job_id":"11111111-1111-4111-8111-111111111111","url":"/notebooks/11111111-1111-4111-8111-111111111111/lab","expires_at":"2030-01-01T00:00:00Z"}))})).await.unwrap()
     });
     let app = router(Config {
+        reservations: None,
         enabled: true,
         diagnostics: None,
         notebooks: Some(Arc::new(SigningKey::from_bytes(&[5; 32]))),

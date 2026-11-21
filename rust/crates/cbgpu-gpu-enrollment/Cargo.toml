@@ -19,6 +19,10 @@ libc = "0.2"
 url = "2"
 cbgpu-notebook-protocol = { path = "../cbgpu-notebook-protocol" }
 bytes = "1"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "chrono", "uuid", "json"] }
+chrono = { version = "0.4", features = ["clock", "serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
 hyper = {version="1",features=["client","http1"]}
 hyper-util = {version="0.1",features=["tokio"]}
 http-body-util = "0.1"

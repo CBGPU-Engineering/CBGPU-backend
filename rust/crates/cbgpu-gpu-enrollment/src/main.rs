@@ -26,7 +26,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !listen.ip().is_loopback() {
         return Err("GPU registry must bind private loopback".into());
     }
+    let reservations = if std::env::var_os("CBGPU_GPU_RESERVATION_DATABASE_URL_FILE").is_some() {
+        Some(
+            sqlx::postgres::PgPoolOptions::new()
+                .max_connections(2)
+                .acquire_timeout(std::time::Duration::from_secs(3))
+                .connect(&secret("CBGPU_GPU_RESERVATION_DATABASE_URL_FILE")?)
+                .await
+                .map_err(|_| "Reservation database connection unavailable")?,
+        )
+    } else {
+        None
+    };
     let config = Config {
+        reservations,
         notebooks: if flag(std::env::var("CBGPU_GPU_NOTEBOOKS_ENABLED").ok().as_deref())? {
             let value = secret("CBGPU_GPU_NOTEBOOK_SIGNING_KEY_FILE")?;
             Some(std::sync::Arc::new(ed25519_dalek::SigningKey::from_bytes(
