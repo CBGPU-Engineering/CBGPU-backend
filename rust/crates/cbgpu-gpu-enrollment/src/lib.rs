@@ -2,6 +2,7 @@
 pub mod commands;
 pub mod notebooks;
 pub mod nvidia_path;
+pub mod reservations;
 use axum::{
     Json, Router,
     body::to_bytes,
@@ -16,6 +17,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Config {
+    pub reservations: Option<sqlx::PgPool>,
     pub enabled: bool,
     pub diagnostics: Option<Arc<ed25519_dalek::SigningKey>>,
     pub notebooks: Option<Arc<ed25519_dalek::SigningKey>>,
@@ -232,7 +234,7 @@ pub fn router(config: Config) -> Router {
 }
 async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     if request.uri().path() == "/health" {
-        return Json(json!({"ok":true,"enabled":c.enabled,"implementation":"native-rust","execution":false,"sharing":false,"diagnostics_enabled":c.diagnostics.is_some(),"execution_ready":false,"notebooks_enabled":c.notebooks.is_some(),"notebook_signing_public_key":c.notebooks.as_ref().map(|k|hex(k.verifying_key().as_bytes()))})).into_response();
+        return Json(json!({"ok":true,"enabled":c.enabled,"implementation":"native-rust","execution":false,"sharing":false,"diagnostics_enabled":c.diagnostics.is_some(),"reservation_extensions_enabled":c.reservations.is_some(),"execution_ready":false,"notebooks_enabled":c.notebooks.is_some(),"notebook_signing_public_key":c.notebooks.as_ref().map(|k|hex(k.verifying_key().as_bytes()))})).into_response();
     }
     if !c.enabled {
         return fail(StatusCode::NOT_FOUND, "FEATURE_DISABLED");
@@ -243,6 +245,9 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     let auth = bearer(&request);
     if request.uri().query().is_some() {
         return fail(StatusCode::BAD_REQUEST, "QUERY_NOT_SUPPORTED");
+    }
+    if reservations::is_path(&path) {
+        return reservations::handle(&c, request).await;
     }
     if let ["v1", "gpu", "notebooks", job, "session"] = parts.as_slice()
         && uuid(job)
@@ -542,6 +547,7 @@ mod tests {
     async fn disabled_is_fail_closed() {
         use tower::ServiceExt;
         let app = router(Config {
+            reservations: None,
             enabled: false,
             diagnostics: None,
             notebooks: None,

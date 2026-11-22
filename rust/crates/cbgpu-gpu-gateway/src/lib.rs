@@ -144,10 +144,12 @@ impl Gateway {
                     revoke.send_replace(true);
                     break;
                 }
+                // Refresh before the cached boundary. Forwarding never receives grace
+                // beyond the last verified grant or the original JWT expiry.
                 let wait = state
                     .config
                     .recheck
-                    .min(Duration::from_secs_f64((ends - now()).max(0.001)));
+                    .min(Duration::from_secs_f64(((ends - now()) / 2.).max(0.001)));
                 tokio::select! {_ =stopped.changed()=>break,_ =drain.changed()=>{revoke.send_replace(true);break;},_ =tokio::time::sleep(wait)=>{}}
                 if now() >= ends {
                     revoke.send_replace(true);
@@ -483,3 +485,111 @@ fn url_query(query: &str) -> Vec<(String, String)> {
 }
 
 pub mod public_start;
+
+#[cfg(test)]
+mod lease_tests {
+    use super::*;
+    use base64::Engine;
+    struct Fresh {
+        end: f64,
+        delay: Duration,
+    }
+    #[async_trait::async_trait]
+    impl auth::Authority for Fresh {
+        async fn authorize(&self, _: &str, _: u8) -> Result<auth::Grant> {
+            tokio::time::sleep(self.delay).await;
+            Ok(auth::Grant {
+                owner: "owner".into(),
+                ends_at: self.end,
+            })
+        }
+    }
+    #[tokio::test]
+    async fn fresh_longer_booking_never_extends_jwt_boundary() {
+        let end = now() + 0.12;
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&json!({"exp":end})).unwrap());
+        let token = format!("synthetic.{payload}.synthetic");
+        let gateway = Gateway::new(
+            Config {
+                recheck: Duration::from_millis(10),
+                ..Default::default()
+            },
+            Arc::new(Fresh {
+                end: now() + 60.,
+                delay: Duration::ZERO,
+            }),
+        )
+        .unwrap();
+        let (mut revoked, _lease) = gateway.monitor(
+            token,
+            1,
+            auth::Grant {
+                owner: "owner".into(),
+                ends_at: now() + 60.,
+            },
+        );
+        tokio::time::timeout(Duration::from_secs(1), revoked.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(*revoked.borrow());
+        assert!(now() >= end);
+    }
+    #[tokio::test]
+    async fn slow_authority_cannot_grant_grace_past_cached_expiry() {
+        let end = now() + 0.1;
+        let gateway = Gateway::new(
+            Config {
+                recheck: Duration::from_millis(10),
+                ..Default::default()
+            },
+            Arc::new(Fresh {
+                end: now() + 60.,
+                delay: Duration::from_secs(2),
+            }),
+        )
+        .unwrap();
+        let (mut revoked, _lease) = gateway.monitor(
+            "synthetic".into(),
+            1,
+            auth::Grant {
+                owner: "owner".into(),
+                ends_at: end,
+            },
+        );
+        tokio::time::timeout(Duration::from_millis(300), revoked.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(*revoked.borrow());
+        assert!(now() >= end);
+    }
+    #[tokio::test]
+    async fn expired_fresh_grant_cannot_extend_cached_authority() {
+        let gateway = Gateway::new(
+            Config {
+                recheck: Duration::from_millis(10),
+                ..Default::default()
+            },
+            Arc::new(Fresh {
+                end: now() - 1.,
+                delay: Duration::ZERO,
+            }),
+        )
+        .unwrap();
+        let (mut revoked, _lease) = gateway.monitor(
+            "synthetic".into(),
+            1,
+            auth::Grant {
+                owner: "owner".into(),
+                ends_at: now() + 60.,
+            },
+        );
+        tokio::time::timeout(Duration::from_millis(300), revoked.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(*revoked.borrow());
+    }
+}

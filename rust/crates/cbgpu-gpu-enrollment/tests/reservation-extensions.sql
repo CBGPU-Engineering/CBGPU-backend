@@ -1,0 +1,34 @@
+-- Synthetic, disposable PostgreSQL only. Authorization functions and write guard
+-- are loaded verbatim from versioned migrations by the Rust integration test.
+CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
+CREATE SCHEMA auth; CREATE SCHEMA cbgpu_accounts; CREATE SCHEMA cbgpu_schools;
+CREATE TABLE auth.users(id uuid PRIMARY KEY,email_confirmed_at timestamptz DEFAULT now(),deleted_at timestamptz,banned_until timestamptz);
+CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid REFERENCES auth.users,not_after timestamptz);
+CREATE TABLE public.profiles(id uuid PRIMARY KEY,account_status text DEFAULT 'ACTIVE',is_admin boolean DEFAULT false);
+CREATE TABLE cbgpu_schools.schools(id text PRIMARY KEY,status text DEFAULT 'APPROVED',features text[] DEFAULT '{gpu_compute}');
+CREATE TABLE cbgpu_schools.feature_registry(key text PRIMARY KEY,enabled boolean,globally_available boolean,allowed_school_ids text[]);
+CREATE TABLE cbgpu_schools.memberships(user_id uuid,school_id text,membership_type text DEFAULT 'STUDENT',status text DEFAULT 'ACTIVE',verified boolean DEFAULT true,starts_at timestamptz DEFAULT now()-interval '1day',ends_at timestamptz);
+CREATE TABLE cbgpu_accounts.guest_requests(external_user_id uuid,requester_id uuid,school_id text,status text,resources text[],starts_at timestamptz,ends_at timestamptz);
+CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$SELECT nullif(current_setting('request.jwt.claims',true),'')::jsonb$$;
+CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$SELECT (auth.jwt()->>'sub')::uuid$$;
+CREATE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$SELECT auth.jwt()->>'role'$$;
+CREATE FUNCTION public.is_admin(uid uuid) RETURNS boolean LANGUAGE sql STABLE AS $$SELECT coalesce((SELECT is_admin FROM public.profiles WHERE id=uid),false)$$;
+CREATE TABLE public.reservations(id uuid PRIMARY KEY,user_id uuid,user_email text,gpu_id int,status text,created_at timestamptz DEFAULT now(),start_time timestamptz,end_time timestamptz,ssh_password text DEFAULT 'synthetic-password');
+ALTER TABLE public.reservations ENABLE ROW LEVEL SECURITY;
+CREATE TABLE cbgpu_schools.gpu_nodes(id uuid PRIMARY KEY,school_id text,status text DEFAULT 'ONLINE',credential_version bigint DEFAULT 1,last_seen_at timestamptz DEFAULT now(),last_sequence bigint DEFAULT 1);
+CREATE TABLE cbgpu_schools.gpu_resources(id uuid PRIMARY KEY,node_id uuid,credential_version bigint DEFAULT 1,last_seen_at timestamptz DEFAULT now(),reported_sequence bigint DEFAULT 1,hardware_uuid text DEFAULT 'GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+CREATE TABLE cbgpu_schools.gpu_executor_capabilities(node_id uuid,credential_version bigint DEFAULT 1,protocol int DEFAULT 3,ready boolean DEFAULT true,relay_seen_at timestamptz DEFAULT now(),expires_at timestamptz DEFAULT now()+interval '1hour',image_digest text DEFAULT 'synthetic-image',hardware_uuids text[] DEFAULT '{GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}');
+CREATE TABLE cbgpu_schools.gpu_notebook_policy(enabled boolean DEFAULT true,image_digest text DEFAULT 'synthetic-image');
+INSERT INTO cbgpu_schools.gpu_notebook_policy DEFAULT VALUES;
+CREATE TABLE cbgpu_schools.gpu_resource_reservations(id uuid PRIMARY KEY,resource_id uuid,owner_id uuid,starts_at timestamptz,ends_at timestamptz,status text DEFAULT 'RESERVED');
+CREATE TABLE cbgpu_schools.gpu_notebook_jobs(id uuid PRIMARY KEY,reservation_id uuid);
+ALTER TABLE cbgpu_schools.gpu_resource_reservations ENABLE ROW LEVEL SECURITY;
+INSERT INTO auth.users(id) SELECT ('00000000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid FROM generate_series(1,3)x;
+INSERT INTO auth.sessions(id,user_id) SELECT ('10000000-0000-4000-8000-'||lpad(x::text,12,'0'))::uuid,id FROM auth.users CROSS JOIN LATERAL(SELECT right(id::text,12)::int x) a;
+INSERT INTO public.profiles(id) SELECT id FROM auth.users;
+INSERT INTO cbgpu_schools.schools(id) VALUES('cbsh'),('school-b');
+INSERT INTO cbgpu_schools.feature_registry VALUES('gpu_compute',true,true,'{}');
+INSERT INTO cbgpu_schools.memberships(user_id,school_id) SELECT id,school FROM auth.users CROSS JOIN unnest(ARRAY['cbsh','school-b'])school WHERE right(id::text,1)<>'3';
+INSERT INTO cbgpu_schools.gpu_nodes(id,school_id) VALUES('30000000-0000-4000-8000-000000000001','school-b');
+INSERT INTO cbgpu_schools.gpu_resources(id,node_id) VALUES('40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001');
+INSERT INTO cbgpu_schools.gpu_executor_capabilities(node_id) VALUES('30000000-0000-4000-8000-000000000001');

@@ -43,6 +43,7 @@ async fn only_verified_inventory_reaches_privileged_store() {
             .unwrap()
     });
     let app = router(Config {
+        reservations: None,
         enabled: true,
         diagnostics: None,
         notebooks: None,
@@ -144,6 +145,7 @@ async fn resource_reservation_target_is_path_bound_and_never_service_role() {
     let addr = listener.local_addr().unwrap();
     let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let native = router(Config {
+        reservations: None,
         enabled: true,
         diagnostics: None,
         notebooks: None,

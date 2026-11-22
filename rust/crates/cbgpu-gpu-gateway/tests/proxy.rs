@@ -27,7 +27,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 const OWNER: &str = "00000000-0000-4000-8000-000000000001";
 struct Access {
     valid: AtomicBool,
-    ends: f64,
+    ends: std::sync::Mutex<f64>,
 }
 #[async_trait::async_trait]
 impl Authority for Access {
@@ -40,7 +40,7 @@ impl Authority for Access {
         }
         Ok(Grant {
             owner: OWNER.into(),
-            ends_at: self.ends,
+            ends_at: *self.ends.lock().unwrap(),
         })
     }
 }
@@ -154,7 +154,7 @@ async fn fixture(seconds: f64) -> Fixture {
     let address = listener.local_addr().unwrap();
     let access = Arc::new(Access {
         valid: AtomicBool::new(true),
-        ends: now() + seconds,
+        ends: std::sync::Mutex::new(now() + seconds),
     });
     let state = Gateway::new(
         Config {
@@ -407,4 +407,34 @@ async fn form_posts_preserve_same_origin_without_allowing_null_or_external_origi
         assert_eq!(response.status(), status, "origin={origin}");
     }
     drained(&f).await;
+}
+
+#[tokio::test]
+async fn fresh_extension_keeps_existing_stream_alive_past_original_deadline() {
+    let f = fixture(0.3).await;
+    let response = reqwest::Client::new()
+        .get(format!("http://{}/1/stream", f.address))
+        .header("host", "gpu.cbgpu.com")
+        .header("cookie", cookie(1))
+        .send()
+        .await
+        .unwrap();
+    let mut stream = response.bytes_stream();
+    assert!(stream.next().await.unwrap().is_ok());
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    *f.access.ends.lock().unwrap() = now() + 1.;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    for _ in 0..40 {
+        assert!(stream.next().await.unwrap().is_ok());
+    }
+    f.access.valid.store(false, Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while let Some(chunk) = stream.next().await {
+            if chunk.is_err() {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
 }
