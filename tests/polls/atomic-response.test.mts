@@ -42,6 +42,14 @@ test('atomic response submission validates, recovers owned empty headers, and co
   const failA=randomUUID(),failB=randomUUID(),failPoll=make([{id:failA},{id:failB}]);failure(submit(failPoll,{[failA]:'kept draft',[failB]:'FAIL_INSERT'}),'SYNTHETIC_ANSWER_FAILURE');assert.equal(count(failPoll),'0');
   const retained=rawHeader(failPoll);failure(submit(failPoll,{[failA]:'kept draft',[failB]:'FAIL_INSERT'}),'SYNTHETIC_ANSWER_FAILURE');assert.equal(count(failPoll),'1');assert.deepEqual(answers(retained),[]);assert.equal(JSON.parse(db(claims+submit(failPoll,{[failA]:'valid',[failB]:'valid'}))).id,retained);
   for(const settings of [{open:false},{expired:true}]){const closed=make([],settings);failure(submit(closed,{}),'POLL_CLOSED');assert.equal(count(closed),'0')}
+  // Old authenticated tabs cannot append answers after closure/deadline;
+  // the same valid historical import remains available to maintenance roles.
+  db('create role service_role bypassrls;grant all on public.polls,public.poll_questions,public.poll_responses,public.poll_answers to service_role;');
+  for(const settings of [{open:false},{expired:true}]){
+   const qid=randomUUID(),legacyClosed=make([{id:qid}],settings),header=rawHeader(legacyClosed);
+   failure(`insert into public.poll_answers(response_id,question_id,value) values('${header}','${qid}','"too late"');`,'POLL_CLOSED');assert.deepEqual(answers(header),[]);
+   db(`set role service_role;insert into public.poll_answers(response_id,question_id,value) values('${header}','${qid}','"historical import"');`);assert.equal(answers(header)[0].value,'historical import');
+  }
   db(`update public.profiles set account_status='SUSPENDED' where id='${owner}'`);failure(submit(poll,payload),'POLL_AUTH_REQUIRED');db(`update public.profiles set account_status='ACTIVE' where id='${owner}'`);
   db(`update auth.sessions set not_after=now()-interval '1 minute' where user_id='${owner}'`);failure(submit(poll,payload),'POLL_AUTH_REQUIRED');db(`update auth.sessions set not_after=null`);
   assert.throws(()=>db('set role anon;'+submit(poll,payload)),e=>String((e as any).stderr).includes('permission denied'));

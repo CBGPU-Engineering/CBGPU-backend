@@ -10,6 +10,11 @@ begin
  perform pg_advisory_xact_lock(hashtextextended('cbgpu-poll-answer:'||new.response_id::text,0));
  select poll_id into response_poll from public.poll_responses where id=new.response_id;
  if not found then raise exception 'POLL_RESPONSE_QUESTION_SCOPE';end if;
+ -- User-facing old tabs must obey the current deadline too. Service/import
+ -- database roles retain their existing maintenance capability.
+ if current_user in ('authenticated','anon') and exists(
+  select 1 from public.polls p where p.id=response_poll and (p.is_active is distinct from true or p.ends_at<=now())
+ ) then raise exception 'POLL_CLOSED';end if;
  select * into question from public.poll_questions q where q.id=new.question_id and q.poll_id=response_poll;
  if not found then
   raise exception 'POLL_RESPONSE_QUESTION_SCOPE';
