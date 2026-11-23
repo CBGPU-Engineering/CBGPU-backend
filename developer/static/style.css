@@ -119,3 +119,7 @@ dialog{overscroll-behavior:contain;max-height:calc(100dvh - 32px);scroll-padding
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 @media(max-width:720px){.theme-control select,.header-actions .theme-control select{font-size:16px;min-width:98px;width:98px}}
 [data-theme="dark"] :is(input:not([type="checkbox"]),select,textarea,.editor-value textarea){border-color:var(--input-border)}
+/* Table/schema content keeps the shared 14px reading size; wide data scrolls. */
+.table-link,.table-link small,.data-table,.data-table thead th,.data-table td,.column-type,.editor-field label,.editor-field .meta{font-size:14px;line-height:1.6}
+.editor-field .meta{font-size:14px!important}
+.table-link small{max-width:45%;overflow-wrap:anywhere;text-align:right}
