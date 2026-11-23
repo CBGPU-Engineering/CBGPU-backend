@@ -78,6 +78,8 @@ jobs:
       - run: cargo test --locked --manifest-path rust/Cargo.toml
       - name: Reservation extension authorization and direct-booking races (disposable PostgreSQL)
         run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-gpu-enrollment --test reservation_extensions -- --ignored
+      - name: School-local reservation authority and lifecycle (disposable PostgreSQL)
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-gpu-enrollment --test school_admin_reservations -- --ignored
       - name: Arcade replay ownership and least-privilege PostgreSQL contracts
         run: |
           docker run --rm -d --name cbgpu-arcade-ci-db -e POSTGRES_PASSWORD=ci-only-password -e POSTGRES_DB=cbgpu_arcade_ci -p 127.0.0.1:55492:5432 postgres:17

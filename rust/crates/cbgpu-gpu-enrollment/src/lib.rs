@@ -3,6 +3,7 @@ pub mod commands;
 pub mod notebooks;
 pub mod nvidia_path;
 pub mod reservations;
+pub mod school_reservations;
 use axum::{
     Json, Router,
     body::to_bytes,
@@ -243,6 +244,9 @@ async fn handle(State(c): State<Arc<Config>>, request: Request) -> Response {
     let parts = path.trim_matches('/').split('/').collect::<Vec<_>>();
     let method = request.method().clone();
     let auth = bearer(&request);
+    if school_reservations::is_path(&path) {
+        return school_reservations::handle(&c, request).await;
+    }
     if request.uri().query().is_some() {
         return fail(StatusCode::BAD_REQUEST, "QUERY_NOT_SUPPORTED");
     }
