@@ -31,6 +31,9 @@ test('atomic response submission validates, recovers owned empty headers, and co
   const retry=JSON.parse(db(claims+submit(poll,payload)));assert.equal(retry.id,first.id);assert.equal(retry.reused,true);assert.deepEqual(answers(first.id),saved);assert.equal(count(poll),'1');
   failure(submit(poll,{...payload,[a]:'overwrite'}),'POLL_RESPONSE_ALREADY_RECORDED');assert.deepEqual(answers(first.id),saved);
   failure(submit({...poll,revision:poll.revision-1},payload),'POLL_EDIT_CONFLICT');
+  const checkId=randomUUID(),checkPoll=make([{id:checkId,type:'checkbox',options:[{id:'x',text:'X'},{id:'y',text:'Y'}]}]),checkHeader=rawHeader(checkPoll);
+  db(claims+`insert into public.poll_answers(response_id,question_id,value) values('${checkHeader}','${checkId}','["y","x"]');`);
+  const checkboxBefore=answers(checkHeader);const sameSet=JSON.parse(db(claims+submit(checkPoll,{[checkId]:['x','y','x']})));assert.equal(sameSet.id,checkHeader);assert.equal(sameSet.reused,true);assert.deepEqual(answers(checkHeader),checkboxBefore);
   const zero=make([]),zeroFirst=JSON.parse(db(claims+submit(zero,{}))),zeroRetry=JSON.parse(db(claims+submit(zero,{})));assert.equal(zeroFirst.id,zeroRetry.id);assert.equal(zeroRetry.reused,true);assert.equal(answers(zeroFirst.id).length,0);
   const hidden=make([{id:randomUUID(),required:true,config:{showIf:{questionId:randomUUID(),value:'not-selected'}}}]);assert.equal(answers(JSON.parse(db(claims+submit(hidden,{}))).id).length,0);
   const required=randomUUID(),emptyPoll=make([{id:required,required:true}]);const emptyId=rawHeader(emptyPoll),foreignId=rawHeader(emptyPoll,'11111111-1111-4111-8111-111111111111');const resumed=JSON.parse(db(claims+submit(emptyPoll,{[required]:'resumed'})));assert.equal(resumed.id,emptyId);assert.equal(answers(emptyId).length,1);assert.equal(answers(foreignId).length,0);assert.equal(count(emptyPoll),'2');

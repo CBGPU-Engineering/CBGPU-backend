@@ -109,7 +109,13 @@ begin
  if answer_count>0 then
   if answer_count=(select count(*) from jsonb_each(normalized))
    and answer_count=(select count(distinct a.question_id) from public.poll_answers a where a.response_id=saved_response)
-   and not exists(select 1 from public.poll_answers a where a.response_id=saved_response and normalized->a.question_id::text is distinct from a.value) then
+   and not exists(
+    select 1 from public.poll_answers a join public.poll_questions q on q.id=a.question_id
+    where a.response_id=saved_response and normalized->a.question_id::text is distinct from
+     case when q.type='checkbox' and jsonb_typeof(a.value)='array' then
+      (select coalesce(jsonb_agg(choice.value order by choice.value),'[]'::jsonb) from (select distinct value from jsonb_array_elements(a.value)) choice)
+     else a.value end
+   ) then
    return jsonb_build_object('id',saved_response,'poll_id',p_poll_id,'submitted',true,'reused',true);
   end if;
   raise exception 'POLL_RESPONSE_ALREADY_RECORDED';
