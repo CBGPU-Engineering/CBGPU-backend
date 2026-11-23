@@ -38,7 +38,7 @@ begin
   and exists(
    select 1 from public.poll_answers a
    cross join lateral jsonb_array_elements(case when jsonb_typeof(a.value)='array' then a.value else jsonb_build_array(a.value) end) picked(value)
-   where a.question_id=old.id and jsonb_typeof(picked.value)='string'
+   where a.question_id=old.id and jsonb_typeof(picked.value)='string' and picked.value<>'""'::jsonb
    and not exists(select 1 from jsonb_array_elements(new.options) opt where opt->>'id'=picked.value#>>'{}')
   ) then
   raise exception 'POLL_ANSWERED_OPTION_REMOVAL';
@@ -84,6 +84,11 @@ begin
  or jsonb_array_length(p_questions)>100 or length(btrim(coalesce(p_poll->>'title','')))=0 then
   raise exception 'POLL_INVALID_INPUT';
  end if;
+ -- Match the submit/legacy-answer table order before acquiring row locks.
+ -- This prevents a new editor holding a poll row while a submitter holds the
+ -- table SHARE lock and waits on that same row's foreign-key check.
+ lock table public.polls in row exclusive mode;
+ lock table public.poll_questions in row exclusive mode;
  if target is null then
   insert into public.polls(title,description,ends_at,is_active,show_results,created_by)
   values(p_poll->>'title',coalesce(p_poll->>'description',''),nullif(p_poll->>'ends_at','')::timestamptz,true,coalesce((p_poll->>'show_results')::boolean,true),auth.uid())

@@ -44,3 +44,11 @@ select tgname from pg_trigger where tgrelid='public.poll_answers'::regclass and 
 ```
 
 Expected: invoker (`false`), anonymous execution denied (`false`), and `cbgpu_poll_answer_insert_integrity` installed. Keep database integrity guards if rolling back the web. Dropping them would reopen the old answer-shape and duplicate-insert races.
+
+## Result privacy and live-session policy
+
+Apply `20261123165638_poll_result_visibility.sql` after the two atomic RPC migrations. This adds restrictive policies for authenticated access; existing permissive policies and table privileges are retained. All four poll tables require the same current live-session identity as the RPCs. Suspended or expired-session accounts cannot continue through a legacy direct read/write path. Service and maintenance roles retain their existing behavior.
+
+A hidden result's answers and participation metadata are readable only by their response owner and a current administrator. A poll explicitly showing results retains authenticated result access. Owners can inspect their own receipt without gaining access to other answers. The frontend also prevents hidden-result card, post-submit and result-view entry for nonadministrators. No existing poll's visibility flag, answer, response or question is changed by this migration.
+
+`node --test tests/polls/result-visibility.test.mts` checks real row-level security for an owner, another account and an administrator, public/hidden transitions, hidden participant metadata, valid optional blank selections, suspended and expired sessions, anonymous denial, repeated policy installation without data changes, and confirmed whole-poll deletion. These tests run only in an isolated disposable PostgreSQL container.
