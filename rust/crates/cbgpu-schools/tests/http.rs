@@ -735,3 +735,146 @@ async fn school_member_empty_filters_mean_all_and_nonempty_filters_are_preserved
     assert_eq!(response.status(), 401);
     task.abort();
 }
+#[tokio::test]
+async fn clubs_routes_bind_tenant_ids_and_never_accept_actor_or_window_authority() {
+    let backend=Router::new()
+        .route("/auth/v1/user",get(||async{Json(json!({"id":"fixture"}))}))
+        .route("/rest/v1/rpc/cbgpu_school_clubs_api",post(|h:HeaderMap,Json(v):Json<Value>|async move {
+            assert_eq!(h["authorization"],"Bearer club-fixture");assert_eq!(h["apikey"],"fixture-anon");
+            assert_eq!(v["payload"]["school_id"],"school-a");assert!(v["payload"].get("user_id").is_none());
+            Json(json!({"action":v["action"],"payload":v["payload"],"server_now":"2026-11-24T00:00:00Z"}))
+        }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let handle = tokio::spawn(async move { axum::serve(listener, backend).await.unwrap() });
+    let app = router(config(true, origin));
+    for (method, path, input, action) in [
+        (
+            "GET",
+            "/v1/schools/school-a/clubs?limit=2&offset=1",
+            json!({}),
+            "list",
+        ),
+        (
+            "POST",
+            "/v1/schools/school-a/clubs",
+            json!({"campaign_id":"60000000-0000-4000-8000-000000000001","title":"Draft"}),
+            "create",
+        ),
+        (
+            "POST",
+            "/v1/schools/school-a/clubs/campaigns",
+            json!({"confirmed":true}),
+            "campaign_create",
+        ),
+        (
+            "PATCH",
+            "/v1/schools/school-a/clubs/campaigns/60000000-0000-4000-8000-000000000001",
+            json!({"expected_revision":1,"status":"PAUSED","confirmed":true}),
+            "campaign_update",
+        ),
+        (
+            "PATCH",
+            "/v1/schools/school-a/clubs/60000000-0000-4000-8000-000000000002",
+            json!({"expected_revision":1,"title":"Edited"}),
+            "update",
+        ),
+        (
+            "POST",
+            "/v1/schools/school-a/clubs/60000000-0000-4000-8000-000000000002/ready",
+            json!({"expected_revision":1}),
+            "ready",
+        ),
+        (
+            "POST",
+            "/v1/schools/school-a/clubs/60000000-0000-4000-8000-000000000002/withdraw",
+            json!({"expected_revision":1}),
+            "withdraw",
+        ),
+        (
+            "GET",
+            "/v1/schools/school-a/clubs/60000000-0000-4000-8000-000000000002/applications?limit=10",
+            json!({}),
+            "applications",
+        ),
+        (
+            "POST",
+            "/v1/schools/school-a/clubs/60000000-0000-4000-8000-000000000002/applications",
+            json!({"answers":"Private fixture"}),
+            "apply",
+        ),
+        (
+            "PATCH",
+            "/v1/schools/school-a/clubs/60000000-0000-4000-8000-000000000002/applications/60000000-0000-4000-8000-000000000003",
+            json!({"expected_revision":1,"status":"APPROVED"}),
+            "application_review",
+        ),
+        (
+            "POST",
+            "/v1/schools/school-a/clubs/60000000-0000-4000-8000-000000000002/applications/60000000-0000-4000-8000-000000000003/withdraw",
+            json!({"expected_revision":1}),
+            "application_withdraw",
+        ),
+    ] {
+        let r = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("authorization", "Bearer club-fixture")
+                    .body(Body::from(input.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "{method} {path}");
+        let value = body(r).await;
+        assert_eq!(value["action"], action);
+    }
+    for path in [
+        "/v1/schools/school-a/clubs?limit=0",
+        "/v1/schools/school-a/clubs?limit=1&limit=2",
+        "/v1/schools/school-a/clubs?school_id=other",
+        "/v1/schools/school-a/clubs?campaign_id=not-a-uuid",
+    ] {
+        let r = app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header("authorization", "Bearer club-fixture")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 400);
+    }
+    for input in [
+        json!({"school_id":"other"}),
+        json!({"owner_id":"other"}),
+        json!({"status":"READY"}),
+    ] {
+        let r = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/schools/school-a/clubs")
+                    .header("authorization", "Bearer club-fixture")
+                    .body(Body::from(input.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 400);
+    }
+    let r = app
+        .oneshot(
+            Request::get("/v1/schools/school-a/clubs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    handle.abort();
+}
