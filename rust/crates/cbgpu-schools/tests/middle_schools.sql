@@ -29,6 +29,9 @@ DELETE FROM cbgpu_schools.memberships WHERE user_id IN('00000000-0000-4000-8000-
 INSERT INTO cbgpu_schools.memberships(user_id,school_id,membership_type,status,verified,student_number) VALUES
 ('00000000-0000-4000-8000-000000000005','fixture-middle','STUDENT','ACTIVE',true,'1-12-003'),
 ('00000000-0000-4000-8000-000000000004','fixture-middle','TEACHER','ACTIVE',true,null);
+-- Multi-school signup keeps global profile EXTERNAL; verified school membership is authoritative.
+UPDATE public.profiles SET account_type='EXTERNAL' WHERE id IN('00000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000005');
+UPDATE cbgpu_schools.memberships SET verified=true,status='ACTIVE',membership_type='EXTERNAL' WHERE user_id='00000000-0000-4000-8000-000000000002';
 INSERT INTO public.contests(id,host_id,title,access_scope,participant_policy)
 SELECT ('20000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'00000000-0000-4000-8000-000000000001',policy,'PUBLIC',policy FROM(VALUES(1,'HIGH_SCHOOL_STUDENTS'),(2,'MIDDLE_SCHOOL_STUDENTS'),(3,'SECONDARY_SCHOOL_STUDENTS'),(4,'SCHOOL_TEACHERS'),(5,'ALL_ELIGIBLE'))p(n,policy);
 DO $$DECLARE student uuid:='00000000-0000-4000-8000-000000000005';teacher uuid:='00000000-0000-4000-8000-000000000004';high uuid:='00000000-0000-4000-8000-000000000001'; BEGIN
