@@ -18,6 +18,9 @@ for each row execute function public.cbgpu_poll_revision_trigger();
 create or replace function public.cbgpu_poll_question_integrity_trigger() returns trigger
 language plpgsql security invoker set search_path='' as $$
 begin
+ -- Non-key UPDATE otherwise shares its lock with an in-flight answer FK check.
+ -- Upgrade before inspecting answers so a completed answer cannot be missed.
+ perform id from public.poll_questions where id=old.id for update;
  if tg_op='DELETE' then
   -- A deliberate whole-poll DELETE has already removed the parent row when its
   -- FK cascade visits questions. Preserve that existing confirmed capability.
@@ -30,6 +33,15 @@ begin
  if (new.type is distinct from old.type or new.id is distinct from old.id or new.poll_id is distinct from old.poll_id)
   and exists(select 1 from public.poll_answers a where a.question_id=old.id) then
   raise exception 'POLL_ANSWERED_QUESTION_TYPE';
+ end if;
+ if new.type in ('choice','checkbox','dropdown') and new.options is distinct from old.options
+  and exists(
+   select 1 from public.poll_answers a
+   cross join lateral jsonb_array_elements(case when jsonb_typeof(a.value)='array' then a.value else jsonb_build_array(a.value) end) picked(value)
+   where a.question_id=old.id and jsonb_typeof(picked.value)='string'
+   and not exists(select 1 from jsonb_array_elements(new.options) opt where opt->>'id'=picked.value#>>'{}')
+  ) then
+  raise exception 'POLL_ANSWERED_OPTION_REMOVAL';
  end if;
  return new;
 end $$;
@@ -61,7 +73,7 @@ create or replace function public.cbgpu_save_poll(
 declare
  target uuid := p_poll_id; revision bigint; item jsonb; old_question public.poll_questions%rowtype;
  question_id uuid; client_id text; mapped jsonb := '{}'::jsonb; ids uuid[] := '{}';
- question_config jsonb; dependency text; position integer := 0;
+ question_config jsonb; dependency text; dependency_question jsonb; visited text[]; cursor_id text; position integer := 0;
 begin
  -- The existing identity primitive checks the actual session and account state.
  if not coalesce(public.cbgpu_personal_project_identity(), false)
@@ -90,6 +102,12 @@ begin
   or mapped ? client_id or coalesce(item->>'type','') not in ('choice','checkbox','text','paragraph','scale','dropdown')
   or jsonb_typeof(item->'options') is distinct from 'array' or jsonb_typeof(item->'config') is distinct from 'object'
   or item->>'title' is null then raise exception 'POLL_INVALID_INPUT'; end if;
+  if exists(select 1 from jsonb_array_elements(item->'options') opt
+   where jsonb_typeof(opt) is distinct from 'object' or jsonb_typeof(opt->'id') is distinct from 'string'
+   or length(coalesce(opt->>'id','')) not between 1 and 100 or jsonb_typeof(opt->'text') is distinct from 'string')
+   or exists(select 1 from jsonb_array_elements(item->'options') opt group by opt->>'id' having count(*)>1) then
+   raise exception 'POLL_INVALID_OPTIONS';
+  end if;
   if client_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
    question_id:=client_id::uuid;
    select * into old_question from public.poll_questions where id=question_id;
@@ -98,6 +116,7 @@ begin
     raise exception 'POLL_ANSWERED_QUESTION_TYPE';
    end if;
   else question_id:=gen_random_uuid(); end if;
+  if question_id=any(ids) then raise exception 'POLL_INVALID_INPUT'; end if;
   mapped:=mapped||jsonb_build_object(client_id,question_id::text);
   ids:=array_append(ids,question_id);
  end loop;
@@ -110,6 +129,18 @@ begin
   if question_config ? 'showIf' then
    dependency:=question_config#>>'{showIf,questionId}';
    if dependency is null or not(mapped ? dependency) or dependency=item->>'id' then raise exception 'POLL_INVALID_CONDITION'; end if;
+   select value into dependency_question from jsonb_array_elements(p_questions) where value->>'id'=dependency;
+   if jsonb_typeof(question_config#>'{showIf,value}') is distinct from 'string'
+    or (dependency_question->>'type' in ('choice','checkbox','dropdown') and not exists(
+     select 1 from jsonb_array_elements(dependency_question->'options') opt where opt->>'id'=question_config#>>'{showIf,value}'
+    )) then raise exception 'POLL_INVALID_CONDITION'; end if;
+   -- Preserve valid forward references after reordering, but never save a cycle.
+   visited:=array[item->>'id']; cursor_id:=dependency;
+   while cursor_id is not null loop
+    if cursor_id=any(visited) then raise exception 'POLL_INVALID_CONDITION'; end if;
+    visited:=array_append(visited,cursor_id);
+    select value#>>'{config,showIf,questionId}' into cursor_id from jsonb_array_elements(p_questions) where value->>'id'=cursor_id;
+   end loop;
   end if;
  end loop;
  delete from public.poll_questions where poll_id=target and not(id=any(ids));

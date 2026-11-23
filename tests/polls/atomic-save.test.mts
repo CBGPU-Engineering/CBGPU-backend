@@ -59,6 +59,39 @@ test('atomic poll editor preserves answers, rejects stale writes, and rolls back
   for(let i=0;i<100;i++){if(db("select count(*) from pg_stat_activity where application_name='atomic-poll-winner' and wait_event='PgSleep'")==='1')break;await new Promise(r=>setTimeout(r,20));}
   fails(save(id,revision,[question(first.id),question(second.id)],'concurrent stale'),'POLL_EDIT_CONFLICT');await pending;
   assert.equal(state(id).poll.title,'concurrent winner');assert.deepEqual(state(id).answers,[answer]);
+  // Choice IDs are persisted answer identities, not disposable editor labels.
+  const options=[{id:'kept',text:'유지할 선택지'},{id:'other',text:'다른 선택지'}];
+  const pick=(client:string,type='choice',opts=options)=>({...question(client,'선택 질문',type),options:opts});
+  const choices=JSON.parse(db(claims()+save(null,null,[pick('choice'),pick('checks','checkbox'),question('dependent','조건 질문','text',{showIf:{questionId:'choice',value:'kept'}})]))).id;
+  let choiceState=state(choices);const choiceQ=choiceState.questions.find((q:any)=>q.order_num===0),checkQ=choiceState.questions.find((q:any)=>q.order_num===1);
+  assert.equal(choiceState.questions.find((q:any)=>q.order_num===2).config.showIf.questionId,choiceQ.id);
+  const choiceResponse=db(claims(false)+`insert into public.poll_responses(poll_id,user_id) values('${choices}','22222222-2222-4222-8222-222222222222') returning id;`);
+  db(claims(false)+`insert into public.poll_answers(response_id,question_id,value) values('${choiceResponse}','${choiceQ.id}','"kept"'::jsonb),('${choiceResponse}','${checkQ.id}','["kept","other"]'::jsonb);`);
+  choiceState=state(choices);const chosenSnapshot=choiceState;
+  const changed=choiceState.questions.map((q:any)=>q.id===checkQ.id?{...q,options:[options[1]]}:q);
+  fails(save(choices,choiceState.poll.editor_revision,changed),'POLL_ANSWERED_OPTION_REMOVAL');assert.deepEqual(state(choices),chosenSnapshot);
+  fails(`update public.poll_questions set options='[]'::jsonb where id='${checkQ.id}';`,'POLL_ANSWERED_OPTION_REMOVAL');assert.deepEqual(state(choices),chosenSnapshot);
+  const duplicates=choiceState.questions.map((q:any)=>q.id===choiceQ.id?{...q,options:[options[0],options[0]]}:q);
+  fails(save(choices,choiceState.poll.editor_revision,duplicates),'POLL_INVALID_OPTIONS');assert.deepEqual(state(choices),chosenSnapshot);
+  const alias={...choiceQ,id:choiceQ.id.toUpperCase()};
+  if(alias.id===choiceQ.id)alias.id=choiceQ.id.replace(/[a-f]/,char=>char.toUpperCase());
+  fails(save(choices,choiceState.poll.editor_revision,[...choiceState.questions,alias]),'POLL_INVALID_INPUT');assert.deepEqual(state(choices),chosenSnapshot);
+  const invalidCondition=choiceState.questions.map((q:any)=>q.order_num===2?{...q,config:{showIf:{questionId:choiceQ.id,value:'missing'}}}:q);
+  fails(save(choices,choiceState.poll.editor_revision,invalidCondition),'POLL_INVALID_CONDITION');assert.deepEqual(state(choices),chosenSnapshot);
+  const countBeforeCycle=db('select count(*) from public.polls');
+  fails(save(null,null,[question('cycle-a','A','text',{showIf:{questionId:'cycle-b',value:'yes'}}),question('cycle-b','B','text',{showIf:{questionId:'cycle-a',value:'yes'}})]),'POLL_INVALID_CONDITION');assert.equal(db('select count(*) from public.polls'),countBeforeCycle);
+  // Reordering remains valid even when a conditional question precedes its source.
+  db(claims()+save(choices,choiceState.poll.editor_revision,[...choiceState.questions].reverse()));
+  assert.deepEqual(state(choices).answers,chosenSnapshot.answers);
+  // Legacy non-key updates must wait for a concurrent answer's FK lock, then
+  // re-check the freshly committed answer before changing its interpretation.
+  const racing=JSON.parse(db(claims()+save(null,null,[question('race-q')]))).id;
+  const racingQ=state(racing).questions[0].id;
+  const answering=run('docker',['exec','-i',name,'psql','-X','-qAt','-v','ON_ERROR_STOP=1','-U','postgres','-d','postgres','-c',"set application_name='poll-answer-before-type';begin;"+claims(false)+`insert into public.poll_responses(poll_id,user_id) values('${racing}','22222222-2222-4222-8222-222222222222');insert into public.poll_answers(response_id,question_id,value) select id,'${racingQ}','"text answer"'::jsonb from public.poll_responses where poll_id='${racing}' and user_id=auth.uid();select pg_sleep(1);commit;`]);
+  let answerPending=false;for(let i=0;i<100;i++){if(db("select count(*) from pg_stat_activity where application_name='poll-answer-before-type' and wait_event='PgSleep'")==='1'){answerPending=true;break}await new Promise(r=>setTimeout(r,20));}
+  assert.equal(answerPending,true);
+  fails(`update public.poll_questions set type='scale' where id='${racingQ}';`,'POLL_ANSWERED_QUESTION_TYPE');await answering;
+  assert.equal(state(racing).questions[0].type,'text');assert.equal(state(racing).answers[0].value,'text answer');
   // Explicit whole-poll deletion remains available through the original RLS.
   db(claims()+`delete from public.polls where id='${id}';`);
   assert.equal(db(`select count(*) from public.poll_answers where id='${answer.id}'`),'0');
