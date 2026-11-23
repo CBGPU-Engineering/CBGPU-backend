@@ -1,0 +1,21 @@
+-- Reviewed catalog-only delta. Execute only after backup and additive migration review.
+BEGIN;
+SET LOCAL lock_timeout='3s';
+SET LOCAL statement_timeout='60s';
+CREATE TEMP TABLE middle_before_schools ON COMMIT DROP AS SELECT id,to_jsonb(s) value FROM cbgpu_schools.schools s;
+CREATE TEMP TABLE middle_before_memberships ON COMMIT DROP AS SELECT id,to_jsonb(m) value FROM cbgpu_schools.memberships m;
+CREATE TEMP TABLE middle_delta ON COMMIT DROP AS
+WITH manifest AS MATERIALIZED(SELECT '__MIDDLE_MANIFEST_SQL_LITERAL__'::jsonb value),
+missing AS MATERIALIZED(SELECT item FROM manifest CROSS JOIN LATERAL jsonb_array_elements(value->'schools')item WHERE NOT EXISTS(SELECT FROM cbgpu_schools.schools s WHERE s.official_id=item->>'official_id')),
+aggregated AS(SELECT coalesce(jsonb_agg(item),'[]'::jsonb) schools,count(*) school_count FROM missing)
+SELECT (value-'schools'-'school_count')||jsonb_build_object('schools',schools,'school_count',school_count) payload FROM manifest CROSS JOIN aggregated;
+GRANT SELECT ON middle_delta TO cbgpu_school_directory_importer;
+SET LOCAL ROLE cbgpu_school_directory_importer;
+SELECT cbgpu_schools.import_official_directory(payload) FROM middle_delta;
+RESET ROLE;
+DO $$BEGIN
+IF EXISTS(SELECT FROM middle_before_schools old LEFT JOIN cbgpu_schools.schools s ON s.id=old.id WHERE old.value IS DISTINCT FROM to_jsonb(s)) OR EXISTS(SELECT FROM middle_before_memberships old FULL JOIN cbgpu_schools.memberships m ON m.id=old.id WHERE old.value IS DISTINCT FROM to_jsonb(m)) THEN RAISE EXCEPTION 'EXISTING_SCHOOL_OR_MEMBERSHIP_CHANGED';END IF;
+IF EXISTS(SELECT FROM cbgpu_schools.schools s WHERE NOT EXISTS(SELECT FROM middle_before_schools old WHERE old.id=s.id) AND (s.type<>'MIDDLE_SCHOOL' OR s.status<>'LISTED' OR cardinality(s.features)>0 OR s.verified_at IS NOT NULL OR EXISTS(SELECT FROM cbgpu_schools.memberships m WHERE m.school_id=s.id))) THEN RAISE EXCEPTION 'IMPORT_GRANTED_PERMISSION';END IF;
+END$$;
+SELECT jsonb_build_object('added',(SELECT(payload->>'school_count')::integer FROM middle_delta),'old_rows_unchanged',true,'new_permissions',false);
+COMMIT;

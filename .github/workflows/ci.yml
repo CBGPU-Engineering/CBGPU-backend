@@ -82,6 +82,8 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-gpu-enrollment --test school_admin_reservations -- --ignored
       - name: Canonical public school directory and cached catalog drafts (disposable PostgreSQL)
         run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-schools --test school_directory_canonical -- --ignored
+      - name: Middle-school catalog and participant cohort PostgreSQL boundaries
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p cbgpu-schools --test middle_schools -- --ignored
       - name: Arcade replay ownership and least-privilege PostgreSQL contracts
         run: |
           docker run --rm -d --name cbgpu-arcade-ci-db -e POSTGRES_PASSWORD=ci-only-password -e POSTGRES_DB=cbgpu_arcade_ci -p 127.0.0.1:55492:5432 postgres:17

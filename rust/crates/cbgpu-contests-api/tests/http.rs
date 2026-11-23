@@ -59,7 +59,11 @@ async fn fixture() -> (
         token: token(),
     };
     let backend=Router::new().route("/auth/v1/user",get(|State(w):State<Wire>,h:HeaderMap|async move{assert_eq!(h["authorization"],format!("Bearer {}",w.token));Json(json!({"id":OWNER}))}))
- .route("/rest/v1/contests",get(||async{Json(json!([{"id":CONTEST,"title":"Fixture contest","registration_questions":[{"id":"reason","required":true}],"participation_mode":"team","allow_individual_entries":true}]))}))
+ .route("/rest/v1/contests",get(|State(w):State<Wire>,h:HeaderMap,axum::extract::Query(q):axum::extract::Query<std::collections::BTreeMap<String,String>>|async move{
+ assert_eq!(h["authorization"],format!("Bearer {}",w.token));assert_eq!(h["apikey"],"anon-fixture");
+ for field in ["school_id","access_scope","allowed_school_ids","participant_policy"] {assert!(q["select"].split(',').any(|s|s==field));}
+ if q.contains_key("id") {assert_eq!(q["id"],format!("eq.{CONTEST}"));assert_eq!(q["limit"],"1");} else {assert_eq!(q["visibility"],"eq.public");assert_eq!(q["lifecycle_status"],"eq.published");assert_eq!(q["order"],"created_at.desc");}
+ Json(json!([{"id":CONTEST,"title":"Fixture contest","registration_questions":[{"id":"reason","required":true}],"participation_mode":"team","allow_individual_entries":true,"school_id":"fixture-middle","access_scope":"MULTI_SCHOOL","allowed_school_ids":["fixture-high"],"participant_policy":"MIDDLE_SCHOOL_STUDENTS"}]))}))
  .route("/rest/v1/rpc/register_contest_entry",post(|State(w):State<Wire>,h:HeaderMap,Json(v):Json<Value>|async move{assert_eq!(h["authorization"],format!("Bearer {}",w.token));assert_eq!(h["apikey"],"anon-fixture");assert!(h.get("x-cbgpu-owner").is_none());assert_eq!(v.as_object().unwrap().len(),6);assert!(v.get("user_id").is_none());assert_eq!(v["p_contest_id"],CONTEST);assert_eq!(v["p_answers"],json!({"reason":"study"}));w.writes.fetch_add(1,Ordering::SeqCst);Json(json!([{"id":"registration","contest_id":CONTEST,"user_id":OWNER,"attendee_name":v["p_attendee_name"],"status":"confirmed"}]))}))
  .route("/rest/v1/event_registrations",get(||async{Json(json!([{"id":"registration","contest_id":CONTEST,"user_id":OWNER,"status":"confirmed"}]))}).patch(|State(w):State<Wire>,h:HeaderMap,Json(v):Json<Value>|async move{assert_eq!(h["authorization"],format!("Bearer {}",w.token));assert_eq!(v,json!({"status":"cancelled"}));Json(json!([{"id":"registration","contest_id":CONTEST,"user_id":OWNER,"status":"cancelled"}]))}))
  .with_state(state);
@@ -384,4 +388,31 @@ async fn school_registration_permission_is_bound_to_the_actual_contest() {
             .unwrap()
     );
     running.abort();
+}
+
+#[tokio::test]
+async fn list_and_detail_preserve_authoritative_school_scope_and_cohort() {
+    let (app, _, writes, handle) = fixture().await;
+    for path in ["/v1/contests".to_owned(), format!("/v1/contests/{CONTEST}")] {
+        let response = app
+            .clone()
+            .oneshot(request("GET", &path, Value::Null))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let value: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let row = if path == "/v1/contests" {
+            &value["contests"][0]
+        } else {
+            &value["contest"]
+        };
+        assert_eq!(row["school_id"], "fixture-middle");
+        assert_eq!(row["access_scope"], "MULTI_SCHOOL");
+        assert_eq!(row["allowed_school_ids"], json!(["fixture-high"]));
+        assert_eq!(row["participant_policy"], "MIDDLE_SCHOOL_STUDENTS");
+    }
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    handle.abort();
 }

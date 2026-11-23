@@ -1,4 +1,4 @@
-//! Download the official NEIS high-school directory into a reviewable JSON manifest.
+//! Download the official NEIS secondary-school directory into a reviewable JSON manifest.
 //! This tool never connects to a database or creates permissions.
 use encoding_rs::EUC_KR;
 use serde_json::{Value, json};
@@ -42,7 +42,42 @@ fn source_date(name: &str) -> Option<(u32, u32, u32)> {
         .then_some(date)
 }
 
-fn normalize(bytes: &[u8]) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SchoolType {
+    High,
+    Middle,
+}
+impl SchoolType {
+    fn parse(value: &str) -> Result<Self, Box<dyn Error>> {
+        match value {
+            "HIGH_SCHOOL" => Ok(Self::High),
+            "MIDDLE_SCHOOL" => Ok(Self::Middle),
+            _ => Err("Unsupported school type".into()),
+        }
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::High => "HIGH_SCHOOL",
+            Self::Middle => "MIDDLE_SCHOOL",
+        }
+    }
+    fn kinds(self) -> [&'static str; 2] {
+        match self {
+            Self::High => ["고등학교", "각종학교(고)"],
+            Self::Middle => ["중학교", "각종학교(중)"],
+        }
+    }
+    fn scope(self) -> &'static str {
+        match self {
+            Self::High => "KOREAN_HIGH_SCHOOLS",
+            Self::Middle => "KOREAN_MIDDLE_SCHOOLS",
+        }
+    }
+}
+fn normalize(
+    bytes: &[u8],
+    school_type: SchoolType,
+) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
     if bytes.len() > MAX_BYTES {
         return Err("School directory exceeds safety limit".into());
     }
@@ -73,7 +108,7 @@ fn normalize(bytes: &[u8]) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
     let mut excluded = Vec::new();
     for row in csv.records() {
         let row = row?;
-        if !matches!(row.get(kind), Some("고등학교" | "각종학교(고)")) {
+        if !school_type.kinds().contains(&row.get(kind).unwrap_or("")) {
             continue;
         }
         let get = |i| row.get(i).unwrap_or("").trim();
@@ -99,7 +134,7 @@ fn normalize(bytes: &[u8]) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
         }
         schools.push(json!({
             "official_id":official_id,"official_name":get(name),"display_name":get(name),
-            "type":"HIGH_SCHOOL","source_kind":get(kind),"region":get(region),"address":get(address),
+            "type":school_type.name(),"source_kind":get(kind),"region":get(region),"address":get(address),
             "contact_phone":get(phone),"education_office_code":get(office),
             "homepage_url":homepage.and_then(|i|official_homepage(get(i))),
             "status":"LISTED","features":[],"verified_at":null
@@ -112,11 +147,15 @@ fn normalize(bytes: &[u8]) -> Result<(Vec<Value>, Vec<Value>), Box<dyn Error>> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 2 || args[0] != "--output" {
+    if !matches!(args.len(), 2 | 4)
+        || args[0] != "--output"
+        || (args.len() == 4 && args[2] != "--school-type")
+    {
         return Err(
-            "Usage: school-directory --output NEW_MANIFEST.json (no database writes)".into(),
+            "Usage: school-directory --output NEW_MANIFEST.json [--school-type HIGH_SCHOOL|MIDDLE_SCHOOL] (no database writes)".into(),
         );
     }
+    let school_type = SchoolType::parse(args.get(3).map(String::as_str).unwrap_or("HIGH_SCHOOL"))?;
     let output = Path::new(&args[1]);
     if output.exists() {
         return Err("Output already exists; choose a new manifest path".into());
@@ -161,18 +200,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         bytes.extend_from_slice(&chunk);
     }
-    let (schools, excluded) = normalize(&bytes)?;
+    let (schools, excluded) = normalize(&bytes, school_type)?;
     if schools.len() < 1000 || schools.len() > 10000 {
-        return Err("Unexpected nationwide high-school count; manual review required".into());
+        return Err("Unexpected nationwide school count; manual review required".into());
     }
     let cbsh = schools
         .iter()
         .filter(|s| s["official_name"] == "충북과학고등학교")
         .collect::<Vec<_>>();
-    if cbsh.len() != 1 {
+    if school_type == SchoolType::High && cbsh.len() != 1 {
         return Err("Existing Chungbuk Science High School must match exactly once".into());
     }
-    let manifest = json!({"format_version":1,"normalization_version":2,"scope":"KOREAN_HIGH_SCHOOLS","included_source_kinds":["고등학교","각종학교(고)"],"source":url,"source_as_of":format!("{:04}-{:02}-{:02}",date.0,date.1,date.2),"source_sha256":format!("{:x}",Sha256::digest(&bytes)),"license_url":format!("{ORIGIN}/portal/data/service/selectServicePage.do?infId={DATASET}&infSeq=2"),"school_count":schools.len(),"schools":schools,"excluded":excluded});
+    let manifest = json!({"format_version":1,"normalization_version":2,"scope":school_type.scope(),"included_source_kinds":school_type.kinds(),"source":url,"source_as_of":format!("{:04}-{:02}-{:02}",date.0,date.1,date.2),"source_sha256":format!("{:x}",Sha256::digest(&bytes)),"license_url":format!("{ORIGIN}/portal/data/service/selectServicePage.do?infId={DATASET}&infSeq=2"),"school_count":schools.len(),"schools":schools,"excluded":excluded});
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -180,7 +219,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .open(output)?;
     file.write_all(serde_json::to_string_pretty(&manifest)?.as_bytes())?;
     println!(
-        "Validated {} official high schools as of {}. Manifest only; no memberships, permissions or database rows changed.",
+        "Validated {} official schools as of {}. Manifest only; no memberships, permissions or database rows changed.",
         manifest["school_count"], manifest["source_as_of"]
     );
     Ok(())
@@ -193,7 +232,7 @@ mod tests {
     fn includes_explicit_high_school_alternatives_but_not_middle_or_unspecified_kinds() {
         let input = "행정표준코드,학교명,학교종류명,시도명,도로명주소,전화번호,시도교육청코드\n8000550,단재고등학교,각종학교(고),충청북도,청주시,043-000,M10\n1234567,일반고등학교,고등학교,충청북도,청주시,043-000,M10\n1234568,대안중학교,각종학교(중),충청북도,청주시,043-000,M10\n1234569,일반중학교,중학교,충청북도,청주시,043-000,M10\n1234570,미분류학교,각종학교,충청북도,청주시,043-000,M10\n";
         let (bytes, _, _) = EUC_KR.encode(input);
-        let (schools, excluded) = normalize(&bytes).unwrap();
+        let (schools, excluded) = normalize(&bytes, SchoolType::High).unwrap();
         assert_eq!(schools.len(), 2);
         assert!(excluded.is_empty());
         assert!(schools.iter().any(|s| s["official_id"] == "8000550"
@@ -201,6 +240,22 @@ mod tests {
             && s["status"] == "LISTED"
             && s["features"] == json!([])
             && s["verified_at"].is_null()));
+    }
+    #[test]
+    fn middle_school_types_are_explicit_and_preserve_listed_only() {
+        let input = "행政";
+        assert!(SchoolType::parse(input).is_err());
+        let input = "행정표준코드,학교명,학교종류명,시도명,도로명주소,전화번호,시도교육청코드\n1234567,일반중학교,중학교,충청북도,청주시,043-000,M10\n1234568,대안중학교,각종학교(중),충청북도,청주시,043-000,M10\n1234569,고등학교,고등학교,충청북도,청주시,043-000,M10\n1234570,미분류,각종학교,충청북도,청주시,043-000,M10\n";
+        let (bytes, _, _) = EUC_KR.encode(input);
+        let (schools, excluded) = normalize(&bytes, SchoolType::Middle).unwrap();
+        assert_eq!(schools.len(), 2);
+        assert!(excluded.is_empty());
+        for s in schools {
+            assert_eq!(s["type"], "MIDDLE_SCHOOL");
+            assert_eq!(s["status"], "LISTED");
+            assert_eq!(s["features"], json!([]));
+            assert!(s["verified_at"].is_null());
+        }
     }
     #[test]
     fn official_homepage_is_metadata_not_an_arbitrary_proxy_destination() {
@@ -232,7 +287,7 @@ mod tests {
         let s = "행정표준코드,학교명,학교종류명,시도명,도로명주소,전화번호,시도교육청코드\n1234567,예시고,고등학교,충북,주소,043-000,Q10\n1234568,예시중,중학교,충북,주소,043-001,Q10\n";
         let (bytes, _, invalid) = EUC_KR.encode(s);
         assert!(!invalid);
-        let (schools, excluded) = normalize(&bytes).unwrap();
+        let (schools, excluded) = normalize(&bytes, SchoolType::High).unwrap();
         assert_eq!(schools.len(), 1);
         assert!(excluded.is_empty());
         assert_eq!(schools[0]["status"], "LISTED");
@@ -243,14 +298,14 @@ mod tests {
     fn duplicate_school_identity_is_not_silently_accepted() {
         let s = "행정표준코드,학교명,학교종류명,시도명,도로명주소,전화번호,시도교육청코드\n1234567,예시고,고등학교,충북,주소,043-000,Q10\n1234567,다른고,고등학교,충북,주소,043-001,Q10\n";
         let (bytes, _, _) = EUC_KR.encode(s);
-        assert!(normalize(&bytes).is_err());
+        assert!(normalize(&bytes, SchoolType::High).is_err());
     }
     #[test]
     fn national_schools_can_use_alphanumeric_codes_and_same_names() {
         let s = "행정표준코드,학교명,학교종류명,시도명,도로명주소,전화번호,시도교육청코드\nC035903,중앙고등학교,고등학교,충남,주소,041-000,N10\n1234567,중앙고등학교,고등학교,충북,주소,043-000,M10\n,설립예정고,고등학교,충북,주소,,M10\n";
         let (bytes, _, invalid) = EUC_KR.encode(s);
         assert!(!invalid);
-        let (schools, excluded) = normalize(&bytes).unwrap();
+        let (schools, excluded) = normalize(&bytes, SchoolType::High).unwrap();
         assert_eq!(schools.len(), 2);
         assert_eq!(excluded.len(), 1);
         assert_eq!(excluded[0]["reason"], "MISSING_OFFICIAL_IDENTIFIER");
