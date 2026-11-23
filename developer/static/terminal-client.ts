@@ -13,11 +13,11 @@ export {};
  async function connect(){if(connecting||socket?.readyState===WebSocket.OPEN)return;connecting=true;const attempt=++generation;setup();status('Connecting…');$('terminal-connect').disabled=true;
   try{
    const sessionResponse=await fetch('/api/session',{credentials:'same-origin',cache:'no-store'});const session=await sessionResponse.json();if(!session.authenticated)throw Error('Sign in before connecting.');
-   const response=await fetch('/api/terminal/session',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf_token},body:'{}'});const data=await response.json();if(attempt!==generation)return;if(!response.ok)throw Error(data.error||'Could not create a terminal session.');
+   const response=await fetch('/api/terminal/session',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf_token},body:'{}'});const data=await response.json();if(attempt!==generation)return;if(!response.ok)throw Error(data.error||'Could not create a terminal session. Select Connect to try again.');
    const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/terminal?ticket='+encodeURIComponent(data.ticket));socket=ws;
    ws.onopen=()=>{if(socket!==ws)return;connecting=false;term.clear();status('Connected · cbgpu');$('terminal-connect').disabled=true;$('terminal-disconnect').disabled=false;size();term.focus()};
    ws.onmessage=event=>{if(socket!==ws)return;try{const m=JSON.parse(event.data);if(m.type==='output')term.write(m.data);else if(m.type==='exit')term.writeln('\r\n[Shell exited: '+m.exitCode+']');else if(m.type==='error')term.writeln('\r\n'+m.message)}catch{}};
-   ws.onerror=()=>{if(socket===ws)status('Connection failed')};
+   ws.onerror=()=>{if(socket===ws)status('Connection failed. Select Connect to try again.')};
    ws.onclose=()=>{if(socket!==ws)return;socket=null;connecting=false;status('Disconnected');$('terminal-connect').disabled=false;$('terminal-disconnect').disabled=true;term.writeln('\r\n[Disconnected. Connect to resume your session.]')};
   }catch(e){if(attempt!==generation)return;connecting=false;status(e.message);$('terminal-connect').disabled=false}
  }

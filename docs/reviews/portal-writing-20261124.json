@@ -1,0 +1,404 @@
+{
+  "base": "3663501",
+  "changes": [
+    {
+      "file": "developer/static/index.html",
+      "before": "Use this computer’s shell directly, including interactive programs.",
+      "after": "Open an interactive shell on the CBGPU server.",
+      "reason": "this computer가 사용자 기기로 오해되지 않도록 실제 원격 서버를 명시해요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "developer/static/app.ts",
+      "before": "No deployment jobs yet. Build a release to get started.",
+      "after": "No deployment jobs were returned.",
+      "reason": "조회 화면에 빌드 기능이 없고 응답이 빈 결과일 뿐이므로 실행 유도를 제거해요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "developer/static/app.ts",
+      "before": "The sign-in session changed. Retry this action.",
+      "after": "The sign-in session changed. Reload the current view and check the result before trying again.",
+      "reason": "쓰기 결과가 반영된 뒤 세션이 바뀔 수 있어 즉시 재실행을 권하지 않아요.",
+      "priority": "high",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/index.html",
+      "before": "팀에서 지원서를 확인하고 적어주신 이메일로 연락드려요. 서로 궁금한 점을 이야기해요.",
+      "after": "팀에서 지원서를 검토해요. 추가 대화가 필요하면 적어주신 이메일로 연락드려요.",
+      "reason": "모든 지원자에게 연락한다고 약속하지 않으며 실제 검토 이후 연락 단계를 설명해요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "developer/static/app.ts",
+      "before": "No audit events have been recorded yet.",
+      "after": "No audit events were returned.",
+      "reason": "최근 이벤트 조회 결과를 전체 기록 부재로 표현하지 않아요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "developer/static/terminal-client.ts",
+      "before": "Could not create a terminal session.",
+      "after": "Could not create a terminal session. Select Connect to try again.",
+      "reason": "세션 생성 실패 다음 행동을 안내해요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "developer/static/app.ts",
+      "before": "Account security is up to date.",
+      "after": "Account security details loaded.",
+      "reason": "계정 정보를 불러왔다는 응답만으로 보안 상태가 최신·안전하다고 보장하지 않아요.",
+      "priority": "high",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": " 내용은 그대로 있으니 잠시 후 다시 시도해주세요.",
+      "after": " 입력 내용은 이 화면에 남아 있어요. 안내를 확인한 뒤 다시 제출해 주세요.",
+      "reason": "서버 validation 오류도 동일 catch를 지나므로 기다리면 해결된다고 단정하지 않아요. 새로고침 후 보존도 약속하지 않아요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "developer/static/app.ts",
+      "before": "This table has no rows.",
+      "after": "No rows match the current view.",
+      "reason": "행 검색이 적용되어 있을 수 있어 테이블 자체가 비었다고 단정하지 않아요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": "검토 후 적어주신 이메일로 연락드릴게요.",
+      "after": "지원서 검토와 연락에 적어주신 이메일을 사용해요.",
+      "reason": "저장은 확인되지만 실제 이메일 연락 여부·시점은 제출 handler가 보장하지 않아요.",
+      "priority": "high",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "developer/static/terminal-client.ts",
+      "before": "Connection failed",
+      "after": "Connection failed. Select Connect to try again.",
+      "reason": "터미널 연결 실패 다음 행동을 안내해요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": "임시 저장은 지원하지 않아요.",
+      "after": "임시 저장은 지원하지 않아요. 페이지를 떠나면 입력 내용이 사라져요.",
+      "reason": "페이지 이동 시 form이 다시 생성되므로 제출 전 입력 보존 범위를 명확히 알려요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "developer/static/app.ts",
+      "before": "Refresh failed.",
+      "after": "Could not refresh the overview. Select Refresh to try again.",
+      "reason": "조회 실패 대상과 실제 사용 가능한 재시도 버튼을 알려요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "수락해주세요",
+      "after": "수락해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "공유해주세요",
+      "after": "공유해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 2,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "만들어주세요",
+      "after": "만들어 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "설정해주세요",
+      "after": "설정해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "확인해주세요",
+      "after": "확인해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "진행해주세요",
+      "after": "진행해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": "공유해주세요",
+      "after": "공유해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.ts",
+      "before": "복사해주세요",
+      "after": "복사해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 2,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/index.html",
+      "before": "적어주세요",
+      "after": "적어 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/index.html",
+      "before": "남겨주세요",
+      "after": "남겨 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/index.html",
+      "before": "알려주세요",
+      "after": "알려 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "적어주세요",
+      "after": "적어 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "남겨주세요",
+      "after": "남겨 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 2,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "알려주세요",
+      "after": "알려 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 2,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": "적어주세요",
+      "after": "적어 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 2,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": "알려주세요",
+      "after": "알려 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 2,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": "보내주세요",
+      "after": "보내 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.ts",
+      "before": "채워주세요",
+      "after": "채워 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.html",
+      "before": "해주세요",
+      "after": "해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": "해주세요",
+      "after": "해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 3,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/onboarding.ts",
+      "before": "해주세요",
+      "after": "해 주세요",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 0,
+      "status": "covered by longer spelling replacement"
+    },
+    {
+      "file": "careers/public/onboarding.ts",
+      "before": "붙여넣고",
+      "after": "붙여 넣고",
+      "reason": "차분한 해요체와 보조 용언 띄어쓰기를 일관되게 맞춰요.",
+      "priority": "normal",
+      "implementation": "문자열만 변경; API·동작 변경 없음",
+      "occurrences": 1,
+      "status": "applied"
+    },
+    {
+      "file": "careers/public/app.ts",
+      "before": "${esc(r.category)}",
+      "after": "${esc(categoryLabel(r.category))}",
+      "occurrences": 2,
+      "reason": "목록·상세 표시만 한국어로 연결; 원본 category·필터값 유지"
+    },
+    {
+      "file": "developer/static/app.ts",
+      "before": "notice('Row updated.')",
+      "after": "notice('Update request returned. Check the refreshed row to verify the result.')",
+      "occurrences": 1,
+      "reason": "기존 성공응답 JSON 검증은 변경하지 않음. 저장 완료를 단정하지 않고 새로고침 결과 확인 안내. nonJSON 수락 문제는 별도동작 수정 필요"
+    }
+  ],
+  "verification": {
+    "typescript": "npm run check: PASS",
+    "existingTests": {
+      "command": "npm test",
+      "tests": 100,
+      "pass": 98,
+      "skip": 2,
+      "fail": 0
+    },
+    "browserBuild": "npm run build:browser: PASS",
+    "sourceLanguages": "npm run check:source: PASS",
+    "browser": {
+      "command": "CBGPU_BROWSER_TEST_TOOLS=/path/to/package.json-containing-playwright node developer/tests/portal-writing.browser.mts",
+      "beforeRevision": "3663501",
+      "beforeCases": 8,
+      "afterCases": 8,
+      "screenshotsPerVersion": 56,
+      "viewports": [
+        390,
+        1280
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "externalRequests": 0,
+      "unexpectedRequests": 0,
+      "simulatedApplicationsPerVersion": 8,
+      "simulatedTableUpdatesPerVersion": 4,
+      "runtimeErrors": 0,
+      "beforeArtifacts": "/tmp/cbgpu-backend-writing-before",
+      "afterArtifacts": "/tmp/cbgpu-backend-writing-after"
+    },
+    "remaining": "Malformed successful acknowledgements still follow the existing API parser. Copy now requests verification; acknowledgement validation/reconciliation is a separate stability change."
+  }
+}
