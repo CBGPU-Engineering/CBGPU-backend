@@ -194,7 +194,7 @@ interface PortalElements {
     const response = await fetch(apiPrefix + path, { ...init, body: init.body as BodyInit | null | undefined, method, headers, credentials: 'same-origin', cache: 'no-store' });
     let data;
     try { data = await response.json(); } catch { data = null; }
-    if (generation !== state.authGeneration) throw new Error('The sign-in session changed. Retry this action.');
+    if (generation !== state.authGeneration) throw new Error('The sign-in session changed. Reload the current view and check the result before trying again.');
     if (!response.ok) {
       if (response.status === 401 && authFailure) clearSession('Your session ended. Please sign in again.');
       const detail = data?.detail ?? data?.message ?? data?.error;
@@ -416,7 +416,7 @@ interface PortalElements {
       const data = await api('/overview'); if (!state.authenticated || request !== overviewRequest) return;
       renderHealth(data.health); renderTraffic(data.traffic); renderUsage(data.usage); renderSystem(data.system); renderDeploymentSummary(data.deployment);
       message('overview-updated', data.updated_at ? 'Updated ' + dateTime(data.updated_at) : 'Update time unavailable.');
-    } catch (error) { if (state.authenticated) { notice(error.message, true); message('overview-updated', 'Refresh failed.', true); } }
+    } catch (error) { if (state.authenticated) { notice(error.message, true); message('overview-updated', 'Could not refresh the overview. Select Refresh to try again.', true); } }
   }
 
   async function loadTables() {
@@ -478,7 +478,7 @@ interface PortalElements {
       const keys = state.columns.filter(column => column.primary_key);
       const editable = keys.length > 0 && state.rows.every(row => !Array.isArray(row));
       const result = $('table-result'); result.replaceChildren();
-      if (!state.rows.length) { message('table-message', offset ? 'No more rows on this page.' : 'This table has no rows.'); }
+      if (!state.rows.length) { message('table-message', offset ? 'No more rows on this page.' : 'No rows match the current view.'); }
       else { result.append(dataTable(state.columns, state.rows, editable)); message('table-message', editable ? 'Use Edit to change a row. Primary keys identify the row and remain unchanged.' : 'Rows are read-only here because no primary key is available. Use the SQL editor for other changes.'); }
       $('table-export').disabled = !state.rows.length; renderSchema();
       const last = offset + state.rows.length;
@@ -539,7 +539,7 @@ interface PortalElements {
       busy($('row-editor-save'), true, 'Saving…');
       await api('/table/update', { method: 'POST', body: { schema: table.schema, table: table.name, primary_key: key, values } });
       if (!state.authenticated) return;
-      $('row-editor').close(); notice('Row updated.'); await loadRows();
+      $('row-editor').close(); notice('Update request returned. Check the refreshed row to verify the result.'); await loadRows();
     } catch (error) { message('row-editor-message', error.message, true); }
     finally { busy($('row-editor-save'), false); }
   });
@@ -573,7 +573,7 @@ interface PortalElements {
     try {
       const data = await api('/deployments'); if (!state.authenticated) return;
       const jobs = Array.isArray(data.jobs) ? data.jobs : []; const root = $('deployment-jobs'); root.replaceChildren();
-      message('deployments-message', jobs.length ? `${jobs.length} ${jobs.length === 1 ? 'deployment' : 'deployments'}` : 'No deployment jobs yet. Build a release to get started.');
+      message('deployments-message', jobs.length ? `${jobs.length} ${jobs.length === 1 ? 'deployment' : 'deployments'}` : 'No deployment jobs were returned.');
       for (const job of jobs) {
         const button = element('button', 'job-button' + (String(job.id) === String(state.selectedJob) ? ' selected' : '')); button.type = 'button'; button.dataset.jobId = String(job.id);
         const top = element('div', 'job-top'); top.append(element('span', 'job-id', job.commit ? String(job.commit).slice(0, 10) : String(job.id)), element('span', 'job-status ' + jobStatusClass(job.status), display(job.status)));
@@ -672,7 +672,7 @@ interface PortalElements {
         if (typeof developer.email === 'string') developers.append(element('p', '', developer.email));
       }
       if (!developers.childElementCount) developers.append(element('p', 'meta', 'No developer account records are available.'));
-      message('account-message', 'Account security is up to date.');
+      message('account-message', 'Account security details loaded.');
     } catch (error) { if (state.authenticated) { message('account-message', error.message, true); message('recovery-kit-status', 'Unable to check recovery-kit availability.'); } }
     finally { busy($('account-refresh'), false); }
   }
@@ -734,7 +734,7 @@ interface PortalElements {
     const search = $('audit-search').value.trim().toLowerCase(); const outcome = $('audit-outcome').value;
     const rows = state.auditEvents.filter(event => (!outcome || event.outcome === outcome) && (!search || [event.actor_email, event.action, event.target, event.outcome, event.detail].map(valuesText).join(' ').toLowerCase().includes(search)));
     const root = $('audit-result'); root.replaceChildren();
-    message('audit-message', state.auditEvents.length ? `${number.format(rows.length)} of ${number.format(state.auditEvents.length)} loaded events${state.auditEvents.length === 100 ? ' · Latest 100 requested' : ''}` : 'No audit events have been recorded yet.');
+    message('audit-message', state.auditEvents.length ? `${number.format(rows.length)} of ${number.format(state.auditEvents.length)} loaded events${state.auditEvents.length === 100 ? ' · Latest 100 requested' : ''}` : 'No audit events were returned.');
     if (!rows.length) { if (state.auditEvents.length) message('audit-message', 'No loaded events match these filters.'); return; }
     const { table, body } = resultTable(['Time', 'Developer', 'Action', 'Target', 'Outcome', 'Details']);
     for (const event of rows) {
