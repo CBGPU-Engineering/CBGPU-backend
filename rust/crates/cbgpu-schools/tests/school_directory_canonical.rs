@@ -45,7 +45,11 @@ impl Database {
             "canonical directory SQL failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        String::from_utf8(out.stdout).unwrap()
+        format!(
+            "{}{}",
+            String::from_utf8(out.stdout).unwrap(),
+            String::from_utf8_lossy(&out.stderr)
+        )
     }
 }
 #[test]
@@ -123,6 +127,13 @@ fn canonical_public_directory_preserves_school_identity() {
     );
     db.sql(migration);
     db.sql(migration);
+    let optimization = include_str!(
+        "../../../../supabase/migrations/20261123143055_optimize_canonical_school_candidates.sql"
+    );
+    db.sql("CREATE TABLE directory_query_baseline AS SELECT payload,public.cbgpu_school_api('directory',payload) result FROM (VALUES ('{}'::jsonb),('{\"q\":\"경상\"}'::jsonb),('{\"q\":\"경북\"}'::jsonb),('{\"q\":\"충청남도 설화고등학교\"}'::jsonb),('{\"q\":\"설화고등학교\",\"status\":\"LISTED\"}'::jsonb),('{\"limit\":2,\"offset\":1}'::jsonb)) v(payload);");
+    db.sql(optimization);
+    db.sql(optimization);
+    db.sql("DO $$BEGIN IF EXISTS(SELECT FROM directory_query_baseline WHERE result IS DISTINCT FROM public.cbgpu_school_api('directory',payload)) THEN RAISE EXCEPTION 'OPTIMIZATION_CHANGED_RESULTS'; END IF; END$$;");
     db.sql(include_str!("school_directory_canonical_assert.sql"));
     db.sql(include_str!(
         "../../../../operations/school-search/rollback.sql"
@@ -133,4 +144,7 @@ fn canonical_public_directory_preserves_school_identity() {
     db.sql("DO $$BEGIN IF public.cbgpu_school_api('directory','{\"q\":\"설화고등학교\"}')->>'total'<>'2' THEN RAISE EXCEPTION 'ROLLBACK_FAILED';END IF;END$$;");
     db.sql(migration);
     db.sql("DO $$BEGIN IF public.cbgpu_school_api('directory','{\"q\":\"설화고등학교\"}')->>'total'<>'1' THEN RAISE EXCEPTION 'REAPPLY_FAILED';END IF;END$$;");
+    db.sql(optimization);
+    db.sql("INSERT INTO cbgpu_schools.schools(id,official_name,normalized_name,display_name,type,region,address,official_id,status,source_sha256,configuration) SELECT 'bulk-'||n,'Synthetic '||n,'synthetic '||n,'Synthetic '||n,'HIGH_SCHOOL','경상북도','경상북도 청도군 합성로','BULK-'||n,'LISTED',repeat('b',64),'{}' FROM generate_series(1,2479-(SELECT count(*)::integer FROM cbgpu_schools.schools)) n; ANALYZE cbgpu_schools.schools;");
+    println!("{}", db.sql(include_str!("school_directory_benchmark.sql")));
 }

@@ -71,3 +71,6 @@ preserved unrelated function bodies, cached-link draft prevention, unchanged
 unregistered draft behavior, anonymous read/private-helper boundaries, repeated
 migration, repeated rollback and reapplication. No production writes occur in
 the test.
+
+
+Performance followup: apply `20261123143055_optimize_canonical_school_candidates.sql` after the canonical migration. It changes only read helpers: materialized cheap candidate keys precede strict identity checks, and search terms/provinces are computed once. The province helper uses qualified pg_catalog functions to permit SQL inlining without a function-local search_path. Strict matching and the cached-draft guard remain unchanged. No indexes or data writes. The original rollback removes both revisions together.
