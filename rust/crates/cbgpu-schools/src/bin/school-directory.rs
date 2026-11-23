@@ -275,6 +275,17 @@ mod tests {
         }
     }
     #[test]
+    fn nested_blob_origins_are_opaque_without_recursive_stack_growth() {
+        let nested = format!("{}https://school.example/", "blob:".repeat(10_000));
+        assert!(!url::Url::parse(&nested).unwrap().origin().is_tuple());
+        assert!(
+            url::Url::parse("blob:https://school.example/id")
+                .unwrap()
+                .origin()
+                .is_tuple()
+        );
+    }
+    #[test]
     fn chronological_dates_are_not_lexicographic() {
         assert!(
             source_date("학교기본정보_2026년10월31일기준")
