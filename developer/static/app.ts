@@ -174,7 +174,8 @@ interface PortalElements {
     window.dispatchEvent(new Event('cbgpu-terminal-logout'));
     message('login-message', text, !!text);
     message('account-name', ''); message('account-email', ''); message('header-account-label', 'Account');
-    for (const id of ['health-grid', 'traffic-content', 'usage-content', 'system-content', 'deployment-summary', 'table-result', 'sql-result', 'deployment-jobs', 'row-editor-fields', 'release-details', 'table-list', 'schema-result', 'container-list', 'backup-list', 'email-status', 'audit-result', 'emails-result', 'email-summary', 'email-detail', 'security-identity', 'account-developers', 'offsite-status', 'monitor-status']) $(id).replaceChildren();
+    for (const id of ['health-grid', 'traffic-content', 'system-content', 'deployment-summary', 'table-result', 'sql-result', 'deployment-jobs', 'row-editor-fields', 'release-details', 'table-list', 'schema-result', 'container-list', 'backup-list', 'email-status', 'audit-result', 'emails-result', 'email-summary', 'email-detail', 'security-identity', 'account-developers', 'offsite-status', 'monitor-status']) $(id).replaceChildren();
+    $('usage-content')?.replaceChildren();
     $('service-log-output').textContent = 'Choose a service to inspect its recent logs.'; state.sqlRows=[];state.sqlColumns=[];state.search='';state.sort='';$('row-search').value='';$('table-search').value='';
     $('deployment-log').textContent = 'No deployment selected.'; $('sql-query').value = ''; $('audit-detail').textContent = '';
     $('audit-detail-surface').hidden = true; $('email-detail-surface').hidden = true; $('email-summary').hidden = true;
@@ -338,7 +339,7 @@ interface PortalElements {
     root.append(chart);
   }
   function renderUsage(usage: Record<string,any> | null | undefined) {
-    const root = $('usage-content'); root.replaceChildren();
+    const root = $('usage-content'); if (!root) return; root.replaceChildren();
     if (!usage) { root.append(element('p', 'empty-state', 'Usage data is not available right now.')); return; }
     const group = (title: string, stats: [unknown, string][]) => {
       const heading = element('h3', 'usage-group', title); root.append(heading);
@@ -379,7 +380,7 @@ interface PortalElements {
       root.append(chart);
     }
     const rate = finite(api?.error_rate) ? api.error_rate + '% server errors' : '';
-    message('usage-meta', ['People and counts', rate].filter(Boolean).join(' · '));
+    if ($('usage-meta')) message('usage-meta', ['People and counts', rate].filter(Boolean).join(' · '));
   }
   function uptime(seconds) {
     if (!finite(seconds) || seconds < 0) return 'Unavailable';
