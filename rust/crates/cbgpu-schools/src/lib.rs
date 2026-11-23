@@ -1,4 +1,5 @@
 //! Fresh session/tenant authorization lives in PostgreSQL; no caller identity is accepted in JSON.
+mod clubs;
 use axum::{
     Json, Router,
     body::to_bytes,
@@ -13,6 +14,7 @@ pub const FEATURES: &[&str] = &[
     "school_life",
     "projects",
     "contests",
+    "clubs",
     "gpu_compute",
     "ai",
     "materials",
@@ -33,7 +35,7 @@ fn failure(status: StatusCode, message: &str, code: &str) -> Response {
     (status, Json(json!({"error":message,"code":code}))).into_response()
 }
 pub fn empty_draft() -> Value {
-    json!({"school":{"official_name":"","type":"HIGH_SCHOOL","official_id":"","region":"","address":"","contact_email":"","contact_phone":""},"administrator":{"name":"","role":"STUDENT_OPERATOR","relationship":"","contact_email":"","verification_note":""},"configuration":{"display_name":"","brand_color":"#17634d","join_policy":"APPROVAL_REQUIRED","student_id_policy":"SCHOOL_DEFINED","teacher_policy":"MANUAL_REVIEW","community_policy":"MEMBERS_ONLY"},"features":["community","projects","contests"],"gpu":{"choice":"CONNECT_LATER"},"confirmed":false})
+    json!({"school":{"official_name":"","type":"HIGH_SCHOOL","official_id":"","region":"","address":"","contact_email":"","contact_phone":""},"administrator":{"name":"","role":"STUDENT_OPERATOR","relationship":"","contact_email":"","verification_note":""},"configuration":{"display_name":"","brand_color":"#17634d","join_policy":"APPROVAL_REQUIRED","student_id_policy":"SCHOOL_DEFINED","teacher_policy":"MANUAL_REVIEW","community_policy":"MEMBERS_ONLY"},"features":["community","projects","contests","clubs"],"gpu":{"choice":"CONNECT_LATER"},"confirmed":false})
 }
 fn bearer(request: &Request) -> Option<String> {
     if request.headers().get_all("authorization").iter().count() != 1 {
@@ -101,6 +103,16 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             })
             .map(|(key, value)| (key.into_owned(), Value::String(value.into_owned())))
             .collect();
+    let club_route = match clubs::route(&path, &method, &query) {
+        Ok(route) => route,
+        Err(()) => {
+            return failure(
+                StatusCode::BAD_REQUEST,
+                "Invalid club query",
+                "INVALID_CLUB_REQUEST",
+            );
+        }
+    };
     let route = match (path.as_slice(), &method) {
         (["v1", "admin", "schools"], &Method::GET) => Some((
             "platform_school_directory",
@@ -327,7 +339,7 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         }
         _ => None,
     };
-    let Some((action, mut payload)) = route else {
+    let Some((action, mut payload)) = route.or(club_route) else {
         return failure(StatusCode::NOT_FOUND, "School route not found", "NOT_FOUND");
     };
     if method != Method::GET {
@@ -373,7 +385,14 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
             ]
             .contains(&k.as_str())
                 && !(action == "review_member" && k == "school_roles")
-                && !(["central_cpu_set", "central_cpu_pool_set"].contains(&action) && k == "status")
+                && !([
+                    "central_cpu_set",
+                    "central_cpu_pool_set",
+                    "clubs_campaign_update",
+                    "clubs_application_review",
+                ]
+                .contains(&action)
+                    && k == "status")
         }) {
             return failure(
                 StatusCode::BAD_REQUEST,
@@ -434,6 +453,9 @@ async fn handle(State(config): State<Arc<Config>>, request: Request) -> Response
         "cbgpu_school_api"
     };
     let (rpc, rpc_action) = match action {
+        a if a.starts_with("clubs_") => {
+            ("cbgpu_school_clubs_api", a.strip_prefix("clubs_").unwrap())
+        }
         "central_cpu_pool_get" => ("cbgpu_platform_cpu_api", "pool_get"),
         "central_cpu_pool_set" => ("cbgpu_platform_cpu_api", "pool_set"),
         "central_cpu_self" => ("cbgpu_platform_cpu_api", "self"),
