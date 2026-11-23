@@ -115,7 +115,7 @@ BEGIN
   IF payload->>'campaign_id' IS NOT NULL AND NOT EXISTS(SELECT FROM cbgpu_schools.club_campaigns WHERE id=(payload->>'campaign_id')::uuid AND school_id=sid) THEN RAISE EXCEPTION 'CLUB_CAMPAIGN_NOT_FOUND' USING ERRCODE='P0002';END IF;
   WITH visible AS MATERIALIZED(SELECT x.* FROM cbgpu_schools.clubs x JOIN cbgpu_schools.club_campaigns y ON y.id=x.campaign_id AND y.school_id=x.school_id
    WHERE x.school_id=sid AND(payload->>'campaign_id' IS NULL OR x.campaign_id=(payload->>'campaign_id')::uuid)
-   AND(cbgpu_schools.club_manager(x,uid) OR x.status='READY' AND(
+   AND(cbgpu_schools.club_manager(x,uid) OR EXISTS(SELECT FROM cbgpu_schools.club_applications own WHERE own.club_id=x.id AND own.school_id=sid AND own.applicant_id=uid) OR x.status='READY' AND(
     y.status='ACTIVE' AND at_time>=y.promotion_starts_at AND at_time<y.promotion_ends_at
     OR payload->>'campaign_id' IS NOT NULL AND at_time>=y.promotion_ends_at))),
   page AS(SELECT * FROM visible ORDER BY created_at DESC,id LIMIT lim OFFSET off)
@@ -183,7 +183,7 @@ BEGIN
   ELSIF action='applications' THEN
    IF NOT manager THEN RAISE EXCEPTION 'CLUB_MANAGER_REQUIRED' USING ERRCODE='42501';END IF;
    SELECT count(*) INTO total FROM cbgpu_schools.club_applications WHERE club_id=c.id;
-   SELECT coalesce(jsonb_agg(to_jsonb(x)-'applicant_id'||jsonb_build_object('applicant',jsonb_build_object('user_id',x.applicant_id,'full_name',left(coalesce(pr.full_name,''),100),'student_number',m.student_number)) ORDER BY x.created_at,x.id),'[]') INTO items FROM(SELECT * FROM cbgpu_schools.club_applications WHERE club_id=c.id ORDER BY created_at,id LIMIT lim OFFSET off)x JOIN public.profiles pr ON pr.id=x.applicant_id LEFT JOIN cbgpu_schools.memberships m ON m.school_id=sid AND m.user_id=x.applicant_id;
+   SELECT coalesce(jsonb_agg(to_jsonb(x)-'applicant_id'||jsonb_build_object('applicant',jsonb_build_object('user_id',x.applicant_id,'full_name',left(coalesce(pr.full_name,''),100),'student_number',m.student_number)) ORDER BY x.created_at,x.id),'[]') INTO items FROM(SELECT * FROM cbgpu_schools.club_applications WHERE club_id=c.id ORDER BY created_at,id LIMIT lim OFFSET off)x LEFT JOIN public.profiles pr ON pr.id=x.applicant_id LEFT JOIN cbgpu_schools.memberships m ON m.school_id=sid AND m.user_id=x.applicant_id;
    RETURN jsonb_build_object('school_id',sid,'server_now',clock_timestamp(),'items',items,'total',total);
   ELSIF action IN('application_review','application_withdraw') THEN
    SELECT * INTO a FROM cbgpu_schools.club_applications WHERE school_id=sid AND club_id=c.id AND id=(payload->>'application_id')::uuid FOR UPDATE;
