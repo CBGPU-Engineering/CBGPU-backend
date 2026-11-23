@@ -259,7 +259,7 @@ interface PortalElements {
     for (const panel of document.querySelectorAll<HTMLElement>('.panel')) panel.hidden = panel.id !== 'panel-' + name;
     for (const button of document.querySelectorAll<HTMLElement>('[data-panel]')) {
       const active = button.dataset.panel === name; button.classList.toggle('active', active);
-      if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+      if (active) { button.setAttribute('aria-current', 'page'); if (matchMedia('(max-width:720px)').matches) button.scrollIntoView({block:'nearest',inline:'nearest'}); } else button.removeAttribute('aria-current');
     }
     if (name === 'overview') loadOverview();
     if (name === 'database' && !state.tables.length) loadTables();
@@ -269,7 +269,7 @@ interface PortalElements {
     if (name === 'emails') loadEmails();
     if (name === 'security') loadAccount();
   }
-  for (const button of document.querySelectorAll<HTMLElement>('[data-panel]')) button.addEventListener('click', () => showPanel(button.dataset.panel));
+  for (const button of document.querySelectorAll<HTMLElement>('[data-panel]')) button.addEventListener('click', () => { showPanel(button.dataset.panel); $('main-content').focus({preventScroll:true}); });
   for (const button of document.querySelectorAll<HTMLElement>('[data-open-panel]')) button.addEventListener('click', (event) => { event.preventDefault(); showPanel(button.dataset.openPanel); });
   $('refresh-button').addEventListener('click', async () => {
     const button = $('refresh-button'); busy(button, true, 'Refreshing…');
