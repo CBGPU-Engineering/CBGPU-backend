@@ -40,6 +40,8 @@ jobs:
       - run: npm run check
       - run: npm run check:source
       - run: npm run build:browser
+      - name: Poll transaction integrity (isolated disposable PostgreSQL)
+        run: node --test tests/polls/*.test.mts
       - run: sudo apt-get update -qq && sudo apt-get install -y tmux
       - run: node --test developer/tests/*.test.mts operations/study-refresh/*.test.mts operations/study-monitor/*.test.mts operations/worker.test.mts rust/compat/*.test.mts
       # Native AI parity is verified in the Rust job below; no legacy interpreter.
