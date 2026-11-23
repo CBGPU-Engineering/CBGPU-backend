@@ -55,3 +55,71 @@ input,select,textarea,.field select,.sql-editor,.editor-value textarea,.button,.
 
 [data-theme="dark"] img[src*="assets/logo.png"]{content:url("/static/assets/symbol_white.svg");filter:none!important;opacity:1}
 .usage-group{font-size:12px;font-weight:600;color:var(--muted);margin:20px 0 10px;text-transform:none}#usage-content>.usage-group:first-child{margin-top:0}#usage-content .traffic-totals{grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:0;row-gap:18px}@media(max-width:620px){#usage-content .traffic-totals{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Operator tools: readable controls, clear input boundaries, and a single scroll region. */
+:root{--input-border:#7f8995;--green:#21623b;--amber:#75500e}
+[data-theme="dark"]{--input-border:#707684}
+:is(input:not([type="checkbox"]),select,textarea),.field select,.editor-value textarea{border-color:var(--input-border);min-height:44px}
+.button.small,.text-button,.subnav-item,.terminal-mobile-keys button{min-height:44px}
+.text-button{display:inline-flex;align-items:center;justify-content:center;padding-inline:8px}
+.meta,.form-message,.supporting,.page-description,.health-detail,.field label,.table-message,.table-pagination,.empty-state{font-size:14px;line-height:1.6}
+.health-card h3,.stat-label,dt,.column-type,.job-time,.job-status,.table-list-count{font-size:12px;line-height:1.5}
+.page-heading{margin-bottom:24px;align-items:start}
+.page-heading>.meta{max-width:30%;text-align:right}
+.table-toolbar,.sql-toolbar,.surface-heading{flex-wrap:wrap}
+.table-toolbar .field{flex:1;min-width:min(240px,100%)}
+.table-toolbar .field select{width:100%;min-width:0}
+.table-actions,.action-group{max-width:100%;flex-wrap:wrap}
+.sql-shortcuts select{min-width:0;max-width:100%}
+.table-viewport{scrollbar-gutter:stable}
+.table-viewport:focus-visible{outline-offset:-3px}
+.data-table{font-size:13px}
+.data-table th,.data-table td{line-height:1.6}
+.dialog-header{position:sticky;top:0;z-index:2;background:var(--surface)}
+dialog{overscroll-behavior:contain;max-height:calc(100dvh - 32px);scroll-padding-block:96px}
+.dialog-actions{z-index:2;flex-wrap:wrap;background:var(--surface);padding-bottom:max(16px,env(safe-area-inset-bottom))}
+.editor-field .meta,.null-checkbox{font-size:12px!important;line-height:1.5}
+.terminal-mobile-keys{flex-wrap:wrap}
+.terminal-mount{height:clamp(260px,58dvh,620px)}
+@media(max-width:720px){
+  .navigation{scroll-padding-inline:12px;gap:4px;margin-top:14px}
+  .nav-item{min-height:44px;font-size:12px;padding:10px 12px}
+  .workspace-header{height:auto;min-height:72px;gap:12px;flex-wrap:wrap}
+  .workspace-header .button,.account-button{min-height:44px}
+  .account-button{width:44px;height:44px;padding:12px}
+  .header-actions .theme-control select{font-size:12px;width:82px}
+  .sidebar-bottom .button{min-height:44px;font-size:12px}
+  .page-heading{gap:12px;flex-wrap:wrap;margin-bottom:22px}
+  .page-heading>.meta{max-width:none;text-align:left}
+  .page-description{max-width:none;font-size:14px}
+  .table-toolbar,.sql-toolbar{gap:12px;align-items:stretch}
+  .table-actions{width:100%}
+  .table-actions .button,.sql-shortcuts .button{font-size:12px;min-height:44px}
+  .table-list{grid-template-columns:1fr;max-height:176px}
+  .table-list button{min-height:44px}
+  .row-filter .search-input{width:100%;flex-basis:100%}
+  .row-filter .button{min-height:44px}
+  .row-filter .text-button{font-size:12px}
+  .sql-shortcuts{align-items:stretch}
+  .sql-shortcuts select{width:100%;flex-basis:100%;max-width:none}
+  .sql-toolbar{flex-direction:column}
+  .sql-toolbar>.button{width:100%}
+  .terminal-surface .surface-heading{align-items:start}
+  .terminal-surface .action-group{width:100%;justify-content:stretch}
+  .terminal-surface .action-group .button{font-size:12px;flex:1;min-height:44px}
+  .terminal-help{font-size:12px;line-height:1.7}
+  .editor-field{grid-template-columns:1fr;gap:8px}
+  .editor-value textarea,.sql-editor,input,select,textarea{font-size:16px}
+  .dialog-header{padding:18px}
+  .dialog-actions .button{flex:1;min-height:44px}
+  .service-row strong{font-size:12px}
+  .service-status{font-size:11px}
+  .login-card input{font-size:16px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+@media(max-width:720px){.theme-control select,.header-actions .theme-control select{font-size:16px;min-width:98px;width:98px}}
+[data-theme="dark"] :is(input:not([type="checkbox"]),select,textarea,.editor-value textarea){border-color:var(--input-border)}
+/* Table/schema content keeps the shared 14px reading size; wide data scrolls. */
+.table-link,.table-link small,.data-table,.data-table thead th,.data-table td,.column-type,.editor-field label,.editor-field .meta{font-size:14px;line-height:1.6}
+.editor-field .meta{font-size:14px!important}
+.table-link small{max-width:45%;overflow-wrap:anywhere;text-align:right}

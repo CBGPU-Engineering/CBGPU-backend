@@ -1,0 +1,467 @@
+{
+  "branch": "feat/oil-ui-portals-20261124",
+  "base": "f8",
+  "scope": "Synthetic browser verification only. No commands, SQL writes, applications or messages were sent.",
+  "canonicalServing": [
+    {
+      "host": "developers.cbgpu.com",
+      "handler": "developer/server.mts:146",
+      "source": "developer/static/index.html",
+      "views": [
+        "overview",
+        "database",
+        "sql",
+        "deployments",
+        "operations",
+        "terminal",
+        "audit",
+        "emails",
+        "security"
+      ]
+    },
+    {
+      "host": "admin.cbgpu.com",
+      "handler": "developer/server.mts:146",
+      "source": "developer/static/index.html",
+      "behavior": "Host-specific sign-in string substitutions; management app is outside this asset scope."
+    },
+    {
+      "host": "print.cbgpu.com / laser.cbgpu.com",
+      "handler": "developer/equipment.mts:32",
+      "source": "developer/static/index.html + equipment-signin.ts",
+      "behavior": "Sign-in-only extracted HTML; redirects authenticated managers to main app /manage/manufacturing."
+    },
+    {
+      "host": "manufacturing.cbgpu.com",
+      "handler": "developer/equipment.mts:46",
+      "source": "developer/static/equipment-index.html",
+      "behavior": "Legacy equipment chooser, active serving path."
+    },
+    {
+      "host": "careers.cbgpu.com",
+      "handler": "rust/crates/cbgpu-careers/src/lib.rs:386",
+      "source": "careers/public",
+      "paths": [
+        "/",
+        "/privacy",
+        "/onboarding"
+      ]
+    },
+    {
+      "component": "rust/crates/cbgpu-portal-auth",
+      "behavior": "Authentication endpoints only; no alternate portal frontend to edit."
+    }
+  ],
+  "coverage": {
+    "coverage": [
+      {
+        "name": "overview",
+        "width": 1440,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "overview",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "database",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "row-editor",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "sql",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "deployments",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "operations",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "terminal",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "audit",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "emails",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "security",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "operations-malformed",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "operations-failure",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "row-editor-error-short",
+        "width": 390,
+        "height": 640,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "sql-resize",
+        "width": 320,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "sql-resize",
+        "width": 768,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "signin",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "signin",
+        "width": 1440,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      },
+      {
+        "name": "print-signin",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://print.test/"
+      },
+      {
+        "name": "laser-signin",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://laser.test/"
+      },
+      {
+        "name": "manufacturing-signin",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://manufacturing.test/"
+      },
+      {
+        "name": "careers",
+        "width": 1440,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/"
+      },
+      {
+        "name": "careers",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/"
+      },
+      {
+        "name": "role",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/roles/frontend"
+      },
+      {
+        "name": "apply",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/frontend"
+      },
+      {
+        "name": "apply-error",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/frontend"
+      },
+      {
+        "name": "apply-success",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/frontend"
+      },
+      {
+        "name": "role-backend",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/roles/backend"
+      },
+      {
+        "name": "apply-backend",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/backend"
+      },
+      {
+        "name": "role-android",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/roles/android"
+      },
+      {
+        "name": "apply-android",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/android"
+      },
+      {
+        "name": "role-ios",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/roles/ios"
+      },
+      {
+        "name": "apply-ios",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/ios"
+      },
+      {
+        "name": "role-infra",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/roles/infra"
+      },
+      {
+        "name": "apply-infra",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/infra"
+      },
+      {
+        "name": "role-design",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/roles/design"
+      },
+      {
+        "name": "apply-design",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/design"
+      },
+      {
+        "name": "role-product",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/roles/product"
+      },
+      {
+        "name": "apply-product",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/apply/product"
+      },
+      {
+        "name": "privacy",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/privacy"
+      },
+      {
+        "name": "onboarding",
+        "width": 1440,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/onboarding"
+      },
+      {
+        "name": "onboarding",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/onboarding"
+      },
+      {
+        "name": "onboarding-dark",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://careers.test/onboarding"
+      },
+      {
+        "name": "signin-dark",
+        "width": 390,
+        "height": 900,
+        "overflow": false,
+        "url": "http://portal.test/"
+      }
+    ],
+    "errors": [],
+    "flows": [
+      "Malformed and failed operations requests show section recovery states; Refresh restores actual containers response",
+      "Keyboard tool navigation focuses workspace",
+      "Synthetic row save and reload reads updated value",
+      "Failed row save retains edits; Escape closes dialog at 390\u00d7640",
+      "print synthetic sign-in failure and retry focus",
+      "laser synthetic sign-in failure and retry focus",
+      "Careers search empty state and category filter recover",
+      "Synthetic application failure retains data, retry succeeds and result receives focus",
+      "Onboarding checklist and copy feedback without external posting"
+    ]
+  },
+  "roleTemplates": [
+    {
+      "role": "frontend",
+      "detail": "/roles/frontend",
+      "apply": "/apply/frontend",
+      "verification": "Browser detail and apply entry at 390px; full synthetic submit failure/success on frontend role only."
+    },
+    {
+      "role": "backend",
+      "detail": "/roles/backend",
+      "apply": "/apply/backend",
+      "verification": "Browser detail and apply entry at 390px; full synthetic submit failure/success on frontend role only."
+    },
+    {
+      "role": "android",
+      "detail": "/roles/android",
+      "apply": "/apply/android",
+      "verification": "Browser detail and apply entry at 390px; full synthetic submit failure/success on frontend role only."
+    },
+    {
+      "role": "ios",
+      "detail": "/roles/ios",
+      "apply": "/apply/ios",
+      "verification": "Browser detail and apply entry at 390px; full synthetic submit failure/success on frontend role only."
+    },
+    {
+      "role": "infra",
+      "detail": "/roles/infra",
+      "apply": "/apply/infra",
+      "verification": "Browser detail and apply entry at 390px; full synthetic submit failure/success on frontend role only."
+    },
+    {
+      "role": "design",
+      "detail": "/roles/design",
+      "apply": "/apply/design",
+      "verification": "Browser detail and apply entry at 390px; full synthetic submit failure/success on frontend role only."
+    },
+    {
+      "role": "product",
+      "detail": "/roles/product",
+      "apply": "/apply/product",
+      "verification": "Browser detail and apply entry at 390px; full synthetic submit failure/success on frontend role only."
+    }
+  ],
+  "limits": [
+    "Terminal connect/commands not executed.",
+    "No real application, email retry, deployment, login, Slack or Jira action performed.",
+    "Authentication integration, upstream equipment UI and real DB were not exercised.",
+    "Admin host sign-in substitution source-audited; no separate admin synthetic screenshot.",
+    "Oil audit covers sign-in, careers landing and onboarding at 1440\u00d7900 and 390\u00d7844; developer authenticated panels covered separately via synthetic Playwright fixture."
+  ],
+  "evidenceDirectory": "/tmp/cbgpu-oil-portals",
+  "oilAudit": "/tmp/cbgpu-oil-portals/oil-audit/report.json",
+  "checks": [
+    "npm run build:browser",
+    "npm run check",
+    "npm run check:source",
+    "git diff --check",
+    "node --test developer/tests/operations-view.test.mts"
+  ],
+  "independentReview": {
+    "source": "/tmp/cbgpu-oil-portals-independent-review.json",
+    "resolutions": [
+      {
+        "issue": "Raw operations error and indefinite loading",
+        "cause": "Synthetic fixture used services rather than real containers field; UI also lacked resilient fetch/shape failure states.",
+        "resolution": "Corrected fixture contract, validated section data, explicit unavailable+Refresh recovery for malformed/failing API; independent service logs still load.",
+        "evidence": [
+          "reviewed-operations-390.png",
+          "reviewed-operations-malformed-390.png",
+          "reviewed-operations-failure-390.png"
+        ]
+      },
+      {
+        "issue": "Stale Row updated notice behind failed current edit",
+        "resolution": "Clear global mutation notices on opening new editor and before save request; preserve edits on failure.",
+        "evidence": [
+          "reviewed-row-editor-error-short-390.png"
+        ]
+      },
+      {
+        "issue": "Actual database typography",
+        "resolution": "Table/schema/column/cell selectors measured at14px in browser after fixing more-specific11px/9px rules.",
+        "evidence": "/tmp/cbgpu-oil-portals/table-font-sizes.json"
+      }
+    ],
+    "shortDialogBounds": "/tmp/cbgpu-oil-portals/short-dialog-bounds.json"
+  }
+}

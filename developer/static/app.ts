@@ -1,3 +1,4 @@
+import {operationsView} from './operations-view.ts';
 export {};
 interface PortalElements {
 "login-view":HTMLElement;
@@ -259,7 +260,7 @@ interface PortalElements {
     for (const panel of document.querySelectorAll<HTMLElement>('.panel')) panel.hidden = panel.id !== 'panel-' + name;
     for (const button of document.querySelectorAll<HTMLElement>('[data-panel]')) {
       const active = button.dataset.panel === name; button.classList.toggle('active', active);
-      if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+      if (active) { button.setAttribute('aria-current', 'page'); if (matchMedia('(max-width:720px)').matches) button.scrollIntoView({block:'nearest',inline:'nearest'}); } else button.removeAttribute('aria-current');
     }
     if (name === 'overview') loadOverview();
     if (name === 'database' && !state.tables.length) loadTables();
@@ -269,7 +270,7 @@ interface PortalElements {
     if (name === 'emails') loadEmails();
     if (name === 'security') loadAccount();
   }
-  for (const button of document.querySelectorAll<HTMLElement>('[data-panel]')) button.addEventListener('click', () => showPanel(button.dataset.panel));
+  for (const button of document.querySelectorAll<HTMLElement>('[data-panel]')) button.addEventListener('click', () => { showPanel(button.dataset.panel); $('main-content').focus({preventScroll:true}); });
   for (const button of document.querySelectorAll<HTMLElement>('[data-open-panel]')) button.addEventListener('click', (event) => { event.preventDefault(); showPanel(button.dataset.openPanel); });
   $('refresh-button').addEventListener('click', async () => {
     const button = $('refresh-button'); busy(button, true, 'Refreshing…');
@@ -487,6 +488,7 @@ interface PortalElements {
   }
   function serialized(value) { return value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value); }
   function editRow(row) {
+    notice();
     state.editing = { row, table: state.table, columns: state.columns };
     const keys = state.columns.filter(column => column.primary_key); const key = Object.fromEntries(keys.map(column => [column.name, row[column.name]]));
     message('row-editor-table', `${state.table.schema}.${state.table.name}`); message('row-editor-key', JSON.stringify(key)); message('row-editor-message', 'Only changed fields will be updated.');
@@ -521,6 +523,7 @@ interface PortalElements {
   }
   $('row-editor-form').addEventListener('submit', async event => {
     event.preventDefault(); if (!state.editing) return;
+    notice();
     const { row, table, columns } = state.editing; const values = {}; const key = {};
     try {
       for (const [index, column] of columns.entries()) {
@@ -626,17 +629,31 @@ interface PortalElements {
 
   async function loadRelease(){try{const data=await api('/overview');if(!state.authenticated)return;const root=$('release-details');root.replaceChildren();for(const [key,value] of [['Domain','cbgpu.com'],['Commit',data.deployment?.commit?.slice(0,12)||'Unavailable'],['Active build',data.deployment?.active_build||'Unavailable'],['Source',data.deployment?.dirty?'Includes local changes':'Clean checkout']]){const item=element('div');item.append(element('dt','',key),element('dd','',value));root.append(item)}}catch(e){if(state.authenticated)notice(e.message,true)}}
   async function loadOperations(){
-    try{const data=await api('/operations');if(!state.authenticated)return;
-      message('operations-updated','Updated '+dateTime(data.updated_at));message('container-count',data.containers.length+' running');const root=$('container-list');root.replaceChildren();
-      for(const c of data.containers){const row=element('div','service-row'),name=element('div');name.append(element('strong','',c.name),element('small','',c.image));row.append(name,element('span','service-status'+(/unhealthy|starting/i.test(c.status)?' warning':''),c.status));root.append(row)}
-      if(!data.containers.length)root.append(element('p','empty-state','No service data available.'));
-      message('backup-timer',data.backup_timer_active?'Daily timer enabled':'Timer inactive');const backups=$('backup-list');backups.replaceChildren();
-      for(const b of data.backups){const row=element('div','backup-row'),name=element('div');name.append(element('span','',dateTime(b.created_at)),element('small','',(b.database?'Database':'Missing database')+' · '+(b.storage?'Storage':'Missing storage')));row.append(name,element('span','meta',number.format(b.bytes/1024/1024)+' MB'));backups.append(row)}
-      if(!data.backups.length)backups.append(element('p','empty-state','No saved backups found.'));
-      const email=$('email-status');email.replaceChildren();for(const [key,value] of [['Active sender',data.email?.active||'Unavailable'],['Delivery status',data.email?.status?.replaceAll('_',' ')||'Unavailable']]){const item=element('div');item.append(element('dt','',key),element('dd','',value));email.append(item)}
-      renderOperationalStatus('offsite', data.offsite ?? data.offsite_backup); renderOperationalStatus('monitor', data.monitoring ?? data.monitor);
-      await loadLogs();
-    }catch(e){if(state.authenticated)notice(e.message,true)}
+    const unavailable = 'Status is unavailable. Use Refresh to try again.';
+    try {
+      const data = operationsView(await api('/operations')); if (!state.authenticated) return;
+      message('operations-updated', data.incomplete ? 'Some status data is unavailable. Refresh to try again.' : data.updatedAt ? 'Updated '+dateTime(data.updatedAt) : 'Update time unavailable.');
+      message('container-count', data.containers ? data.containers.length+' running' : 'Unavailable');
+      const root=$('container-list'); root.replaceChildren();
+      for (const c of data.containers || []) {const row=element('div','service-row'),name=element('div');name.append(element('strong','',c.name),element('small','',c.image));row.append(name,element('span','service-status'+(/unhealthy|starting/i.test(c.status)?' warning':''),c.status));root.append(row)}
+      if (!data.containers?.length) root.append(element('p','empty-state',data.containers ? 'No service data available.' : unavailable));
+      message('backup-timer',data.timer === null ? 'Timer status unavailable' : data.timer ? 'Daily timer enabled' : 'Timer inactive');
+      const backups=$('backup-list'); backups.replaceChildren();
+      for (const b of data.backups || []) {const row=element('div','backup-row'),name=element('div');name.append(element('span','',dateTime(b.created_at)),element('small','',(b.database?'Database':'Missing database')+' · '+(b.storage?'Storage':'Missing storage')));row.append(name,element('span','meta',number.format(b.bytes/1024/1024)+' MB'));backups.append(row)}
+      if (!data.backups?.length) backups.append(element('p','empty-state',data.backups ? 'No saved backups found.' : unavailable));
+      const email=$('email-status'); email.replaceChildren();
+      for (const [key,value] of [['Active sender',typeof data.email?.active === 'string' ? data.email.active : 'Unavailable'],['Delivery status',typeof data.email?.status === 'string' ? data.email.status.replaceAll('_',' ') : 'Unavailable']]) {const item=element('div');item.append(element('dt','',key),element('dd','',value));email.append(item)}
+      renderOperationalStatus('offsite',data.offsite); renderOperationalStatus('monitor',data.monitor);
+    } catch {
+      if (!state.authenticated) return;
+      message('operations-updated','Service status could not be loaded. Use Refresh to try again.',true);
+      message('container-count','Unavailable'); message('backup-timer','Timer status unavailable');
+      $('container-list').replaceChildren(element('p','empty-state',unavailable));
+      $('backup-list').replaceChildren(element('p','empty-state',unavailable));
+      $('email-status').replaceChildren(element('div','empty-state','Email delivery status is unavailable. Use Refresh to try again.'));
+      renderOperationalStatus('offsite',undefined); renderOperationalStatus('monitor',undefined);
+    }
+    if (state.authenticated) await loadLogs();
   }
   let logRequest=0;
   async function loadLogs(){const request=++logRequest;const source=$('log-source').value;message('logs-message','Loading recent logs…');$('service-log-output').textContent='';busy($('logs-refresh'),true,'Loading…');try{const data=await api('/logs?source='+encodeURIComponent(source));if(!state.authenticated||request!==logRequest)return;$('service-log-output').textContent=data.log||'No recent log entries.';message('logs-message','Last 150 entries · '+dateTime(data.updated_at))}catch(e){if(state.authenticated&&request===logRequest)message('logs-message',e.message,true)}finally{if(request===logRequest)busy($('logs-refresh'),false)}}
