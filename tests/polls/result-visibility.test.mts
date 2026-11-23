@@ -14,7 +14,7 @@ test('hidden poll answers are owner/admin only and visibility changes never muta
  try{
   let ready=false;for(let i=0;i<200;i++){const logs=execFileSync('docker',['logs',name],{encoding:'utf8',stdio:['ignore','pipe','pipe']});if(logs.includes('PostgreSQL init process complete; ready for start up.')){try{db('select 1');ready=true;break}catch{}}await new Promise(r=>setTimeout(r,100))}assert.equal(ready,true);
   db(fs.readFileSync(new URL('./bootstrap.sql',import.meta.url),'utf8'));
-  for(const migration of ['20261123162344_atomic_poll_editor_save.sql','20261123164337_atomic_poll_response_submit.sql','20261123165638_poll_result_visibility.sql'])db(fs.readFileSync(new URL('../../supabase/migrations/'+migration,import.meta.url),'utf8'));
+  for(const migration of ['20261123162344_atomic_poll_editor_save.sql','20261123164337_atomic_poll_response_submit.sql','20261123165638_poll_result_visibility.sql','20261123175207_deny_anonymous_internal_polls.sql'])db(fs.readFileSync(new URL('../../supabase/migrations/'+migration,import.meta.url),'utf8'));
   db(`insert into auth.users(id)values('${actors[2]}');insert into public.profiles(id)values('${actors[2]}');insert into auth.sessions(id,user_id)values('${sessions[2]}','${actors[2]}');`);
   const saved=JSON.parse(db(actor(0)+`select public.cbgpu_save_poll(null,null,${literal({title:'Private result test',show_results:false})},${literal([{id:'question',title:'Answer',type:'text',options:[],config:{},required:true}])});`));
   const q=db(`select id from public.poll_questions where poll_id='${saved.id}';`),submit=(i:number,value:string)=>db(actor(i)+`select public.cbgpu_submit_poll('${saved.id}',${saved.editor_revision},${literal({[q]:value})});`);
@@ -43,7 +43,7 @@ test('hidden poll answers are owner/admin only and visibility changes never muta
   db(`update auth.sessions set not_after=now()-interval '1 minute' where id='${sessions[2]}';`);
   assert.equal(db(actor(2)+'select count(*) from public.poll_answers;'),'0');
   assert.equal(db(actor(2)+'select count(*) from public.poll_questions;'),'0');
-  assert.throws(()=>db('set role anon;select * from public.poll_answers;'));
+  for(const table of ['polls','poll_questions','poll_responses','poll_answers'])assert.equal(db('set role anon;select count(*) from public.'+table+';'),'0');
   for(let i=0;i<2;i++)db(fs.readFileSync(new URL('../../supabase/migrations/20261123165638_poll_result_visibility.sql',import.meta.url),'utf8'));
   assert.equal(db('select jsonb_agg(to_jsonb(a) order by id) from public.poll_answers a;'),values);
   assert.equal(db("select polpermissive from pg_policy where polname='cbgpu_poll_answer_result_visibility' and polrelid='public.poll_answers'::regclass;"),'f');

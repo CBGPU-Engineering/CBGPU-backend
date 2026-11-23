@@ -29,6 +29,8 @@ create policy answers_read on public.poll_answers for select using(auth.uid() is
 create policy answers_insert on public.poll_answers for insert with check(exists(select 1 from public.poll_responses where id=response_id and user_id=auth.uid()));
 grant usage on schema public,auth to authenticated,anon;
 grant all on public.polls,public.poll_questions,public.poll_responses,public.poll_answers to authenticated;
+-- Live anon ACLs permit SELECT; policies, rather than missing grants, must deny internal poll rows.
+grant select on public.polls,public.poll_questions,public.poll_responses,public.poll_answers to anon;
 grant select on public.profiles to authenticated;
 insert into auth.users(id) values('11111111-1111-4111-8111-111111111111'),('22222222-2222-4222-8222-222222222222');
 insert into public.profiles(id,is_admin) values('11111111-1111-4111-8111-111111111111',true),('22222222-2222-4222-8222-222222222222',false);
