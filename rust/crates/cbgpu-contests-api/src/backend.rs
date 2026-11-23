@@ -1,6 +1,6 @@
 use crate::{ContestBackend, RegistrationInput, Result, fail};
 use serde_json::{Value, json};
-const FIELDS: &str = "id,host_id,title,description,created_at,ends_at,is_open,fields,event_start_at,event_end_at,location_type,location_name,address,visibility,capacity,waitlist_enabled,approval_required,registration_open,registration_questions,registration_closes_at,lifecycle_status,cancellation_message,registration_opens_at,starts_at,participation_mode,team_min_size,team_max_size,allow_individual_entries,banner_path";
+const FIELDS: &str = "id,host_id,title,description,created_at,ends_at,is_open,fields,event_start_at,event_end_at,location_type,location_name,address,visibility,capacity,waitlist_enabled,approval_required,registration_open,registration_questions,registration_closes_at,lifecycle_status,cancellation_message,registration_opens_at,starts_at,participation_mode,team_min_size,team_max_size,allow_individual_entries,banner_path,school_id,access_scope,allowed_school_ids,participant_policy";
 pub struct Backend {
     pub origin: String,
     pub anon_key: String,
