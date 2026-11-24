@@ -68,6 +68,10 @@ fn payload(input: &Value) -> Result<Value> {
     if let Some(tools) = function_tools(input) {
         // Keep the documented API envelope independent of the bundled chat template.
         let (mut prepared, _) = protocol::prepare(messages, tools, &input["tool_choice"]);
+        let instruction = prepared[0]["content"].as_str().unwrap_or_default();
+        prepared[0]["content"] = json!(format!(
+            "When the requested work needs a tool, call it in this turn. Use a final answer for a result, a real clarification question, or a task that needs no tool. A promise to inspect, create or run something is not a completed result.\n\n{instruction}"
+        ));
         for (original, message) in messages.iter().zip(prepared.iter_mut().skip(1)) {
             if original["content"].is_array() {
                 message["content"] = original["content"].clone();
@@ -166,6 +170,137 @@ fn function_tools(input: &Value) -> Option<&[Value]> {
         .as_array()
         .map(Vec::as_slice)
         .filter(|tools| !tools.is_empty() && input["tool_choice"] != "none")
+}
+
+fn matches_argument_shape(value: &Value, schema: &Value, depth: usize) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    if let Some(options) = schema["enum"].as_array()
+        && !options.contains(value)
+    {
+        return false;
+    }
+    if let Some(required) = schema.get("const")
+        && value != required
+    {
+        return false;
+    }
+    let valid_type = |kind| match kind {
+        "string" => value.is_string(),
+        "integer" => value.as_f64().is_some_and(|n| n.fract() == 0.0),
+        "number" => value.is_number(),
+        "boolean" => value.is_boolean(),
+        "null" => value.is_null(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        _ => true,
+    };
+    if !schema["type"].as_str().is_none_or(valid_type)
+        || schema["type"]
+            .as_array()
+            .is_some_and(|types| !types.iter().filter_map(Value::as_str).any(valid_type))
+    {
+        return false;
+    }
+    if let Some(object) = value.as_object() {
+        if schema["required"].as_array().is_some_and(|required| {
+            required
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|key| !object.contains_key(key))
+        }) {
+            return false;
+        }
+        return object.iter().all(|(key, item)| {
+            if let Some(field) = schema["properties"].get(key) {
+                matches_argument_shape(item, field, depth + 1)
+            } else {
+                schema["additionalProperties"] != false
+            }
+        });
+    }
+    if let Some(items) = value.as_array()
+        && schema["items"].is_object()
+    {
+        return items
+            .iter()
+            .all(|item| matches_argument_shape(item, &schema["items"], depth + 1));
+    }
+    if let Some(text) = value.as_str() {
+        let length = text.chars().count() as u64;
+        return !schema["minLength"].as_u64().is_some_and(|min| length < min)
+            && !schema["maxLength"].as_u64().is_some_and(|max| length > max);
+    }
+    true
+}
+
+fn validate_proposal(raw: &str, tools: &[Value]) -> bool {
+    let Ok(proposal) = serde_json::from_str::<Value>(raw) else {
+        return false;
+    };
+    if proposal["type"] != "tool" {
+        return true;
+    }
+    tools.iter().any(|tool| {
+        let function = &tool["function"];
+        function["name"] == proposal["name"]
+            && proposal["arguments"].is_object()
+            && matches_argument_shape(&proposal["arguments"], &function["parameters"], 0)
+    })
+}
+
+fn only_announces_tool_work(text: &str) -> bool {
+    let text = text.trim();
+    if text.len() > 450 || text.contains(['\n', '?']) {
+        return false;
+    }
+    let normalized = text.to_lowercase().replace('’', "'");
+    let names_work = [
+        "workspace",
+        "file",
+        "folder",
+        "directory",
+        "script",
+        "presentation",
+        " deck",
+        "project",
+        "test",
+        "command",
+        "report",
+    ]
+    .iter()
+    .any(|subject| normalized.contains(subject));
+    names_work
+        && ["i'll ", "i will ", "let me "].iter().any(|prefix| {
+            normalized.strip_prefix(prefix).is_some_and(|rest| {
+                [
+                    "check ",
+                    "inspect ",
+                    "read ",
+                    "list ",
+                    "open ",
+                    "run ",
+                    "create ",
+                    "make ",
+                    "write ",
+                    "save ",
+                    "start by check",
+                    "start by inspect",
+                    "start by read",
+                    "start by list",
+                ]
+                .iter()
+                .any(|verb| rest.starts_with(verb))
+            })
+        })
+        || (text.starts_with("먼저 ")
+            && ["파일", "폴더", "작업 공간"]
+                .iter()
+                .any(|noun| text.contains(noun))
+            && ["확인할게요", "확인하겠습니다", "확인해 볼게요"]
+                .iter()
+                .any(|end| text.trim_end_matches('.').ends_with(end)))
 }
 
 fn has_image_messages(body: &Value) -> bool {
@@ -267,6 +402,7 @@ fn start_server(socket: &Path, use_vision: bool) -> Result<Server> {
 
 pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
     let mut body = payload(input)?;
+    let generation_deadline = Instant::now() + Duration::from_secs(660);
     let directory = tempfile::Builder::new()
         .prefix("cbgpu-qwen-")
         .tempdir_in("/tmp")
@@ -310,9 +446,14 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         &folder.join("progress.json"),
         &json!({"message":"Processing the conversation with Qwen3.8"}),
     )?;
-    let generate = |body: &Value| {
+    let generate = |body: &Value, turn: &Value| {
+        let remaining = generation_deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("Qwen3.8 inference timed out".into());
+        }
         let response = client
             .post("http://localhost/v1/chat/completions")
+            .timeout(remaining)
             .json(body)
             .send()
             .map_err(|_| "Qwen3.8 inference was interrupted")?;
@@ -322,24 +463,43 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
                 response.status().as_u16()
             ));
         }
-        completion(BufReader::new(response), input, |text| {
+        completion(BufReader::new(response), turn, |text| {
             atomic(&folder.join("partial.json"), &json!({"text":text}))
         })
     };
-    let result = generate(&body);
-    if result
+    let result = generate(&body, input);
+    let needs_tool = input["tool_choice"] == "auto"
+        && function_tools(input).is_some()
+        && result.as_ref().is_ok_and(|value| {
+            value["choices"][0]["finish_reason"] == "stop"
+                && value["choices"][0]["message"]["content"]
+                    .as_str()
+                    .is_some_and(only_announces_tool_work)
+        });
+    let invalid_tool = result
         .as_ref()
         .err()
-        .is_some_and(|error| error == TOOL_FORMAT_ERROR)
-    {
-        // The first response has never been exposed to the caller. Retry once
-        // on the same running model with a strict output-format reminder.
-        let system = body["messages"][0]["content"].as_str().unwrap_or_default();
-        body["messages"][0]["content"] = json!(format!(
-            "{system}\n\nOutput only the exact JSON object described above. Start with {{ and end with }}. Do not use Markdown, XML, commentary or extra keys."
-        ));
-        body["temperature"] = json!(0);
-        return generate(&body);
+        .is_some_and(|error| error == TOOL_FORMAT_ERROR);
+    if needs_tool || invalid_tool {
+        // The proposed response was buffered. Preserve the original prompt prefix
+        // so the same inference process can reuse it when making one correction.
+        body["messages"].as_array_mut().ok_or(TOOL_FORMAT_ERROR)?.push(json!({
+            "role":"user",
+            "content":if needs_tool {
+                "Proceed with the existing request now. Call one available tool for the next step without announcing it."
+            } else {
+                "Correct the response to match the requested JSON format and tool argument schema. Return only that response."
+            }
+        }));
+        let mut turn = input.clone();
+        if needs_tool {
+            turn["tool_choice"] = json!("required");
+            body["response_format"] = tool_response_format(
+                function_tools(&turn).ok_or(TOOL_FORMAT_ERROR)?,
+                &turn["tool_choice"],
+            );
+        }
+        return generate(&body, &turn);
     }
     result
 }
@@ -402,8 +562,10 @@ fn completion(
             .strip_prefix("```json")
             .and_then(|value| value.strip_suffix("```"))
             .unwrap_or(raw);
-        match protocol::decode(raw.trim(), tools, &input["tool_choice"]) {
-            Ok((message, reason)) => (message, reason.to_owned()),
+        let raw = raw.trim();
+        let decoded = protocol::decode(raw, tools, &input["tool_choice"]);
+        match decoded {
+            Ok((message, reason)) if validate_proposal(raw, tools) => (message, reason.to_owned()),
             Err(_)
                 if input["tool_choice"] == "auto"
                     && !raw.is_empty()
@@ -416,7 +578,7 @@ fn completion(
                 // when the caller also advertises tools.
                 (json!({"role":"assistant","content":text}), finish)
             }
-            Err(_) => return Err(TOOL_FORMAT_ERROR.into()),
+            _ => return Err(TOOL_FORMAT_ERROR.into()),
         }
     } else {
         if !text.is_empty() {
@@ -434,6 +596,45 @@ fn completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_preambles_do_not_complete_the_turn() {
+        assert!(only_announces_tool_work(
+            "I'll create the launch-review.pptx presentation. Let me start by checking the workspace."
+        ));
+        assert!(only_announces_tool_work("먼저 작업 폴더를 확인하겠습니다."));
+        for response in [
+            "I've created the presentation.",
+            "I'll explain how this works.",
+            "I'll need the workspace location.",
+            "Let me check which file you meant?",
+        ] {
+            assert!(!only_announces_tool_work(response));
+        }
+    }
+
+    #[test]
+    fn validates_nested_tool_arguments_before_releasing_them() {
+        let tools = [json!({"function":{"name":"save","parameters":{
+            "type":"object","required":["slides"],"additionalProperties":false,
+            "properties":{"slides":{"type":"array","items":{"type":"object","required":["type","title"],
+                "additionalProperties":false,"properties":{"type":{"enum":["title"]},"title":{"type":"string","minLength":3}}}}}
+        }}})];
+        let payload =
+            |arguments| json!({"type":"tool","name":"save","arguments":arguments}).to_string();
+        assert!(validate_proposal(
+            &payload(json!({"slides":[{"type":"title","title":"Hello"}]})),
+            &tools
+        ));
+        for bad in [
+            json!({"slides":[{"type":"bad","title":"Hello"}]}),
+            json!({"slides":[{"type":"title","title":"x"}]}),
+            json!({"slides":[{"type":"title"}]}),
+            json!({"slides":"wrong"}),
+        ] {
+            assert!(!validate_proposal(&payload(bad), &tools));
+        }
+    }
 
     #[test]
     fn validates_tool_calls_before_returning_them() {
