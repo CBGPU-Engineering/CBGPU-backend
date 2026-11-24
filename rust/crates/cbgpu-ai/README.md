@@ -238,3 +238,15 @@ receives a recorded SHA256 digest. Existing changed assets and symlink targets
 are refused. This prepares data only: native CUDA/llama libraries, FFmpeg and the
 OCR image remain separately provisioned prerequisites. No GPU work, runtime
 installation, database migration or service activation is performed.
+
+### CBSH shared GPU 1 fallback
+
+On the four-card CBSH host, `CBGPU_AI_SHARE_RESERVED_GPU_ONE=1` allows one
+queued chat on GPU 1 when the scheduler has confirmed reservations for all
+four cards. Existing CUDA processes on card 1 may continue. Shared inference
+can reduce the reservation holder's throughput or available VRAM. Coordinate
+this setting with the reservation-screen notice before enabling it.
+
+Regular inference continues to use unreserved cards in parallel. GPU units
+2–4 retain normal reservation priority. The fallback is opt-in, only applies
+to chat, and is suspended when the reservation snapshot is unavailable.

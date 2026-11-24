@@ -13,6 +13,7 @@ pub struct Settings {
     pub admission_floor: u64,
     pub running_floor: u64,
     pub tick: std::time::Duration,
+    pub share_reserved_gpu_one: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -21,6 +22,7 @@ impl Default for Settings {
             admission_floor: 20 * 1024 * 1024 * 1024,
             running_floor: 10 * 1024 * 1024 * 1024,
             tick: std::time::Duration::from_secs(2),
+            share_reserved_gpu_one: false,
         }
     }
 }
@@ -102,6 +104,7 @@ impl Scheduler {
             self.api.store.bulk_directory("workspaces")?;
         }
         let snapshot = self.resources.snapshot().await?;
+        let shared = reserved_fallback(&snapshot, self.settings.share_reserved_gpu_one);
         let active = self.api.running.read().await.len();
         let mut status = health(&snapshot, active, self.settings.workers);
         let leases = self
@@ -112,6 +115,7 @@ impl Scheduler {
             .keys()
             .cloned()
             .collect::<std::collections::HashSet<_>>();
+        status["shared_fallback_gpu"] = json!(shared.map(|gpu| gpu.index + 1));
         status["active_gpus"] = json!(
             snapshot
                 .cards
@@ -138,7 +142,8 @@ impl Scheduler {
                 candidates.push(job);
             }
         }
-        for gpu in snapshot.cards.iter().filter(|c| c.available) {
+        for gpu in snapshot.cards.iter().filter(|c| c.available).chain(shared) {
+            let shared = gpu.reserved;
             let mut state = self.state.lock().await;
             if state.leases.len() >= self.settings.workers.clamp(1, 4)
                 || state.leases.contains_key(&gpu.uuid)
@@ -148,10 +153,11 @@ impl Scheduler {
             let available = candidates
                 .iter()
                 .filter(|j| {
-                    !state
-                        .leases
-                        .values()
-                        .any(|id| Some(id.as_str()) == j["id"].as_str())
+                    (!shared || j["kind"] == "chat")
+                        && !state
+                            .leases
+                            .values()
+                            .any(|id| Some(id.as_str()) == j["id"].as_str())
                 })
                 .collect::<Vec<_>>();
             let Some(first) = available.first() else {
@@ -311,11 +317,17 @@ impl Scheduler {
             prepare_workspace(&self.api.store, &job, &job["input"])?;
         }
         let snapshot = self.resources.snapshot().await?;
-        if !snapshot
-            .cards
-            .iter()
-            .any(|card| card.uuid == gpu.uuid && card.available)
-        {
+        let admission = if gpu.reserved {
+            job["kind"] == "chat"
+                && reserved_fallback(&snapshot, self.settings.share_reserved_gpu_one)
+                    .is_some_and(|card| card.uuid == gpu.uuid)
+        } else {
+            snapshot
+                .cards
+                .iter()
+                .any(|card| card.uuid == gpu.uuid && card.available)
+        };
+        if !admission {
             return Ok((
                 "queued".into(),
                 "GPU allocation changed before start".into(),
@@ -389,10 +401,17 @@ impl Scheduler {
                     task.own_pids().await,
                 ) {
                     (Some(card), Ok(owned)) => (
-                        card.reserved,
-                        snapshot.processes.iter().any(|process| {
-                            process.uuid == gpu.uuid && !owned.contains(&process.pid)
-                        }),
+                        card.reserved
+                            && (!gpu.reserved
+                                || reserved_fallback(
+                                    &snapshot,
+                                    self.settings.share_reserved_gpu_one,
+                                )
+                                .is_none()),
+                        !gpu.reserved
+                            && snapshot.processes.iter().any(|process| {
+                                process.uuid == gpu.uuid && !owned.contains(&process.pid)
+                            }),
                         false,
                     ),
                     _ => (false, false, true),
@@ -535,6 +554,21 @@ impl Scheduler {
         }
         Ok(())
     }
+}
+/// Only the existing four-GPU school host can use this fallback.
+fn reserved_fallback(snapshot: &Snapshot, enabled: bool) -> Option<&Card> {
+    if !enabled
+        || snapshot.cards.len() != 4
+        || !(0..4).all(|index| {
+            snapshot
+                .cards
+                .iter()
+                .any(|card| card.index == index && card.reserved)
+        })
+    {
+        return None;
+    }
+    snapshot.cards.iter().find(|card| card.index == 0)
 }
 fn health(snapshot: &Snapshot, active: usize, workers: usize) -> Value {
     json!({"status":"ok","available":true,"checked_at":now(),"workers":workers.clamp(1,4),"active_jobs":active,"gpus":snapshot.cards.iter().map(|c|json!({"id":c.index+1,"name":c.name,"reserved":c.reserved,"available":c.available})).collect::<Vec<_>>()})
@@ -700,5 +734,42 @@ mod tests {
         assert!(instance_lock(t.path()).is_err());
         drop(lock);
         assert!(instance_lock(t.path()).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod reserved_fallback_tests {
+    use super::reserved_fallback;
+    use crate::resources::{Card, Process, Snapshot};
+
+    #[test]
+    fn sharing_is_opt_in_and_limited_to_gpu_one_when_all_four_are_reserved() {
+        let mut snapshot = Snapshot {
+            cards: (0..4)
+                .map(|index| Card {
+                    index,
+                    uuid: format!("GPU-{index}"),
+                    name: "fixture".into(),
+                    memory: 0,
+                    utilization: 0,
+                    reserved: true,
+                    available: false,
+                })
+                .collect(),
+            processes: vec![Process {
+                uuid: "GPU-0".into(),
+                pid: 42,
+            }],
+        };
+        assert!(reserved_fallback(&snapshot, false).is_none());
+        assert_eq!(
+            reserved_fallback(&snapshot, true).map(|card| card.index),
+            Some(0)
+        );
+        snapshot.cards[2].reserved = false;
+        snapshot.cards[2].available = true;
+        assert!(reserved_fallback(&snapshot, true).is_none());
+        snapshot.cards.pop();
+        assert!(reserved_fallback(&snapshot, true).is_none());
     }
 }

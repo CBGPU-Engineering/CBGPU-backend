@@ -102,6 +102,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(4)
                     .clamp(1, 4),
+                share_reserved_gpu_one: std::env::var("CBGPU_AI_SHARE_RESERVED_GPU_ONE")
+                    .ok()
+                    .as_deref()
+                    == Some("1"),
                 ..Default::default()
             },
         );

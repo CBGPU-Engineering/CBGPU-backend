@@ -230,6 +230,7 @@ async fn real_queue_claim_fairness_preemption_cancel_and_recovery() {
         admission_floor: 100,
         running_floor: 10,
         tick: std::time::Duration::from_millis(20),
+        ..Settings::default()
     };
     let a = store.enqueue(OWNER, "embed", input(), "one").await.unwrap();
     let b = store.enqueue(OWNER, "embed", input(), "two").await.unwrap();
