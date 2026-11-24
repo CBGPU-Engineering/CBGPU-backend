@@ -1,5 +1,6 @@
 """Private persistent queue, ownership checks, bounded uploads and artifact paths."""
 import hashlib, hmac, json, os, secrets, sqlite3, threading, time, uuid, zipfile, shutil, stat
+from contextlib import closing
 from pathlib import Path, PurePosixPath
 from catalog import TEXT_MODELS
 from tool_protocol import validate_tools
@@ -38,6 +39,18 @@ class SafeArtifact:
         try:self.close()
         except Exception:pass
 
+class QueryResult:
+    def __init__(self, rows, rowcount):
+        self.rows = iter(rows)
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return next(self.rows, None)
+
+    def fetchall(self):
+        return list(self.rows)
+
+
 class Store:
     def __init__(self,state,data_root=None):
         self.root=Path(state).resolve();self.root.mkdir(parents=True,exist_ok=True,mode=0o700);self.root.chmod(0o700)
@@ -63,7 +76,12 @@ class Store:
         self.preparation = FilePreparation(self)
     def execute(self,query,args=()):
         with self.lock:
-            cur=self.db.execute(query,args);self.db.commit();return cur
+            # Worker and HTTP threads share the connection. Read and close the
+            # cursor before another thread can reuse its prepared statement.
+            with closing(self.db.execute(query, args)) as cursor:
+                result = QueryResult(cursor.fetchall() if cursor.description else (), cursor.rowcount)
+            self.db.commit()
+            return result
     def bulk_directory(self,name):
         if self.data_root is None:return self.root/name
         if os.environ.get('CBGPU_AI_REQUIRE_DATA_MOUNT')=='1' and not os.path.ismount('/srv/cbgpu-data'):raise Failure('추가 데이터 SSD가 연결되지 않았어요. 저장 작업을 잠시 중단합니다.',503)

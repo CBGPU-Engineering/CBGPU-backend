@@ -1,4 +1,5 @@
 import io,json,sys,tempfile,threading,unittest,uuid,zipfile,os,sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch,MagicMock
 from types import SimpleNamespace
@@ -18,6 +19,15 @@ class StoreTests(unittest.TestCase):
   with self.assertRaises(Failure):self.store.job(OTHER,job['id'])
   file=self.store.upload(OWNER,'sample.wav',[b'audio'])
   with self.assertRaises(Failure):self.store.enqueue(OTHER,'transcribe',{'upload_id':file['id']})
+ def test_parallel_job_reads_keep_the_matching_owner_and_job(self):
+  inputs={'messages':[{'role':'user','content':'synthetic'}]}
+  jobs=[(owner,self.store.enqueue(owner,'chat',inputs)['id']) for owner in (OWNER,OTHER) for _ in range(4)]
+  def read(index):
+   owner,id=jobs[index%len(jobs)]
+   job=self.store.job(owner,id,False)
+   self.assertEqual((job['id'],job['owner']),(id,owner))
+  with ThreadPoolExecutor(max_workers=12) as threads:
+   list(threads.map(read,range(1200)))
  def test_key_secret_is_one_time_and_revocable(self):
   value=self.store.create_key(OWNER,'test');self.assertEqual(self.store.key_owner(value['key']),OWNER);self.assertNotIn('key',self.store.keys(OWNER)[0]);self.assertNotIn(value['key'],json.dumps(self.store.keys(OWNER)));self.assertEqual(self.store.keys(OTHER),[])
   self.store.execute('UPDATE api_keys SET revoked=1 WHERE id=?',(value['id'],))
