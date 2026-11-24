@@ -332,6 +332,9 @@ fn answers_with_source_instead_of_file(input: &Value, text: &str) -> bool {
         "presentation file",
         "파일로",
         "파일 만들어",
+        "ppt",
+        "발표 자료",
+        "발표자료",
     ]
     .iter()
     .any(|hint| request.contains(hint));
@@ -345,9 +348,11 @@ fn answers_with_source_instead_of_file(input: &Value, text: &str) -> bool {
     ]
     .iter()
     .any(|verb| request.starts_with(verb))
-        || ["만들어 줘", "만들어줘", "저장해 줘", "저장해줘"]
-            .iter()
-            .any(|verb| request.contains(verb));
+        || (!request.contains(['?', '？'])
+            && !request.contains("방법")
+            && ["만들어", "저장해"]
+                .iter()
+                .any(|verb| request.contains(verb)));
     artifact && action
 }
 
@@ -669,6 +674,12 @@ mod tests {
         let file = json!({"messages":[{"role":"user","content":"Make slides.pptx and save it."}]});
         let example =
             json!({"messages":[{"role":"user","content":"How do I make slides.pptx in Python?"}]});
+        let korean =
+            json!({"messages":[{"role":"user","content":"발표할 PPT 좀 만들어서 보내줘."}]});
+        assert!(answers_with_source_instead_of_file(
+            &korean,
+            "from pptx import Presentation"
+        ));
         assert!(answers_with_source_instead_of_file(
             &file,
             "from pptx import Presentation"
