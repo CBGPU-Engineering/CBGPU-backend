@@ -285,62 +285,87 @@ fn validate_proposal(raw: &str, tools: &[Value]) -> bool {
 
 fn only_announces_tool_work(text: &str) -> bool {
     let text = text.trim();
-    if text.chars().count() > 280 || text.contains(['?', '？']) {
+    if text.chars().count() > 420 || text.contains(['?', '？']) || text.starts_with('`') {
         return false;
     }
-    let last_sentence = text
-        .trim_end_matches(['.', '。', '!'])
-        .rsplit(['.', '。', '\n', '!'])
-        .find(|part| !part.trim().is_empty())
-        .unwrap_or(text)
-        .trim();
-    announces_tool_step(text) || announces_tool_step(last_sentence)
+    announces_korean_tool_step(text)
+        || text
+            .split(['。', '!', '\n'])
+            .flat_map(|line| line.split(". "))
+            .map(str::trim)
+            .any(|sentence| {
+                announces_english_tool_step(sentence) || announces_korean_tool_step(sentence)
+            })
 }
 
-fn announces_tool_step(text: &str) -> bool {
-    let normalized = text.to_lowercase().replace('’', "'");
-    let english = [
-        "workspace",
-        "file",
-        "folder",
-        "directory",
-        "script",
-        "presentation",
-        " deck",
-        "project",
-        "test",
-        "command",
-        "report",
+fn announces_english_tool_step(sentence: &str) -> bool {
+    let normalized = sentence.to_lowercase().replace('’', "'");
+    let sentence = ["okay, ", "sure, ", "understood, "]
+        .iter()
+        .find_map(|intro| normalized.strip_prefix(intro))
+        .unwrap_or(&normalized);
+    if ["if you want", "if you'd like", "when you ask"]
+        .iter()
+        .any(|optional| sentence.contains(optional))
+    {
+        return false;
+    }
+    let Some(step) = ["i'll ", "i will ", "let me ", "i need to "]
+        .iter()
+        .find_map(|prefix| sentence.strip_prefix(prefix))
+    else {
+        return false;
+    };
+    let step = ["also ", "first ", "now ", "just "]
+        .iter()
+        .find_map(|adverb| step.strip_prefix(adverb))
+        .unwrap_or(step);
+    [
+        "check ",
+        "inspect ",
+        "read ",
+        "list ",
+        "open ",
+        "run ",
+        "create ",
+        "make ",
+        "write ",
+        "save ",
+        "verify ",
+        "look at ",
+        "start by check",
+        "start by inspect",
+        "start by read",
+        "start by list",
     ]
     .iter()
-    .any(|subject| normalized.contains(subject))
-        && ["i'll ", "i will ", "let me ", "i need to "]
-            .iter()
-            .any(|prefix| {
-                normalized.strip_prefix(prefix).is_some_and(|rest| {
-                    let rest = rest.strip_prefix("now ").unwrap_or(rest);
-                    [
-                        "check ",
-                        "inspect ",
-                        "read ",
-                        "list ",
-                        "open ",
-                        "run ",
-                        "create ",
-                        "make ",
-                        "write ",
-                        "save ",
-                        "verify ",
-                        "start by check",
-                        "start by inspect",
-                        "start by read",
-                        "start by list",
-                    ]
-                    .iter()
-                    .any(|verb| rest.starts_with(verb))
-                })
-            });
-    let korean = !text.contains("설명해")
+    .any(|verb| step.starts_with(verb))
+        && [
+            "workspace",
+            "file",
+            "folder",
+            "directory",
+            "script",
+            "presentation",
+            " deck",
+            "project",
+            "test",
+            "command",
+            "report",
+            "git log",
+            "daemon",
+            "codebase",
+            "repo",
+            " ppt",
+            "source code",
+            ".pptx",
+        ]
+        .iter()
+        .any(|subject| step.contains(subject))
+}
+
+fn announces_korean_tool_step(text: &str) -> bool {
+    !text.contains("설명해")
         && [
             "확인", "검증", "실행", "열어", "저장", "만들", "진행", "작성", "살펴", "시작", "찾아",
             "보내",
@@ -349,8 +374,81 @@ fn announces_tool_step(text: &str) -> bool {
         .any(|action| text.contains(action))
         && ["겠습니다", "할게요", "볼게요", "드릴게요", "만들게요"]
             .iter()
-            .any(|end| text.trim_end_matches(['.', '。', '!']).ends_with(end));
-    english || korean
+            .any(|end| text.trim_end_matches(['.', '。', '!']).ends_with(end))
+}
+
+fn explicit_continuation(text: &str) -> bool {
+    // OpenClaw can prefix the actual message with its transport timestamp.
+    let text = text.trim();
+    let text = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        .iter()
+        .any(|day| text.starts_with(&format!("[{day} ")))
+        .then(|| text.split_once("] "))
+        .flatten()
+        .map_or(text, |(_, content)| {
+            content
+                .split_once("\n\nRuntime:")
+                .map_or(content, |(text, _)| text)
+        });
+    let text = text
+        .trim()
+        .trim_end_matches(['.', '!', '。'])
+        .trim()
+        .to_lowercase();
+    matches!(
+        text.as_str(),
+        "continue"
+            | "continue please"
+            | "go ahead"
+            | "keep going"
+            | "proceed"
+            | "계속"
+            | "계속해"
+            | "계속 해"
+            | "계속해줘"
+            | "계속해 줘"
+            | "계속 진행"
+            | "계속 진행해"
+            | "계속 진행해줘"
+            | "계속 진행해 줘"
+            | "마저 해"
+            | "마저 해줘"
+    )
+}
+
+fn continues_unfinished_tool_step(input: &Value) -> bool {
+    if !auto_tool_choice(input) || function_tools(input).is_none() {
+        return false;
+    }
+    let Some(messages) = input["messages"].as_array() else {
+        return false;
+    };
+    let Some(previous) = messages
+        .iter()
+        .rposition(|message| message["role"] == "assistant")
+    else {
+        return false;
+    };
+    let assistant = &messages[previous];
+    if assistant["tool_calls"]
+        .as_array()
+        .is_some_and(|calls| !calls.is_empty())
+        || !assistant["content"]
+            .as_str()
+            .is_some_and(only_announces_tool_work)
+    {
+        return false;
+    }
+    let tail = &messages[previous + 1..];
+    if tail.iter().any(|message| message["role"] == "tool") {
+        return false;
+    }
+    tail.iter()
+        .rev()
+        .filter(|message| message["role"] == "user")
+        .filter_map(|message| message["content"].as_str())
+        .find(|text| !text.trim().starts_with("OpenClaw runtime context:"))
+        .is_some_and(explicit_continuation)
 }
 
 fn answers_with_source_instead_of_file(input: &Value, text: &str) -> bool {
@@ -504,6 +602,12 @@ fn start_server(socket: &Path, use_vision: bool) -> Result<Server> {
 }
 
 pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
+    let continuation = continues_unfinished_tool_step(input).then(|| {
+        let mut followup = input.clone();
+        followup["tool_choice"] = json!("required");
+        followup
+    });
+    let input = continuation.as_ref().unwrap_or(input);
     let mut body = payload(input)?;
     let generation_deadline = Instant::now() + Duration::from_secs(660);
     let directory = tempfile::Builder::new()
@@ -703,8 +807,12 @@ fn completion(
 mod tests {
     use super::*;
 
+    const AFTER_CONTEXT_PROMISE: &str = "I have enough context about the CBGPU project now. Let me check the git log to understand the development history, and then create the PPT. Let me also check the daemon code and the overall project structure to understand the full picture.";
+
     #[test]
     fn action_preambles_do_not_complete_the_turn() {
+        assert!(only_announces_tool_work(AFTER_CONTEXT_PROMISE));
+        assert!(only_announces_tool_work("I will create slides.pptx."));
         assert!(only_announces_tool_work(
             "I'll create the launch-review.pptx presentation. Let me start by checking the workspace."
         ));
@@ -732,9 +840,32 @@ mod tests {
             "I'll explain how this works.",
             "I'll need the workspace location.",
             "Let me check which file you meant?",
+            "The file was created and verified. I'll check the file again if you want.",
+            "`Let me check the Git log.` is a sentence about future work.",
         ] {
             assert!(!only_announces_tool_work(response));
         }
+    }
+
+    #[test]
+    fn explicit_continuation_advances_a_bare_promise() {
+        let mut input = json!({"tool_choice":"auto","tools":[{"function":{"name":"read"}}],
+            "messages":[
+                {"role":"user","content":"Create the research slides."},
+                {"role":"assistant","content":AFTER_CONTEXT_PROMISE},
+                {"role":"user","content":"[Tue 2026-11-24 23:20 GMT+9] 계속 진행해 줘.\n\nRuntime: agent=main"},
+                {"role":"user","content":"OpenClaw runtime context:\nContext data"}
+            ]
+        });
+        assert!(continues_unfinished_tool_step(&input));
+        input["messages"][2]["content"] = json!("계속 진행해. 대신 발표 주제를 바꿔 줘.");
+        assert!(!continues_unfinished_tool_step(&input));
+        input["messages"][2]["content"] = json!("Continue.");
+        input["messages"][1]["tool_calls"] = json!([{"id":"call_1"}]);
+        assert!(!continues_unfinished_tool_step(&input));
+        input["messages"][1]["tool_calls"] = Value::Null;
+        input["tool_choice"] = json!("none");
+        assert!(!continues_unfinished_tool_step(&input));
     }
 
     #[test]
