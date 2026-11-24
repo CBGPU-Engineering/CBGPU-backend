@@ -168,7 +168,17 @@ fn function_tools(input: &Value) -> Option<&[Value]> {
         .filter(|tools| !tools.is_empty() && input["tool_choice"] != "none")
 }
 
-fn start_server(socket: &Path) -> Result<Server> {
+fn has_image_messages(body: &Value) -> bool {
+    body["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|message| message["content"].as_array())
+        .flatten()
+        .any(|part| part["type"] == "image_url")
+}
+
+fn start_server(socket: &Path, use_vision: bool) -> Result<Server> {
     let runtime = configured_path("CBGPU_AI_QWEN38_RUNTIME")?;
     let assets = configured_path("CBGPU_AI_QWEN38_ASSETS")?;
     let assigned = std::env::var("CUDA_VISIBLE_DEVICES").unwrap_or_default();
@@ -199,12 +209,17 @@ fn start_server(socket: &Path) -> Result<Server> {
         .args(["--device", "Vulkan0", "--host"])
         .arg(socket)
         .arg("--model")
-        .arg(assets.join(MODEL))
-        .arg("--mmproj")
-        .arg(assets.join(PROJECTOR))
+        .arg(assets.join(MODEL));
+    if use_vision {
+        command
+            .arg("--mmproj")
+            .arg(assets.join(PROJECTOR))
+            .args(["--mmproj-device", "none"]);
+    } else {
+        command.arg("--no-mmproj");
+    }
+    command
         .args([
-            "--mmproj-device",
-            "none",
             "--gpu-layers",
             "99",
             "--ctx-size",
@@ -261,7 +276,7 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         &folder.join("progress.json"),
         &json!({"message":"Loading Qwen3.8"}),
     )?;
-    let mut server = start_server(&socket)?;
+    let mut server = start_server(&socket, has_image_messages(&body))?;
     let client = Client::builder()
         .unix_socket(socket)
         .no_proxy()
@@ -457,7 +472,13 @@ mod tests {
     #[test]
     fn permits_embedded_images_only() {
         let mut input = json!({"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}]}]});
-        assert!(payload(&input).is_ok());
+        assert!(has_image_messages(&payload(&input).unwrap()));
+        assert!(!has_image_messages(
+            &payload(&json!({
+                "messages":[{"role":"user","content":[{"type":"text","text":"Read this text."}]}]
+            }))
+            .unwrap()
+        ));
         input["messages"][0]["content"][0]["image_url"]["url"] = json!("http://localhost/private");
         assert!(payload(&input).is_err());
     }
