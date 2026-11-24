@@ -16,6 +16,7 @@ const CONTEXT: &str = "65536";
 const MODEL: &str = "Qwen3.8-27B-UD-IQ4_XS.gguf";
 const PROJECTOR: &str = "mmproj-F16.gguf";
 const MAX_OUTPUT: u64 = 4096;
+const TOOL_FORMAT_ERROR: &str = "Qwen3.8 did not return a valid tool response";
 
 struct Server(Child);
 impl Drop for Server {
@@ -72,6 +73,20 @@ fn payload(input: &Value) -> Result<Value> {
             if original["content"].is_array() {
                 message["content"] = original["content"].clone();
             }
+        }
+        // The model template takes the leading system message as its main
+        // instructions. Keep the caller's instructions and tool protocol together.
+        let system_count = prepared
+            .iter()
+            .take_while(|message| message["role"] == "system")
+            .count();
+        if system_count > 1 {
+            let system = prepared
+                .drain(..system_count)
+                .filter_map(|message| message["content"].as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            prepared.insert(0, json!({"role":"system","content":system}));
         }
         body["messages"] = json!(prepared);
     }
@@ -168,7 +183,7 @@ fn start_server(socket: &Path) -> Result<Server> {
 }
 
 pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
-    let body = payload(input)?;
+    let mut body = payload(input)?;
     let directory = tempfile::Builder::new()
         .prefix("cbgpu-qwen-")
         .tempdir_in("/tmp")
@@ -212,20 +227,38 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         &folder.join("progress.json"),
         &json!({"message":"Processing the conversation with Qwen3.8"}),
     )?;
-    let response = client
-        .post("http://localhost/v1/chat/completions")
-        .json(&body)
-        .send()
-        .map_err(|_| "Qwen3.8 inference was interrupted")?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "Qwen3.8 rejected the request (HTTP {})",
-            response.status().as_u16()
+    let generate = |body: &Value| {
+        let response = client
+            .post("http://localhost/v1/chat/completions")
+            .json(body)
+            .send()
+            .map_err(|_| "Qwen3.8 inference was interrupted")?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "Qwen3.8 rejected the request (HTTP {})",
+                response.status().as_u16()
+            ));
+        }
+        completion(BufReader::new(response), input, |text| {
+            atomic(&folder.join("partial.json"), &json!({"text":text}))
+        })
+    };
+    let result = generate(&body);
+    if result
+        .as_ref()
+        .err()
+        .is_some_and(|error| error == TOOL_FORMAT_ERROR)
+    {
+        // The first response has never been exposed to the caller. Retry once
+        // on the same running model with a strict output-format reminder.
+        let system = body["messages"][0]["content"].as_str().unwrap_or_default();
+        body["messages"][0]["content"] = json!(format!(
+            "{system}\n\nOutput only the exact JSON object described above. Start with {{ and end with }}. Do not use Markdown, XML, commentary or extra keys."
         ));
+        body["temperature"] = json!(0);
+        return generate(&body);
     }
-    completion(BufReader::new(response), input, |text| {
-        atomic(&folder.join("partial.json"), &json!({"text":text}))
-    })
+    result
 }
 
 fn completion(
@@ -286,8 +319,22 @@ fn completion(
             .strip_prefix("```json")
             .and_then(|value| value.strip_suffix("```"))
             .unwrap_or(raw);
-        let (message, reason) = protocol::decode(raw, tools, &input["tool_choice"])?;
-        (message, reason.to_owned())
+        match protocol::decode(raw.trim(), tools, &input["tool_choice"]) {
+            Ok((message, reason)) => (message, reason.to_owned()),
+            Err(_)
+                if input["tool_choice"] == "auto"
+                    && !raw.is_empty()
+                    && !raw.starts_with(['{', '['])
+                    && !raw.contains("<tool_call")
+                    && !raw.contains("<function=")
+                    && !raw.contains("\"type\":\"tool\"") =>
+            {
+                // OpenAI's auto mode accepts a natural-language answer even
+                // when the caller also advertises tools.
+                (json!({"role":"assistant","content":text}), finish)
+            }
+            Err(_) => return Err(TOOL_FORMAT_ERROR.into()),
+        }
     } else {
         if !text.is_empty() {
             partial(&text)?;
@@ -345,5 +392,43 @@ mod tests {
         assert!(payload(&input).is_ok());
         input["messages"][0]["content"][0]["image_url"]["url"] = json!("http://localhost/private");
         assert!(payload(&input).is_err());
+    }
+
+    #[test]
+    fn accepts_plain_auto_answers_but_never_unvalidated_tool_calls() {
+        let auto = json!({"tool_choice":"auto","tools":[{"function":{"name":"example"}}]});
+        let mut required = auto.clone();
+        required["tool_choice"] = json!("required");
+        let stream = |text: &str| {
+            let chunk = json!({"choices":[{"delta":{"content":text},"finish_reason":"stop"}]});
+            format!("data: {chunk}\n\ndata: [DONE]\n\n")
+        };
+        let plain = stream("안녕하세요. 무엇을 도와드릴까요?");
+        let result = completion(plain.as_bytes(), &auto, |_| panic!("Buffer tool output")).unwrap();
+        assert_eq!(
+            result["choices"][0]["message"]["content"],
+            "안녕하세요. 무엇을 도와드릴까요?"
+        );
+        assert!(completion(plain.as_bytes(), &required, |_| Ok(())).is_err());
+        for text in [
+            "<tool_call>example</tool_call>",
+            r#"{"type":"tool","name":"other","arguments":{}}"#,
+        ] {
+            assert!(completion(stream(text).as_bytes(), &auto, |_| Ok(())).is_err());
+        }
+    }
+
+    #[test]
+    fn keeps_caller_system_instructions_with_the_tool_contract() {
+        let input = json!({
+            "messages":[{"role":"system","content":"Caller instructions"},{"role":"user","content":"Hello"}],
+            "tools":[{"function":{"name":"example"}}],"tool_choice":"auto",
+        });
+        let request = payload(&input).unwrap();
+        let messages = request["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        let system = messages[0]["content"].as_str().unwrap();
+        assert!(system.contains("Caller instructions"));
+        assert!(system.contains("EXACTLY one JSON object"));
     }
 }
