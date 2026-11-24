@@ -10,6 +10,7 @@ import {ownerCanExecute,ownerResourceDecision,deploymentResourceEnforced} from '
 import {frontendWorkerCommand,composeWorkerCommand} from '../rust/compat/worker-command.mts';
 import type {LegacyDatabase} from '../tooling/contracts.mts';
 import {startComposeManager} from './compose-manager.mts';
+import { parseTerminalCommand, runProjectTerminal } from './project-terminal.mts';
 import http from 'node:http';import dns from 'node:dns/promises';import net from 'node:net';import readline from 'node:readline';import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {spawn,execFile,execFileSync} from 'node:child_process';import {promisify} from 'node:util';import {DatabaseSync} from 'node:sqlite';import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url)),statePaths=deploymentStatePaths(HERE),PRIVATE=statePaths.privateRoot,DATA=statePaths.data,BACKEND=deploymentBackendOrigin(),LISTEN_PORT=deploymentListenPort();fs.mkdirSync(DATA,{recursive:true,mode:0o700});
 const frontendWorker=frontendWorkerCommand({here:HERE});
@@ -57,7 +58,31 @@ async function resolveProxyTarget(host){const effective=await customHost(host)||
 function tunnelOptions(host){return{intervalMs:deploymentResourceEnforced()?5000:0,headers:headers=>requestCookieBoundary({...headers,'x-forwarded-host':host,'x-forwarded-proto':'https'}),responseHeaders:headers=>({...responseCookieBoundary(headers,host),'X-Content-Type-Options':'nosniff'})}}
 function proxy(req,res,target){const host=(req.headers.host||'').split(':')[0];return proxyDeploymentHTTP(req,res,target,()=>resolveProxyTarget(host),tunnelOptions(host))}
 const server=http.createServer(async(req,res)=>{const host=(req.headers.host||'').split(':')[0];try{if(req.url==='/health'&&host==='127.0.0.1')return json(res,200,{ok:true,commit:process.env.CBGPU_RELEASE_SHA||'legacy'});if((host==='deploy.internal'||(host==='127.0.0.1'&&req.headers['x-cbgpu-deploy-key']))){if(!sameSecret(req.headers['x-cbgpu-deploy-key']))return json(res,403,{message:'Forbidden'});const owner=req.headers['x-cbgpu-owner'];if(typeof owner!=='string'||!/^[a-f0-9-]{36}$/.test(owner))return json(res,403,{message:'Forbidden'});const url=new URL(req.url,'http://deploy.internal'),parts=url.pathname.split('/').filter(Boolean);if(parts[0]==='compose'){
- const id=parts[1],resourceOwner=String(req.headers['x-cbgpu-resource-owner']||'');if(!/^[a-f0-9-]{36}$/.test(id||'')||!roleFor('server',id,resourceOwner,owner))fail('Project not found',404);if(req.method==='GET')return json(res,200,composeManager.summary(id));if(req.method==='DELETE'&&resourceOwner===owner){await composeManager.stop(id);return json(res,200,{ok:true})}fail('Forbidden',403)
+ const id=parts[1],resourceOwner=String(req.headers['x-cbgpu-resource-owner']||'');if(!/^[a-f0-9-]{36}$/.test(id||'')||!roleFor('server',id,resourceOwner,owner))fail('Project not found',404);
+ if(parts.length===3&&parts[2]==='terminal'){
+  if(resourceOwner!==owner)fail('Only the project owner can use this terminal',403);
+  if(!['GET','POST'].includes(req.method||''))fail('Method not allowed',405);
+  const input=req.method==='POST'?parseTerminalCommand(await body(req)):null;
+  if(!process.env.SERVICE_ROLE_KEY)fail('Project authorization unavailable',503);
+  let project;
+  try{
+   const metadata=await fetch(BACKEND+'/rest/v1/cpu_projects?select=id,user_id,env_vars,allocation_school_id,deploy_requested_at&id=eq.'+id+'&user_id=eq.'+owner+'&status=eq.approved',{headers:{apikey:process.env.SERVICE_ROLE_KEY,Authorization:'Bearer '+process.env.SERVICE_ROLE_KEY},signal:AbortSignal.timeout(2500)});
+   if(!metadata.ok)throw Error();
+   [project]=await metadata.json();
+  }catch{fail('Project authorization unavailable',503)}
+  if(!project||project.id!==id||project.user_id!==owner)fail('Project not found',404);
+  if(project.env_vars?.CBGPU_DEPLOY_ENGINE!=='compose')fail('Terminal access requires a Docker Compose deployment',409);
+  const access=project.allocation_school_id?await composeManager.centralDecision(project):await ownerResourceDecision(owner);
+  if(access!=='ALLOW')fail('Server compute access is unavailable',access==='DENY'?403:503);
+  const target=composeManager.terminalTarget(project);
+  if(!target)fail('The current Compose deployment is not ready',409);
+  if(!input)return json(res,200,{services:target.services,gateway:target.gateway});
+  const result=await runProjectTerminal(id,target.services,input,project.env_vars||{});
+  console.info(JSON.stringify({event:'project_terminal',project_id:id,owner_id:owner,service:input.service,exit_code:result.exit_code}));
+  return json(res,200,result);
+ }
+ if(parts.length!==2)fail('Not found',404);
+ if(req.method==='GET')return json(res,200,composeManager.summary(id));if(req.method==='DELETE'&&resourceOwner===owner){await composeManager.stop(id);return json(res,200,{ok:true})}fail('Forbidden',403)
  }if(parts[0]==='domains'){
  const kind=parts[1],id=parts[2];if(!['frontend','server'].includes(kind)||!/^[a-f0-9-]{36}$/.test(id||''))fail('Not found',404);const resourceOwner=kind==='frontend'?db.prepare('SELECT owner FROM projects WHERE id=? AND deleted=0').get(id)?.owner:String(req.headers['x-cbgpu-resource-owner']||'');if(!resourceOwner||!roleFor(kind,id,resourceOwner,owner))fail('Project not found',404);const isOwner=resourceOwner===owner;
  if(req.method==='GET')return json(res,200,{can_manage:isOwner,domains:db.prepare('SELECT * FROM custom_domains WHERE resource_type=? AND project_id=? ORDER BY created_at').all(kind,id).map(domainOutput)});if(!isOwner)fail('Only the owner can manage domains',403);const v=await body(req);
