@@ -9,23 +9,36 @@ MODEL_ID = 'cbgpu-qwen38'
 CONTEXT_WINDOW = 65536
 MAX_OUTPUT = 4096
 IMAGE_PREFIXES = ('data:image/png;base64,', 'data:image/jpeg;base64,', 'data:image/webp;base64,')
-RUNTIME_ENV = ('CBGPU_AI_QWEN38_RUNTIME', 'CBGPU_AI_QWEN38_ASSETS',
-               'CBGPU_AI_QWEN38_GPU_UUID', 'CBGPU_AI_QWEN38_VULKAN_INDEX')
+RUNTIME_ENV = ('CBGPU_AI_QWEN38_RUNTIME', 'CBGPU_AI_QWEN38_ASSETS')
+
+
+def devices():
+    raw = os.environ.get('CBGPU_AI_QWEN38_DEVICES')
+    if raw is None:
+        raw = os.environ.get('CBGPU_AI_QWEN38_GPU_UUID', '') + '=' + os.environ.get('CBGPU_AI_QWEN38_VULKAN_INDEX', '')
+    result = {}
+    for item in raw.split(','):
+        gpu, _, index = item.partition('=')
+        if not re.fullmatch(r'GPU-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', gpu) or index not in ('0', '1', '2', '3'):
+            return {}
+        if gpu in result or index in result.values():
+            return {}
+        result[gpu] = index
+    return result
 
 
 def config():
     env = {key: os.environ.get(key, '') for key in RUNTIME_ENV}
     worker = Path(os.environ.get('CBGPU_AI_QWEN38_WORKER', ''))
     runtime, assets = map(Path, (env[RUNTIME_ENV[0]], env[RUNTIME_ENV[1]]))
-    gpu, index = env[RUNTIME_ENV[2]], env[RUNTIME_ENV[3]]
+    enabled = devices()
     if not (worker.is_absolute() and worker.is_file() and os.access(worker, os.X_OK)
             and runtime.is_absolute() and assets.is_absolute()
             and all(path.is_file() for path in (runtime / 'llama-server', runtime / 'vulkan/libggml-vulkan.so',
                     assets / 'Qwen3.8-27B-UD-IQ4_XS.gguf', assets / 'mmproj-F16.gguf'))
-            and re.fullmatch(r'GPU-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', gpu)
-            and index in ('0', '1', '2', '3')):
+            and enabled):
         return None
-    return worker, gpu, env
+    return worker, enabled, env
 
 
 def image_dimensions(header, data):

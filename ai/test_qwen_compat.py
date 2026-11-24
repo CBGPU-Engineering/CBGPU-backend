@@ -8,10 +8,20 @@ from unittest.mock import patch
 
 from catalog import models
 from core import Failure, Store
-from qwen_compat import MODEL_ID, multipart
+from qwen_compat import MODEL_ID, devices, multipart
 
 
 class QwenCompatibilityTest(unittest.TestCase):
+    def test_device_map_uses_distinct_uuid_and_vulkan_pairs(self):
+        first = 'GPU-00000000-0000-4000-8000-000000000001'
+        second = 'GPU-00000000-0000-4000-8000-000000000002'
+        with patch.dict(os.environ, {'CBGPU_AI_QWEN38_DEVICES': f'{first}=0,{second}=2'}, clear=True):
+            self.assertEqual(devices(), {first: '0', second: '2'})
+        with patch.dict(os.environ, {'CBGPU_AI_QWEN38_DEVICES': f'{first}=0,{second}=0'}, clear=True):
+            self.assertEqual(devices(), {})
+        with patch.dict(os.environ, {'CBGPU_AI_QWEN38_GPU_UUID': first, 'CBGPU_AI_QWEN38_VULKAN_INDEX': '0'}, clear=True):
+            self.assertEqual(devices(), {first: '0'})
+
     def test_qwen_requires_a_configured_worker(self):
         with patch.dict(os.environ, {}, clear=True), tempfile.TemporaryDirectory() as state:
             self.assertNotIn(MODEL_ID, [entry['id'] for entry in models(state)])

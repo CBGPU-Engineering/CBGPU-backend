@@ -9,6 +9,7 @@ class Scheduler:
         self.store=store;self.python=Path(python);self.runner=Path(runner);self.image=image;self.stop_event=threading.Event();self.current=None;self.health={'status':'starting','gpus':[]};self.last_owner=None
         with store.lock:
             if not hasattr(store,'ai_leases'):store.ai_leases={};store.ai_active=set();store.ai_cleanup_lock=threading.Lock()
+            if not hasattr(store,'ai_active_owners'):store.ai_active_owners={}
     def update(self,id,state,**fields):
         fields={'state':state,'updated':time.time(),**fields};self.store.execute('UPDATE jobs SET '+','.join(k+'=?' for k in fields)+' WHERE id=?',(*fields.values(),id))
     def start(self,recover=True):
@@ -34,6 +35,8 @@ class Scheduler:
                     if not compatible:continue
                     # Rotate queued owners within the same priority.
                     priority=compatible[0]['kind']=='python';same=[c for c in compatible if (c['kind']=='python')==priority]
+                    with self.store.lock:active_owners=set(self.store.ai_active_owners.values())
+                    same=[job for job in same if job['owner'] not in active_owners] or same
                     job=next((c for c in same if c['owner']!=self.last_owner),same[0]);self.last_owner=job['owner']
                     if not resources.owner_allowed(job['owner']):self.update(job['id'],'cancelled',error='Account access is no longer available')
                     else:self.execute(job,free)
@@ -52,7 +55,7 @@ class Scheduler:
             self.stop_event.wait(2)
     def can_run(self,job,gpu):
         config=qwen_compat.config()
-        if not config or job['kind']!='chat' or gpu['uuid']==config[1]:return True
+        if not config or job['kind']!='chat' or gpu['uuid'] in config[1]:return True
         try:
             data=json.loads((self.store.root/'jobs'/job['id']/'input.json').read_text())
         except (OSError,ValueError):
@@ -100,6 +103,7 @@ class Scheduler:
         with self.store.lock:
             if gpu['uuid'] in self.store.ai_leases or job['id'] in self.store.ai_active:return
             self.store.ai_leases[gpu['uuid']]=job['id'];self.store.ai_active.add(job['id'])
+            self.store.ai_active_owners[job['id']]=job['owner']
         folder=self.store.root/'jobs'/job['id'];process=None;log=None;start=time.monotonic();elapsed=0;state='failed';message='The task could not start';failed_start=False;self.current=job['id']
         try:
             # Recheck immediately before acquiring a device; the dashboard may have changed during file preparation.
@@ -151,6 +155,7 @@ class Scheduler:
             self.current=None
             with self.store.lock:
                 self.store.ai_leases.pop(gpu['uuid'],None);self.store.ai_active.discard(job['id'])
+                self.store.ai_active_owners.pop(job['id'],None)
             if process:
                 self.store.execute('UPDATE jobs SET runtime=runtime+? WHERE id=?',(max(elapsed,time.monotonic()-start),job['id']))
             latest=self.store.execute('SELECT state FROM jobs WHERE id=?',(job['id'],)).fetchone()

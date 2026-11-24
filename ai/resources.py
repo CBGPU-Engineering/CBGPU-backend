@@ -50,9 +50,10 @@ def start_task(store,job,gpu,python,runner,image):
         args=['docker','run','--rm','--name',name,'--label','cbgpu.ai.managed=true','--label','cbgpu.ai.job='+job['id'],'--gpus','device='+gpu['uuid'],'--network','none','--cap-drop','ALL','--security-opt','no-new-privileges','--read-only','--pids-limit','256','--memory',os.environ.get('CBGPU_AI_PYTHON_MEMORY','32g'),'--cpus',os.environ.get('CBGPU_AI_PYTHON_CPUS','16'),'--shm-size','256m','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--user',f'{os.getuid()}:{os.getgid()}','--mount',f'type=bind,src={workspace},dst=/workspace','--workdir','/workspace','--env','HOME=/tmp','--env','PYTHONDONTWRITEBYTECODE=1','--env','OMP_NUM_THREADS=8',image,'python','-u',data.get('entrypoint','main.py')]
     elif job['kind']=='chat' and data.get('model')==qwen_compat.MODEL_ID:
         config=qwen_compat.config()
-        if not config or gpu['uuid']!=config[1]:
+        if not config or gpu['uuid'] not in config[1]:
             log.close();raise Failure('Qwen3.8 is temporarily unavailable',503)
-        worker,_,runtime_env=config
+        worker,devices,runtime_env=config
+        runtime_env.update(CBGPU_AI_QWEN38_GPU_UUID=gpu['uuid'],CBGPU_AI_QWEN38_VULKAN_INDEX=devices[gpu['uuid']])
         args=[str(worker),'chat',str(folder),str(store.root)]
     else:
         args=[str(python),str(runner),job['kind'],str(folder),str(store.root)]
