@@ -133,4 +133,21 @@ fn registration_guest_rollover_project_continuity_and_replay() {
         db.sql(snapshot),
         "migration replay changed accounts"
     );
+    let signup_review = std::fs::read_to_string(
+        root.join("supabase/migrations/20261124122757_signup_review_after_activation.sql"),
+    )
+    .unwrap();
+    db.sql(&signup_review);
+    db.sql(&signup_review);
+    assert_eq!(
+        before,
+        db.sql(snapshot),
+        "signup migration touched existing accounts"
+    );
+    assert!(
+        db.sql(
+            &std::fs::read_to_string(root.join("schema/tests/accounts/signup-review.sql")).unwrap()
+        )
+        .contains("SIGNUP_REVIEW_PASSED")
+    );
 }

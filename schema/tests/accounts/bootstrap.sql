@@ -1,7 +1,7 @@
 -- Synthetic isolated PostgreSQL only; no production fixtures or personal data.
 create role anon nologin;create role authenticated nologin;create role service_role nologin;
 create schema auth;
-create table auth.users(id uuid primary key,raw_app_meta_data jsonb default '{}',raw_user_meta_data jsonb default '{}',deleted_at timestamptz,banned_until timestamptz,email text unique);
+create table auth.users(id uuid primary key,raw_app_meta_data jsonb default '{}',raw_user_meta_data jsonb default '{}',deleted_at timestamptz,banned_until timestamptz,email text unique,email_confirmed_at timestamptz);
 create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
 create function auth.role() returns text language sql stable as $$select nullif(current_setting('request.jwt.claim.role',true),'')$$;
 create table public.profiles(id uuid primary key references auth.users(id),full_name text,student_id text,student_id_school_year integer,is_admin boolean default false,is_approved boolean);
