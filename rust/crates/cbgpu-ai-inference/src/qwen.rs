@@ -66,8 +66,7 @@ fn payload(input: &Value) -> Result<Value> {
     let mut body = json!({"messages":messages,"max_tokens":output,"stream":true,
         "stream_options":{"include_usage":true},"temperature":0.2});
     if let Some(tools) = function_tools(input) {
-        // Reuse the validated JSON tool protocol. This model's bundled template stalls
-        // when llama-server compiles its native tool grammar.
+        // Keep the documented API envelope independent of the bundled chat template.
         let (mut prepared, _) = protocol::prepare(messages, tools, &input["tool_choice"]);
         for (original, message) in messages.iter().zip(prepared.iter_mut().skip(1)) {
             if original["content"].is_array() {
@@ -81,16 +80,85 @@ fn payload(input: &Value) -> Result<Value> {
             .take_while(|message| message["role"] == "system")
             .count();
         if system_count > 1 {
-            let system = prepared
+            let mut systems = prepared
                 .drain(..system_count)
                 .filter_map(|message| message["content"].as_str().map(str::to_owned))
-                .collect::<Vec<_>>()
-                .join("\n\n");
+                .collect::<Vec<_>>();
+            systems.rotate_left(1);
+            let system = systems.join("\n\n");
             prepared.insert(0, json!({"role":"system","content":system}));
         }
         body["messages"] = json!(prepared);
+        body["response_format"] = tool_response_format(tools, &input["tool_choice"]);
+        body["temperature"] = json!(0);
     }
     Ok(body)
+}
+
+fn tool_response_format(tools: &[Value], choice: &Value) -> Value {
+    let mut alternatives = tools
+        .iter()
+        .filter(|tool| {
+            !choice.is_object() || tool["function"]["name"] == choice["function"]["name"]
+        })
+        .map(|tool| {
+            let function = &tool["function"];
+            json!({
+                "type":"object","properties":{
+                    "type":{"const":"tool"},"name":{"const":function["name"]},
+                    "arguments":argument_schema(&function["parameters"])
+                },
+                "required":["type","name","arguments"],"additionalProperties":false
+            })
+        })
+        .collect::<Vec<_>>();
+    if choice != "required" && !choice.is_object() {
+        alternatives.push(json!({
+            "type":"object","properties":{"type":{"const":"final"},"content":{"type":"string"}},
+            "required":["type","content"],"additionalProperties":false
+        }));
+    }
+    let schema = if let [only] = alternatives.as_slice() {
+        only.clone()
+    } else {
+        json!({"anyOf":alternatives})
+    };
+    json!({"type":"json_schema","json_schema":{"name":"agent_response","strict":true,"schema":schema}})
+}
+
+fn argument_schema(parameters: &Value) -> Value {
+    // Compile the tool's top-level fields. Keep nested client-specific schemas
+    // in the prompt and avoid evaluating arbitrary schema references.
+    let mut properties = serde_json::Map::new();
+    if let Some(source) = parameters["properties"].as_object() {
+        for (name, field) in source {
+            let constraint = match field["type"].as_str() {
+                Some(
+                    kind @ ("string" | "number" | "integer" | "boolean" | "null" | "array"
+                    | "object"),
+                ) => {
+                    json!({"type":kind})
+                }
+                _ => json!({}),
+            };
+            properties.insert(name.clone(), constraint);
+        }
+    }
+    let required = parameters["required"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    for name in &required {
+        properties
+            .entry(name.to_string())
+            .or_insert_with(|| json!({}));
+    }
+    json!({
+        "type":"object","properties":properties,"required":required,
+        "additionalProperties":parameters["additionalProperties"].as_bool().unwrap_or(true)
+    })
 }
 
 fn function_tools(input: &Value) -> Option<&[Value]> {
@@ -430,5 +498,22 @@ mod tests {
         let system = messages[0]["content"].as_str().unwrap();
         assert!(system.contains("Caller instructions"));
         assert!(system.contains("EXACTLY one JSON object"));
+        assert!(system.ends_with("}]"));
+        assert_eq!(request["response_format"]["type"], "json_schema");
+        let required = tool_response_format(
+            &[
+                json!({"function":{"name":"first"}}),
+                json!({"function":{"name":"second","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}}),
+            ],
+            &json!({"type":"function","function":{"name":"second"}}),
+        );
+        assert_eq!(
+            required["json_schema"]["schema"]["properties"]["name"]["const"],
+            json!("second")
+        );
+        assert_eq!(
+            required["json_schema"]["schema"]["properties"]["arguments"]["required"],
+            json!(["command"])
+        );
     }
 }
