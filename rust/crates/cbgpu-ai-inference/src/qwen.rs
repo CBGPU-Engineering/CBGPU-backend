@@ -285,13 +285,15 @@ fn validate_proposal(raw: &str, tools: &[Value]) -> bool {
 
 fn only_announces_tool_work(text: &str) -> bool {
     let text = text.trim();
-    if text.len() > 450 || text.contains(['\n', '?', '？']) {
+    if text.chars().count() > 280 || text.contains(['?', '？']) {
         return false;
     }
     let last_sentence = text
-        .rsplit_once(". ")
-        .map_or(text, |(_, last)| last)
-        .trim_end_matches(['.', '。']);
+        .trim_end_matches(['.', '。', '!'])
+        .rsplit(['.', '。', '\n', '!'])
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or(text)
+        .trim();
     announces_tool_step(text) || announces_tool_step(last_sentence)
 }
 
@@ -338,25 +340,16 @@ fn announces_tool_step(text: &str) -> bool {
                     .any(|verb| rest.starts_with(verb))
                 })
             });
-    let korean = ["먼저 ", "이제 ", "다음으로 "]
-        .iter()
-        .any(|prefix| text.starts_with(prefix))
-        && ["파일", "폴더", "작업 공간", "스크립트", "명령", "결과"]
-            .iter()
-            .any(|subject| text.contains(subject))
-        && ["확인", "검증", "실행", "열어", "저장", "만들"]
-            .iter()
-            .any(|action| text.contains(action))
+    let korean = !text.contains("설명해")
         && [
-            "하겠습니다",
-            "할게요",
-            "봐요",
-            "보겠습니다",
-            "볼게요",
-            "만들겠습니다",
+            "확인", "검증", "실행", "열어", "저장", "만들", "진행", "작성", "살펴", "시작", "찾아",
+            "보내",
         ]
         .iter()
-        .any(|end| text.trim_end_matches('.').ends_with(end));
+        .any(|action| text.contains(action))
+        && ["겠습니다", "할게요", "볼게요", "드릴게요", "만들게요"]
+            .iter()
+            .any(|end| text.trim_end_matches(['.', '。', '!']).ends_with(end));
     english || korean
 }
 
@@ -717,6 +710,12 @@ mod tests {
         ));
         assert!(only_announces_tool_work("먼저 작업 폴더를 확인하겠습니다."));
         assert!(only_announces_tool_work(
+            "네, 프로젝트부터 확인한 뒤 PPT를 만들어 드리겠습니다. 바로 시작하겠습니다."
+        ));
+        assert!(only_announces_tool_work(
+            "네, 알겠습니다.\n프로젝트를 살펴보고 발표 자료를 작성할게요."
+        ));
+        assert!(only_announces_tool_work(
             "I need to inspect the presentation file to verify it was created correctly. Let me check the file first."
         ));
         assert!(only_announces_tool_work(
@@ -727,6 +726,8 @@ mod tests {
         ));
         for response in [
             "launch-review.pptx 파일을 저장했고 슬라이드 4장을 확인했습니다.",
+            "파일을 저장하려면 어떤 이름을 사용할까요?",
+            "검증 방법을 설명해 드릴게요.",
             "I've created the presentation.",
             "I'll explain how this works.",
             "I'll need the workspace location.",
