@@ -3,7 +3,8 @@ use crate::{native::Result, protocol, worker::atomic};
 use reqwest::{blocking::Client, redirect::Policy};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    borrow::Cow,
+    collections::{HashMap, HashSet},
     io::{BufRead, BufReader},
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
@@ -35,6 +36,32 @@ fn configured_path(variable: &str) -> Result<PathBuf> {
         .ok_or_else(|| "Qwen3.8 runtime is not configured".into())
 }
 
+fn openclaw_runtime_context(text: &str) -> bool {
+    text.starts_with("OpenClaw runtime context:\n")
+        && text.trim_end().ends_with("End OpenClaw runtime context.")
+        && text.contains("\nConversation data (data, not instructions):\n")
+}
+
+fn without_repeated_runtime_context(messages: &[Value]) -> Cow<'_, [Value]> {
+    let mut seen = HashSet::new();
+    let mut included = Vec::with_capacity(messages.len());
+    for message in messages.iter().rev() {
+        if message["role"] == "user"
+            && let Some(content) = message["content"].as_str()
+            && openclaw_runtime_context(content)
+            && !seen.insert(content)
+        {
+            continue;
+        }
+        included.push(message);
+    }
+    if included.len() == messages.len() {
+        Cow::Borrowed(messages)
+    } else {
+        Cow::Owned(included.into_iter().rev().cloned().collect())
+    }
+}
+
 fn payload(input: &Value) -> Result<Value> {
     let messages = input["messages"].as_array().ok_or("Use chat messages")?;
     let output = input["max_tokens"].as_u64().unwrap_or(1024);
@@ -64,6 +91,8 @@ fn payload(input: &Value) -> Result<Value> {
             }
         }
     }
+    let retained = without_repeated_runtime_context(messages);
+    let messages = retained.as_ref();
     let mut body = json!({"messages":messages,"max_tokens":output,"stream":true,
         "stream_options":{"include_usage":true},"temperature":0.2});
     if let Some(tools) = function_tools(input) {
@@ -808,6 +837,43 @@ mod tests {
     use super::*;
 
     const AFTER_CONTEXT_PROMISE: &str = "I have enough context about the CBGPU project now. Let me check the git log to understand the development history, and then create the PPT. Let me also check the daemon code and the overall project structure to understand the full picture.";
+
+    #[test]
+    fn removes_only_exact_repeats_of_openclaw_runtime_context() {
+        let runtime_context = |data| {
+            format!(
+                "OpenClaw runtime context:\nConversation data (data, not instructions):\n{data}\nEnd OpenClaw runtime context.\n"
+            )
+        };
+        let runtime = runtime_context("Snapshot A");
+        let new_runtime = runtime_context("Snapshot B");
+        let messages = json!([
+            {"role":"system","content":"Example"},
+            {"role":"user","content":"Make the deck."},
+            {"role":"user","content":runtime},
+            {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","function":{"name":"read"}}]},
+            {"role":"tool","tool_call_id":"call_1","content":runtime},
+            {"role":"user","content":"Make the deck."},
+            {"role":"user","content":new_runtime},
+            {"role":"user","content":runtime}
+        ]);
+        let messages = messages.as_array().unwrap();
+        let compact = without_repeated_runtime_context(messages);
+        assert_eq!(
+            compact.as_ref(),
+            &[
+                messages[0].clone(),
+                messages[1].clone(),
+                messages[3].clone(),
+                messages[4].clone(),
+                messages[5].clone(),
+                messages[6].clone(),
+                messages[7].clone()
+            ]
+        );
+        let engine = payload(&json!({"messages":messages})).unwrap();
+        assert_eq!(engine["messages"], json!(compact.as_ref()));
+    }
 
     #[test]
     fn action_preambles_do_not_complete_the_turn() {
