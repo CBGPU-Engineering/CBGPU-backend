@@ -74,7 +74,6 @@ fn payload(input: &Value) -> Result<Value> {
             }
         }
         body["messages"] = json!(prepared);
-        body["response_format"] = json!({"type":"json_object"});
     }
     Ok(body)
 }
@@ -278,7 +277,12 @@ fn completion(
         .filter(|_| done)
         .ok_or("Qwen3.8 output did not finish")?;
     let (message, finish) = if let Some(tools) = tools {
-        let (message, reason) = protocol::decode(&text, tools, &input["tool_choice"])?;
+        let raw = text.trim();
+        let raw = raw
+            .strip_prefix("```json")
+            .and_then(|value| value.strip_suffix("```"))
+            .unwrap_or(raw);
+        let (message, reason) = protocol::decode(raw, tools, &input["tool_choice"])?;
         (message, reason.to_owned())
     } else {
         if !text.is_empty() {
