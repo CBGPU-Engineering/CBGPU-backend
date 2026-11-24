@@ -10,4 +10,5 @@
 mod ffi;
 pub mod native;
 pub mod protocol;
+mod qwen;
 pub mod worker;
