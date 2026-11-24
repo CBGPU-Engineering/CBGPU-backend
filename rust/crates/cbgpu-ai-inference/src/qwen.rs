@@ -194,6 +194,10 @@ fn argument_schema(parameters: &Value) -> Value {
     })
 }
 
+fn auto_tool_choice(input: &Value) -> bool {
+    input["tool_choice"].is_null() || input["tool_choice"] == "auto"
+}
+
 fn function_tools(input: &Value) -> Option<&[Value]> {
     input["tools"]
         .as_array()
@@ -552,7 +556,7 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         })
     };
     let result = generate(&body, input);
-    let needs_tool = (input["tool_choice"].is_null() || input["tool_choice"] == "auto")
+    let needs_tool = auto_tool_choice(input)
         && function_tools(input).is_some()
         && result.as_ref().is_ok_and(|value| {
             value["choices"][0]["finish_reason"] == "stop"
@@ -654,7 +658,7 @@ fn completion(
         match decoded {
             Ok((message, reason)) if validate_proposal(raw, tools) => (message, reason.to_owned()),
             Err(_)
-                if input["tool_choice"] == "auto"
+                if auto_tool_choice(input)
                     && !raw.is_empty()
                     && !raw.starts_with(['{', '['])
                     && !raw.contains("<tool_call")
