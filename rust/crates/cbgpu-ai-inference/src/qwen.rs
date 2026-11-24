@@ -99,9 +99,13 @@ fn start_server(socket: &Path) -> Result<Server> {
         return Err("Qwen3.8 requires its scheduler-assigned GPU".into());
     }
     let mut command = Command::new(runtime.join("llama-server"));
+    let cache = assets.join("runtime-cache");
+    std::fs::create_dir_all(&cache).map_err(|_| "Cannot initialize the Qwen3.8 GPU cache")?;
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
+        .env("XDG_CACHE_HOME", &cache)
+        .env("__GL_SHADER_DISK_CACHE_PATH", &cache)
         .env("CUDA_VISIBLE_DEVICES", "-1")
         .env("GGML_VK_VISIBLE_DEVICES", index)
         .env(
