@@ -285,11 +285,19 @@ fn validate_proposal(raw: &str, tools: &[Value]) -> bool {
 
 fn only_announces_tool_work(text: &str) -> bool {
     let text = text.trim();
-    if text.len() > 450 || text.contains(['\n', '?']) {
+    if text.len() > 450 || text.contains(['\n', '?', '？']) {
         return false;
     }
+    let last_sentence = text
+        .rsplit_once(". ")
+        .map_or(text, |(_, last)| last)
+        .trim_end_matches(['.', '。']);
+    announces_tool_step(text) || announces_tool_step(last_sentence)
+}
+
+fn announces_tool_step(text: &str) -> bool {
     let normalized = text.to_lowercase().replace('’', "'");
-    let names_work = [
+    let english = [
         "workspace",
         "file",
         "folder",
@@ -303,12 +311,12 @@ fn only_announces_tool_work(text: &str) -> bool {
         "report",
     ]
     .iter()
-    .any(|subject| normalized.contains(subject));
-    names_work
+    .any(|subject| normalized.contains(subject))
         && ["i'll ", "i will ", "let me ", "i need to "]
             .iter()
             .any(|prefix| {
                 normalized.strip_prefix(prefix).is_some_and(|rest| {
+                    let rest = rest.strip_prefix("now ").unwrap_or(rest);
                     [
                         "check ",
                         "inspect ",
@@ -320,6 +328,7 @@ fn only_announces_tool_work(text: &str) -> bool {
                         "make ",
                         "write ",
                         "save ",
+                        "verify ",
                         "start by check",
                         "start by inspect",
                         "start by read",
@@ -328,14 +337,27 @@ fn only_announces_tool_work(text: &str) -> bool {
                     .iter()
                     .any(|verb| rest.starts_with(verb))
                 })
-            })
-        || (text.starts_with("먼저 ")
-            && ["파일", "폴더", "작업 공간"]
-                .iter()
-                .any(|noun| text.contains(noun))
-            && ["확인할게요", "확인하겠습니다", "확인해 볼게요"]
-                .iter()
-                .any(|end| text.trim_end_matches('.').ends_with(end)))
+            });
+    let korean = ["먼저 ", "이제 ", "다음으로 "]
+        .iter()
+        .any(|prefix| text.starts_with(prefix))
+        && ["파일", "폴더", "작업 공간", "스크립트", "명령", "결과"]
+            .iter()
+            .any(|subject| text.contains(subject))
+        && ["확인", "검증", "실행", "열어", "저장", "만들"]
+            .iter()
+            .any(|action| text.contains(action))
+        && [
+            "하겠습니다",
+            "할게요",
+            "봐요",
+            "보겠습니다",
+            "볼게요",
+            "만들겠습니다",
+        ]
+        .iter()
+        .any(|end| text.trim_end_matches('.').ends_with(end));
+    english || korean
 }
 
 fn answers_with_source_instead_of_file(input: &Value, text: &str) -> bool {
@@ -697,7 +719,14 @@ mod tests {
         assert!(only_announces_tool_work(
             "I need to inspect the presentation file to verify it was created correctly. Let me check the file first."
         ));
+        assert!(only_announces_tool_work(
+            "launch-review.pptx 파일은 4장의 슬라이드로 저장되었습니다. 이제 파일을 다시 열어 검증하겠습니다."
+        ));
+        assert!(only_announces_tool_work(
+            "The script saved the presentation. I will now open the file."
+        ));
         for response in [
+            "launch-review.pptx 파일을 저장했고 슬라이드 4장을 확인했습니다.",
             "I've created the presentation.",
             "I'll explain how this works.",
             "I'll need the workspace location.",
