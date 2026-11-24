@@ -562,6 +562,44 @@ fn answers_with_source_instead_of_file(input: &Value, text: &str) -> bool {
     artifact && action
 }
 
+fn saved_file_needs_verification(input: &Value) -> bool {
+    let Some(messages) = input["messages"].as_array() else {
+        return false;
+    };
+    let mut messages = messages.iter().rev();
+    let Some(result) = messages.next().filter(|message| message["role"] == "tool") else {
+        return false;
+    };
+    let Some(result) = result["content"]
+        .as_str()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    else {
+        return false;
+    };
+    if !matches!(
+        result["status"].as_str(),
+        Some("saved" | "written" | "created")
+    ) || !["file", "path"].iter().any(|key| result[key].is_string())
+    {
+        return false;
+    }
+    messages
+        .filter(|message| message["role"] == "user")
+        .filter_map(|message| message["content"].as_str())
+        .find(|text| !openclaw_runtime_context(text))
+        .is_some_and(|request| {
+            let request = request.to_lowercase();
+            ["verify", "inspect", "check", "reopen", "open"]
+                .iter()
+                .any(|verb| request.contains(&format!("{verb} the file")))
+                || request.contains("open it again")
+                || request.contains("열어 확인")
+                || request.contains("열어서 확인")
+                || (request.contains("파일") || request.contains(".pptx"))
+                    && (request.contains("검증해") || request.contains("다시 열"))
+        })
+}
+
 fn has_image_messages(body: &Value) -> bool {
     body["messages"]
         .as_array()
@@ -733,6 +771,7 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         })
     };
     let result = generate(&body, input);
+    let verify_saved_file = saved_file_needs_verification(input);
     let needs_tool = auto_tool_choice(input)
         && function_tools(input).is_some()
         && result.as_ref().is_ok_and(|value| {
@@ -740,7 +779,8 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
                 && value["choices"][0]["message"]["content"]
                     .as_str()
                     .is_some_and(|text| {
-                        only_announces_tool_work(text)
+                        verify_saved_file
+                            || only_announces_tool_work(text)
                             || answers_with_source_instead_of_file(input, text)
                     })
         });
@@ -757,8 +797,11 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
     if needs_tool || repair_error.is_some() {
         // Preserve the prefix so the same worker can reuse the prompt cache.
         let force_tool = needs_tool || repair_error.is_some() && !auto_tool_choice(input);
-        let correction =
-            repair_error.unwrap_or("Continue the existing task by running the next tool step.");
+        let correction = repair_error.unwrap_or(if verify_saved_file {
+            "Inspect the existing saved file with a tool before reporting completion. Do not regenerate it."
+        } else {
+            "Continue the existing task by running the next tool step."
+        });
         let instruction = if force_tool {
             "Return one valid tool call in the requested JSON format."
         } else {
@@ -1031,6 +1074,21 @@ mod tests {
         ] {
             assert!(!validate_proposal(&payload(bad), &tools));
         }
+    }
+
+    #[test]
+    fn verification_requested_by_the_caller_requires_a_step_after_saving() {
+        let mut request = json!({"messages":[
+            {"role":"user","content":"발표자료를 만들고 저장된 파일을 다시 열어 확인해 줘."},
+            {"role":"assistant","content":null},
+            {"role":"tool","content":r#"{"status":"saved","file":"slides.pptx"}"#}
+        ]});
+        assert!(saved_file_needs_verification(&request));
+        request["messages"][2]["content"] = json!(r#"{"status":"verified","file":"slides.pptx"}"#);
+        assert!(!saved_file_needs_verification(&request));
+        request["messages"][2]["content"] = json!(r#"{"status":"saved","file":"slides.pptx"}"#);
+        request["messages"][0]["content"] = json!("발표자료를 저장해 줘.");
+        assert!(!saved_file_needs_verification(&request));
     }
 
     #[test]
