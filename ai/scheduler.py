@@ -2,6 +2,7 @@ import json, os, shutil, subprocess, threading, time, logging, errno
 from pathlib import Path
 from core import atomic_json,Failure
 import resources
+import qwen_compat
 
 class Scheduler:
     def __init__(self,store,python,runner,image):
@@ -28,13 +29,15 @@ class Scheduler:
                 phase='queue'
                 candidates=[dict(r) for r in self.store.execute("SELECT * FROM jobs WHERE state IN ('queued','paused') ORDER BY CASE WHEN kind='python' THEN 1 ELSE 0 END,updated,created").fetchall()]
                 candidates=[c for c in candidates if c['id'] not in self.store.ai_active and self.document_ready(c)]
-                free=next((c for c in cards if c['available'] and c['uuid'] not in self.store.ai_leases),None)
-                if candidates and free:
+                for free in (c for c in cards if c['available'] and c['uuid'] not in self.store.ai_leases):
+                    compatible=[c for c in candidates if self.can_run(c,free)]
+                    if not compatible:continue
                     # Rotate queued owners within the same priority.
-                    priority=candidates[0]['kind']=='python';same=[c for c in candidates if (c['kind']=='python')==priority]
+                    priority=compatible[0]['kind']=='python';same=[c for c in compatible if (c['kind']=='python')==priority]
                     job=next((c for c in same if c['owner']!=self.last_owner),same[0]);self.last_owner=job['owner']
-                    if not resources.owner_allowed(job['owner']):self.update(job['id'],'cancelled',error='Account access is no longer available');continue
-                    self.execute(job,free)
+                    if not resources.owner_allowed(job['owner']):self.update(job['id'],'cancelled',error='Account access is no longer available')
+                    else:self.execute(job,free)
+                    break
                 phase='maintenance'
                 self.cleanup()
             except Exception as error:
@@ -47,6 +50,14 @@ class Scheduler:
                     logging.getLogger(__name__).error('AI scheduler %s failed (%s)',phase,type(error).__name__)
                     self.last_fault=fault;self.last_fault_at=time.monotonic()
             self.stop_event.wait(2)
+    def can_run(self,job,gpu):
+        config=qwen_compat.config()
+        if not config or job['kind']!='chat' or gpu['uuid']==config[1]:return True
+        try:
+            data=json.loads((self.store.root/'jobs'/job['id']/'input.json').read_text())
+        except (OSError,ValueError):
+            return True  # Allow the normal worker to report the invalid task.
+        return data.get('model')!=qwen_compat.MODEL_ID
     def document_ready(self,job):
         if job['kind']!='document':return True
         folder=self.store.root/'jobs'/job['id']

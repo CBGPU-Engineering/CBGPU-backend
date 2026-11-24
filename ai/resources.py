@@ -2,6 +2,7 @@
 import csv, datetime, json, os, signal, subprocess, time
 from pathlib import Path
 from core import Failure, valid_id
+import qwen_compat
 
 def run(args,timeout=8):
     return subprocess.run(args,capture_output=True,text=True,timeout=timeout,check=True).stdout
@@ -43,14 +44,22 @@ def prepare_workspace(store,job,data):
 
 def start_task(store,job,gpu,python,runner,image):
     folder=store.root/'jobs'/job['id'];data=json.loads((folder/'input.json').read_text());log=(folder/'log.txt').open('ab',buffering=0)
+    runtime_env={}
     if job['kind']=='python':
         workspace=prepare_workspace(store,job,data);name='cbgpu-ai-'+job['id']
         args=['docker','run','--rm','--name',name,'--label','cbgpu.ai.managed=true','--label','cbgpu.ai.job='+job['id'],'--gpus','device='+gpu['uuid'],'--network','none','--cap-drop','ALL','--security-opt','no-new-privileges','--read-only','--pids-limit','256','--memory',os.environ.get('CBGPU_AI_PYTHON_MEMORY','32g'),'--cpus',os.environ.get('CBGPU_AI_PYTHON_CPUS','16'),'--shm-size','256m','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--user',f'{os.getuid()}:{os.getgid()}','--mount',f'type=bind,src={workspace},dst=/workspace','--workdir','/workspace','--env','HOME=/tmp','--env','PYTHONDONTWRITEBYTECODE=1','--env','OMP_NUM_THREADS=8',image,'python','-u',data.get('entrypoint','main.py')]
+    elif job['kind']=='chat' and data.get('model')==qwen_compat.MODEL_ID:
+        config=qwen_compat.config()
+        if not config or gpu['uuid']!=config[1]:
+            log.close();raise Failure('Qwen3.8 is temporarily unavailable',503)
+        worker,_,runtime_env=config
+        args=[str(worker),'chat',str(folder),str(store.root)]
     else:
         args=[str(python),str(runner),job['kind'],str(folder),str(store.root)]
     site=Path(python).parent.parent/'lib/python3.12/site-packages'
     libraries=[str(p) for p in (site/'nvidia').glob('*/lib')]+[str(site/'torch/lib')]
     env={'PATH':'/usr/bin:/bin','HOME':str(store.root),'LANG':'C.UTF-8','CUDA_VISIBLE_DEVICES':gpu['uuid'],'OMP_NUM_THREADS':'8','OPENBLAS_NUM_THREADS':'4','MKL_NUM_THREADS':'4','TOKENIZERS_PARALLELISM':'false','HF_HUB_OFFLINE':'1','HF_HUB_DISABLE_TELEMETRY':'1','LD_LIBRARY_PATH':':'.join(libraries)}
+    env.update(runtime_env)
     try:process=subprocess.Popen(['prlimit','--fsize=67108864','--',*args],stdout=log,stderr=log,env=env,start_new_session=True)
     except BaseException:log.close();raise
     return process,log
@@ -72,6 +81,15 @@ def stop_task(process,job):
             process.wait(3)
 
 def own_pids(process,job):
+    if job['kind']=='chat':
+        # The native chat worker can start an isolated local inference child in this group.
+        pids={process.pid}
+        for path in Path('/proc').glob('[0-9]*/stat'):
+            try:
+                fields=path.read_text(errors='replace').rsplit(')',1)[1].split()
+                if int(fields[2])==process.pid:pids.add(int(path.parent.name))
+            except (OSError,IndexError,ValueError):continue
+        return pids
     if job['kind']!='python':return {process.pid}
     try:return {int(p.strip()) for p in run(['docker','top','cbgpu-ai-'+job['id'],'-eo','pid'],3).splitlines()[1:] if p.strip().isdigit()}
     except (subprocess.SubprocessError,OSError):return set()

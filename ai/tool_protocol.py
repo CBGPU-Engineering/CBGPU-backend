@@ -1,12 +1,12 @@
 """Text-only tool protocol adapter. It returns proposals; never executes a tool on the host."""
 import json,re,uuid
 
-def validate_tools(tools):
-    if not isinstance(tools,list) or not 1<=len(tools)<=20 or len(json.dumps(tools))>24000:raise ValueError('Use 1–20 tool definitions within 24 KB')
+def validate_tools(tools,maximum=20,size=24000):
+    if not isinstance(tools,list) or not 1<=len(tools)<=maximum or len(json.dumps(tools))>size:raise ValueError(f'Use 1–{maximum} tool definitions within {size//1000} KB')
     names=set()
     for tool in tools:
         f=tool.get('function',{}) if isinstance(tool,dict) else {}
-        if tool.get('type')!='function' or not isinstance(f.get('name'),str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,63}',f['name']) or f['name'] in names or not isinstance(f.get('parameters',{}),dict):raise ValueError('Invalid function tool')
+        if not isinstance(tool,dict) or not isinstance(f,dict) or tool.get('type')!='function' or not isinstance(f.get('name'),str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,63}',f['name']) or f['name'] in names or not isinstance(f.get('parameters',{}),dict):raise ValueError('Invalid function tool')
         names.add(f['name'])
     return tools
 

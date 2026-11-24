@@ -3,6 +3,7 @@ import hashlib, hmac, json, os, secrets, sqlite3, threading, time, uuid, zipfile
 from pathlib import Path, PurePosixPath
 from catalog import TEXT_MODELS
 from tool_protocol import validate_tools
+import qwen_compat
 
 KINDS={'chat','transcribe','embed','search','document','python'}
 LIVE={'queued','running','paused'}
@@ -116,22 +117,41 @@ class Store:
     def validate(self,owner,kind,data):
         if kind not in KINDS or not isinstance(data,dict): raise Failure('Unsupported task')
         if kind=='chat':
+            model=data.get('model','cbgpu-chat')
+            qwen=model==qwen_compat.MODEL_ID
+            if qwen and not qwen_compat.config():raise Failure('Qwen3.8 is temporarily unavailable',503)
+            if not qwen and (not isinstance(model,str) or model not in TEXT_MODELS):raise Failure('Unknown chat model')
             messages=data.get('messages');limit=data.get('max_tokens',512)
-            if not isinstance(messages,list) or not 1<=len(messages)<=32 or any(not isinstance(m,dict) or m.get('role') not in ['system','user','assistant','tool'] or not (isinstance(m.get('content'),str) or m.get('role')=='assistant' and m.get('content') is None and isinstance(m.get('tool_calls'),list)) for m in messages): raise Failure('Use text chat messages')
-            if any(m['role']=='tool' and not isinstance(m.get('tool_call_id'),str) for m in messages):raise Failure('Tool results require tool_call_id')
-            if sum(len(m.get('content') or '')+len(json.dumps(m.get('tool_calls') or [])) for m in messages)>48000: raise Failure('Text is too long',413)
-            if type(limit)!=int or not 1<=limit<=(4096 if data.get('model')=='cbgpu-oss' else 2048): raise Failure('max_tokens exceeds the selected model limit')
+            if not isinstance(messages,list) or not 1<=len(messages)<=(256 if qwen else 32):raise Failure('Use chat messages')
+            cleaned=[];length=0;images=0
+            for message in messages:
+                if not isinstance(message,dict) or message.get('role') not in ['system','user','assistant','tool']:raise Failure('Use chat messages')
+                item={k:message[k] for k in ['role','content','tool_calls','tool_call_id'] if k in message}
+                content=message.get('content')
+                if isinstance(content,str):length+=len(content)
+                elif item['role']=='assistant' and content is None and isinstance(item.get('tool_calls'),list):pass
+                elif qwen and item['role']=='user':
+                    try:item['content'],count,num_images=qwen_compat.multipart(content)
+                    except ValueError as error:raise Failure(str(error)) from error
+                    length+=count;images+=num_images
+                else:raise Failure('Use text chat messages')
+                if item['role']=='tool' and not isinstance(item.get('tool_call_id'),str):raise Failure('Tool results require tool_call_id')
+                history=item.get('tool_calls') or []
+                if not isinstance(history,list) or len(json.dumps(history))>24000:raise Failure('Invalid tool history')
+                length+=len(json.dumps(history));cleaned.append(item)
+            if images>4:raise Failure('Attach at most 4 images per request',413)
+            if length>(1_000_000 if qwen else 48000):raise Failure('Text is too long',413)
+            if type(limit)!=int or not 1<=limit<=(qwen_compat.MAX_OUTPUT if qwen else 4096 if model=='cbgpu-oss' else 2048): raise Failure('max_tokens exceeds the selected model limit')
             effort=data.get('effort','medium')
             if effort not in ['low','medium','high']:raise Failure('Use low, medium or high effort')
-            model=data.get('model','cbgpu-chat')
-            if model not in TEXT_MODELS:raise Failure('Unknown chat model')
             tools=data.get('tools') or [];choice=data.get('tool_choice','auto')
             try:
-                if tools:validate_tools(tools)
+                if tools:
+                    if qwen:validate_tools(tools,96,250_000)
+                    else:validate_tools(tools)
                 if choice not in ['auto','none','required'] and not (isinstance(choice,dict) and choice.get('type')=='function' and choice.get('function',{}).get('name') in {t['function']['name'] for t in tools}):raise ValueError('Unsupported tool_choice')
-                if any(m.get('tool_calls') and (not isinstance(m['tool_calls'],list) or len(json.dumps(m['tool_calls']))>24000) for m in messages):raise ValueError('Invalid tool history')
             except (ValueError,TypeError,AttributeError) as e:raise Failure(str(e))
-            data={'messages':[{k:m[k] for k in ['role','content','tool_calls','tool_call_id'] if k in m} for m in messages],'max_tokens':limit,'model':model,'effort':effort,'tools':tools,'tool_choice':choice}
+            data={'messages':cleaned,'max_tokens':limit,'model':model,'effort':effort,'tools':tools,'tool_choice':choice}
         elif kind in ['embed','search']:
             if kind=='embed':
                 texts=data.get('input');texts=[texts] if isinstance(texts,str) else texts
