@@ -70,7 +70,7 @@ fn payload(input: &Value) -> Result<Value> {
         let (mut prepared, _) = protocol::prepare(messages, tools, &input["tool_choice"]);
         let instruction = prepared[0]["content"].as_str().unwrap_or_default();
         prepared[0]["content"] = json!(format!(
-            "When the requested work needs a tool, call it in this turn. Use a final answer for a result, a real clarification question, or a task that needs no tool. A promise to inspect, create or run something is not a completed result.\n\n{instruction}"
+            "When the requested work needs a tool, call it in this turn. Use a final answer for a result, a real clarification question, or a task that needs no tool. To create a requested file, pass the source or content as a tool argument. Pasting it into the final response will not save the file. A promise to inspect, create or run something is not a completed result.\n\n{instruction}"
         ));
         for (original, message) in messages.iter().zip(prepared.iter_mut().skip(1)) {
             if original["content"].is_array() {
@@ -303,6 +303,54 @@ fn only_announces_tool_work(text: &str) -> bool {
                 .any(|end| text.trim_end_matches('.').ends_with(end)))
 }
 
+fn answers_with_source_instead_of_file(input: &Value, text: &str) -> bool {
+    let source = text.trim_start();
+    if !["```", "#!", "import ", "from ", "def ", "<!DOCTYPE", "{\n"]
+        .iter()
+        .any(|prefix| source.starts_with(prefix))
+    {
+        return false;
+    }
+    let Some(request) = input["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .rev()
+        .find(|message| message["role"] == "user")
+        .and_then(|message| message["content"].as_str())
+    else {
+        return false;
+    };
+    let request = request.trim().to_lowercase();
+    let artifact = [
+        ".pptx",
+        ".pdf",
+        ".docx",
+        ".xlsx",
+        ".csv",
+        ".zip",
+        "presentation file",
+        "파일로",
+        "파일 만들어",
+    ]
+    .iter()
+    .any(|hint| request.contains(hint));
+    let action = [
+        "make ",
+        "create ",
+        "generate ",
+        "build ",
+        "export ",
+        "save ",
+    ]
+    .iter()
+    .any(|verb| request.starts_with(verb))
+        || ["만들어 줘", "만들어줘", "저장해 줘", "저장해줘"]
+            .iter()
+            .any(|verb| request.contains(verb));
+    artifact && action
+}
+
 fn has_image_messages(body: &Value) -> bool {
     body["messages"]
         .as_array()
@@ -474,7 +522,10 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
             value["choices"][0]["finish_reason"] == "stop"
                 && value["choices"][0]["message"]["content"]
                     .as_str()
-                    .is_some_and(only_announces_tool_work)
+                    .is_some_and(|text| {
+                        only_announces_tool_work(text)
+                            || answers_with_source_instead_of_file(input, text)
+                    })
         });
     let invalid_tool = result
         .as_ref()
@@ -611,6 +662,25 @@ mod tests {
         ] {
             assert!(!only_announces_tool_work(response));
         }
+    }
+
+    #[test]
+    fn raw_source_is_repaired_when_a_file_was_requested() {
+        let file = json!({"messages":[{"role":"user","content":"Make slides.pptx and save it."}]});
+        let example =
+            json!({"messages":[{"role":"user","content":"How do I make slides.pptx in Python?"}]});
+        assert!(answers_with_source_instead_of_file(
+            &file,
+            "from pptx import Presentation"
+        ));
+        assert!(!answers_with_source_instead_of_file(
+            &example,
+            "from pptx import Presentation"
+        ));
+        assert!(!answers_with_source_instead_of_file(
+            &file,
+            "Created slides.pptx."
+        ));
     }
 
     #[test]
