@@ -17,8 +17,9 @@ pub const MODEL_ID: &str = "cbgpu-qwen38";
 const CONTEXT: &str = "65536";
 const MODEL: &str = "Qwen3.8-27B-UD-IQ4_XS.gguf";
 const PROJECTOR: &str = "mmproj-F16.gguf";
-const MAX_OUTPUT: u64 = 4096;
+const MAX_OUTPUT: u64 = 8192;
 const DETAILED_TOOL_SCHEMA_LIMIT: usize = 8;
+const COMPACT_ARGUMENT_CHARS: u64 = 1200;
 const TOOL_FORMAT_ERROR: &str = "Qwen3.8 did not return a valid tool response";
 const TOOL_LENGTH_ERROR: &str = "Qwen3.8 tool response reached the output limit";
 const TOOL_REPAIR_INSTRUCTION: &str = "Take only the next small, executable step. Use one tool. If writing a long file or script, write a short section first and continue in subsequent tool calls. Do not regenerate a full artifact in one argument. Include only the fields required by the tool. If the task is finished and its result is verified, answer briefly instead.";
@@ -195,13 +196,21 @@ fn payload(input: &Value) -> Result<Value> {
             prepared.insert(0, json!({"role":"system","content":system}));
         }
         body["messages"] = json!(prepared);
-        body["response_format"] = tool_response_format(tools, &input["tool_choice"], false);
+        body["response_format"] =
+            tool_response_format(tools, &input["tool_choice"], ToolGrammar::Ordinary);
         body["temperature"] = json!(0);
     }
     Ok(body)
 }
 
-fn tool_response_format(tools: &[Value], choice: &Value, repair_arguments: bool) -> Value {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToolGrammar {
+    Ordinary,
+    Repair,
+    Compact,
+}
+
+fn tool_response_format(tools: &[Value], choice: &Value, grammar: ToolGrammar) -> Value {
     let tool_envelope = |name: Value, arguments: Value| {
         json!({
             "type":"object","properties":{
@@ -210,33 +219,49 @@ fn tool_response_format(tools: &[Value], choice: &Value, repair_arguments: bool)
             "required":["type","name","arguments"],"additionalProperties":false
         })
     };
-    let mut alternatives =
-        if tools.len() > DETAILED_TOOL_SCHEMA_LIMIT && !choice.is_object() && !repair_arguments {
-            // A single envelope avoids compiling one large grammar branch per tool.
-            // Every proposed argument still passes validation before leaving the worker.
-            let names = tools
-                .iter()
-                .map(|tool| &tool["function"]["name"])
-                .collect::<Vec<_>>();
-            vec![tool_envelope(
-                json!({"enum":names}),
-                json!({"type":"object","additionalProperties":true}),
-            )]
-        } else {
-            tools
-                .iter()
-                .filter(|tool| {
-                    !choice.is_object() || tool["function"]["name"] == choice["function"]["name"]
-                })
-                .map(|tool| {
-                    let function = &tool["function"];
-                    tool_envelope(
-                        json!({"const":function["name"]}),
-                        argument_schema(&function["parameters"]),
-                    )
-                })
-                .collect::<Vec<_>>()
-        };
+    let mut alternatives = if tools.len() > DETAILED_TOOL_SCHEMA_LIMIT
+        && !choice.is_object()
+        && grammar == ToolGrammar::Ordinary
+    {
+        // A single envelope avoids compiling one large grammar branch per tool.
+        // Every proposed argument still passes validation before leaving the worker.
+        let names = tools
+            .iter()
+            .map(|tool| &tool["function"]["name"])
+            .collect::<Vec<_>>();
+        vec![tool_envelope(
+            json!({"enum":names}),
+            json!({"type":"object","additionalProperties":true}),
+        )]
+    } else {
+        tools
+            .iter()
+            .filter(|tool| {
+                !choice.is_object() || tool["function"]["name"] == choice["function"]["name"]
+            })
+            .map(|tool| {
+                let function = &tool["function"];
+                let parameters = &function["parameters"];
+                let mut arguments = argument_schema(parameters);
+                if grammar == ToolGrammar::Compact {
+                    for key in ["command", "content", "input"] {
+                        let field = &parameters["properties"][key];
+                        let min = field["minLength"].as_u64().unwrap_or_default();
+                        let max = field["maxLength"]
+                            .as_u64()
+                            .unwrap_or(COMPACT_ARGUMENT_CHARS);
+                        if let Some(target) = arguments["properties"].get_mut(key)
+                            && target["type"] == "string"
+                            && min <= COMPACT_ARGUMENT_CHARS
+                        {
+                            target["maxLength"] = json!(max.min(COMPACT_ARGUMENT_CHARS));
+                        }
+                    }
+                }
+                tool_envelope(json!({"const":function["name"]}), arguments)
+            })
+            .collect::<Vec<_>>()
+    };
     if choice != "required" && !choice.is_object() {
         alternatives.push(json!({
             "type":"object","properties":{"type":{"const":"final"},"content":{"type":"string"}},
@@ -840,6 +865,9 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
     let invalid_arguments = result
         .as_ref()
         .is_err_and(|error| error == TOOL_FORMAT_ERROR);
+    let output_exhausted = result
+        .as_ref()
+        .is_err_and(|error| error == TOOL_LENGTH_ERROR);
     let repair_error = result
         .as_ref()
         .err()
@@ -874,11 +902,20 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         if needs_tool {
             turn["tool_choice"] = json!("required");
         }
-        if needs_tool || invalid_arguments {
+        if needs_tool || invalid_arguments || output_exhausted {
+            let grammar = if output_exhausted
+                && (auto_tool_choice(input) || input["tool_choice"] == "required")
+            {
+                ToolGrammar::Compact
+            } else if invalid_arguments {
+                ToolGrammar::Repair
+            } else {
+                ToolGrammar::Ordinary
+            };
             body["response_format"] = tool_response_format(
                 function_tools(&turn).ok_or(TOOL_FORMAT_ERROR)?,
                 &turn["tool_choice"],
-                invalid_arguments,
+                grammar,
             );
         }
         return generate(&body, &turn);
@@ -1207,7 +1244,7 @@ mod tests {
                 }}})
             })
             .collect::<Vec<_>>();
-        let format = tool_response_format(&tools, &json!("auto"), false);
+        let format = tool_response_format(&tools, &json!("auto"), ToolGrammar::Ordinary);
         let alternatives = format["json_schema"]["schema"]["anyOf"].as_array().unwrap();
         assert_eq!(alternatives.len(), 2);
         assert_eq!(
@@ -1217,7 +1254,7 @@ mod tests {
                 .len(),
             16
         );
-        let format = tool_response_format(&tools, &json!("auto"), true);
+        let format = tool_response_format(&tools, &json!("auto"), ToolGrammar::Repair);
         assert_eq!(
             format["json_schema"]["schema"]["anyOf"]
                 .as_array()
@@ -1242,6 +1279,29 @@ mod tests {
             completion(valid.as_bytes(), &input, |_| Ok(())).unwrap()["choices"][0]["finish_reason"],
             "tool_calls"
         );
+    }
+
+    #[test]
+    fn output_limit_repair_requires_a_small_tool_step() {
+        let call = json!({"function":{"name":"write","parameters":{"type":"object",
+            "required":["content"],"properties":{"content":{"type":"string"},
+            "input":{"type":"string","minLength":2048},"command":{"type":"string","maxLength":100}}
+        }}});
+        let caps = |mode| {
+            tool_response_format(std::slice::from_ref(&call), &json!("required"), mode)
+                ["json_schema"]["schema"]["properties"]["arguments"]["properties"].clone()
+        };
+        let compact = caps(ToolGrammar::Compact);
+        assert_eq!(compact["content"]["maxLength"], COMPACT_ARGUMENT_CHARS);
+        assert_eq!(compact["command"]["maxLength"], 100);
+        assert!(compact["input"]["maxLength"].is_null());
+        assert!(caps(ToolGrammar::Ordinary)["content"]["maxLength"].is_null());
+        let input =
+            json!({"messages":[{"role":"user","content":"A test request"}],"max_tokens":8192});
+        assert_eq!(payload(&input).unwrap()["max_tokens"], 8192);
+        let mut oversized = input;
+        oversized["max_tokens"] = json!(8193);
+        assert!(payload(&oversized).is_err());
     }
 
     #[test]
@@ -1378,7 +1438,7 @@ mod tests {
                 json!({"function":{"name":"second","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}}),
             ],
             &json!({"type":"function","function":{"name":"second"}}),
-            false,
+            ToolGrammar::Ordinary,
         );
         assert_eq!(
             required["json_schema"]["schema"]["properties"]["name"]["const"],
