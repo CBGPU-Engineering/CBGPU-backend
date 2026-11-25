@@ -397,7 +397,10 @@ pub fn normalize(
         let limit = memory * weights[name] / total;
         service["mem_limit"] = json!(limit);
         service["memswap_limit"] = json!(limit);
-        service["pids_limit"] = json!(256);
+        let requested_pids = service["pids_limit"]
+            .as_i64()
+            .or_else(|| service["deploy"]["resources"]["limits"]["pids"].as_i64());
+        service["pids_limit"] = json!(requested_pids.unwrap_or(-1));
         service["security_opt"] = json!(["no-new-privileges:true"]);
         service["oom_kill_disable"] = json!(false);
         service["logging"] =

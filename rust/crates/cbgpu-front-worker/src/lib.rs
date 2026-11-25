@@ -391,7 +391,7 @@ fn isolated_args(name: &str, source: &Path, relative: &str, runtime: bool) -> Ve
         "--memory-swap".into(),
         if runtime { "768m" } else { "2g" }.into(),
         "--pids-limit".into(),
-        if runtime { "128" } else { "256" }.into(),
+        if runtime { "-1" } else { "256" }.into(),
         "--cap-drop".into(),
         "ALL".into(),
         "--security-opt".into(),
