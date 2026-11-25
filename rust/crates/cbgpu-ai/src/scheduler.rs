@@ -339,7 +339,7 @@ impl Scheduler {
         let limit = if job["kind"] == "python" {
             job["input"]["minutes"].as_f64().unwrap_or(60.) * 60.
         } else {
-            3600.
+            f64::INFINITY
         };
         let mut last_permission = Instant::now();
         let mut last_workspace = Instant::now();

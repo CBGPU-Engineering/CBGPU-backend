@@ -766,7 +766,6 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
     });
     let input = continuation.as_ref().unwrap_or(input);
     let mut body = payload(input)?;
-    let generation_deadline = Instant::now() + Duration::from_secs(660);
     let directory = tempfile::Builder::new()
         .prefix("cbgpu-qwen-")
         .tempdir_in("/tmp")
@@ -782,17 +781,15 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         .no_proxy()
         .redirect(Policy::none())
         .connect_timeout(Duration::from_secs(1))
-        .timeout(Duration::from_secs(660))
+        .timeout(None)
         .build()
         .map_err(|_| "Cannot initialize private inference client")?;
-    let deadline = Instant::now() + Duration::from_secs(75);
     loop {
         if server
             .0
             .try_wait()
             .map_err(|_| "Cannot check Qwen3.8 worker")?
             .is_some()
-            || Instant::now() >= deadline
         {
             return Err("Qwen3.8 failed to load on the assigned GPU".into());
         }
@@ -811,13 +808,8 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         &json!({"message":"Processing the conversation with Qwen3.8"}),
     )?;
     let generate = |body: &Value, turn: &Value| {
-        let remaining = generation_deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err("Qwen3.8 inference timed out".into());
-        }
         let response = client
             .post("http://localhost/v1/chat/completions")
-            .timeout(remaining)
             .json(body)
             .send()
             .map_err(|_| "Qwen3.8 inference was interrupted")?;
