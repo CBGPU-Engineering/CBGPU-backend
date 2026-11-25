@@ -18,6 +18,7 @@ const CONTEXT: &str = "65536";
 const MODEL: &str = "Qwen3.8-27B-UD-IQ4_XS.gguf";
 const PROJECTOR: &str = "mmproj-F16.gguf";
 const MAX_OUTPUT: u64 = 4096;
+const DETAILED_TOOL_SCHEMA_LIMIT: usize = 8;
 const TOOL_FORMAT_ERROR: &str = "Qwen3.8 did not return a valid tool response";
 const TOOL_LENGTH_ERROR: &str = "Qwen3.8 tool response reached the output limit";
 const TOOL_REPAIR_INSTRUCTION: &str = "Take only the next small, executable step. Use one tool. If writing a long file or script, write a short section first and continue in subsequent tool calls. Do not regenerate a full artifact in one argument. Include only the fields required by the tool. If the task is finished and its result is verified, answer briefly instead.";
@@ -45,25 +46,66 @@ fn openclaw_runtime_context(text: &str) -> bool {
 }
 
 fn without_repeated_runtime_context(messages: &[Value]) -> Cow<'_, [Value]> {
-    let mut seen = HashSet::new();
+    const END: &str = "\nEnd OpenClaw runtime context.";
+    let mut seen_frames = HashSet::new();
+    let mut seen_sections = HashSet::new();
     let mut included = Vec::with_capacity(messages.len());
+    let mut changed = false;
     for message in messages.iter().rev() {
-        if message["role"] == "user"
-            && let Some(content) = message["content"].as_str()
-            && openclaw_runtime_context(content)
-            && !seen.insert(content)
-        {
+        let Some(content) = message["content"]
+            .as_str()
+            .filter(|text| message["role"] == "user" && openclaw_runtime_context(text))
+        else {
+            included.push(Cow::Borrowed(message));
+            continue;
+        };
+        if !seen_frames.insert(content) {
+            changed = true;
             continue;
         }
-        included.push(message);
+        let Some(frame) = content.trim_end().strip_suffix(END) else {
+            included.push(Cow::Borrowed(message));
+            continue;
+        };
+        let mut sections = frame.split("\n\n");
+        let head = sections.next().unwrap_or(frame);
+        let sections = sections.collect::<Vec<_>>();
+        // A fenced tool or data block can contain blank lines. Leave this frame
+        // untouched unless all sections end outside their fenced blocks.
+        if sections.is_empty()
+            || frame
+                .split("\n\n")
+                .any(|section| section.matches("```").count() % 2 != 0)
+        {
+            included.push(Cow::Borrowed(message));
+            continue;
+        }
+        let distinct = sections
+            .iter()
+            .copied()
+            .filter(|section| !seen_sections.contains(section))
+            .collect::<Vec<_>>();
+        seen_sections.extend(sections.iter().copied());
+        if distinct.len() == sections.len() {
+            included.push(Cow::Borrowed(message));
+        } else {
+            let mut message = message.clone();
+            let mut compact = std::iter::once(head)
+                .chain(distinct)
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            compact.push_str(END);
+            message["content"] = json!(compact);
+            included.push(Cow::Owned(message));
+            changed = true;
+        }
     }
-    if included.len() == messages.len() {
-        Cow::Borrowed(messages)
+    if changed {
+        Cow::Owned(included.into_iter().rev().map(Cow::into_owned).collect())
     } else {
-        Cow::Owned(included.into_iter().rev().cloned().collect())
+        Cow::Borrowed(messages)
     }
 }
-
 fn payload(input: &Value) -> Result<Value> {
     let messages = input["messages"].as_array().ok_or("Use chat messages")?;
     let output = input["max_tokens"].as_u64().unwrap_or(1024);
@@ -153,29 +195,48 @@ fn payload(input: &Value) -> Result<Value> {
             prepared.insert(0, json!({"role":"system","content":system}));
         }
         body["messages"] = json!(prepared);
-        body["response_format"] = tool_response_format(tools, &input["tool_choice"]);
+        body["response_format"] = tool_response_format(tools, &input["tool_choice"], false);
         body["temperature"] = json!(0);
     }
     Ok(body)
 }
 
-fn tool_response_format(tools: &[Value], choice: &Value) -> Value {
-    let mut alternatives = tools
-        .iter()
-        .filter(|tool| {
-            !choice.is_object() || tool["function"]["name"] == choice["function"]["name"]
+fn tool_response_format(tools: &[Value], choice: &Value, repair_arguments: bool) -> Value {
+    let tool_envelope = |name: Value, arguments: Value| {
+        json!({
+            "type":"object","properties":{
+                "type":{"const":"tool"},"name":name,"arguments":arguments
+            },
+            "required":["type","name","arguments"],"additionalProperties":false
         })
-        .map(|tool| {
-            let function = &tool["function"];
-            json!({
-                "type":"object","properties":{
-                    "type":{"const":"tool"},"name":{"const":function["name"]},
-                    "arguments":argument_schema(&function["parameters"])
-                },
-                "required":["type","name","arguments"],"additionalProperties":false
-            })
-        })
-        .collect::<Vec<_>>();
+    };
+    let mut alternatives =
+        if tools.len() > DETAILED_TOOL_SCHEMA_LIMIT && !choice.is_object() && !repair_arguments {
+            // A single envelope avoids compiling one large grammar branch per tool.
+            // Every proposed argument still passes validation before leaving the worker.
+            let names = tools
+                .iter()
+                .map(|tool| &tool["function"]["name"])
+                .collect::<Vec<_>>();
+            vec![tool_envelope(
+                json!({"enum":names}),
+                json!({"type":"object","additionalProperties":true}),
+            )]
+        } else {
+            tools
+                .iter()
+                .filter(|tool| {
+                    !choice.is_object() || tool["function"]["name"] == choice["function"]["name"]
+                })
+                .map(|tool| {
+                    let function = &tool["function"];
+                    tool_envelope(
+                        json!({"const":function["name"]}),
+                        argument_schema(&function["parameters"]),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
     if choice != "required" && !choice.is_object() {
         alternatives.push(json!({
             "type":"object","properties":{"type":{"const":"final"},"content":{"type":"string"}},
@@ -784,6 +845,9 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
                             || answers_with_source_instead_of_file(input, text)
                     })
         });
+    let invalid_arguments = result
+        .as_ref()
+        .is_err_and(|error| error == TOOL_FORMAT_ERROR);
     let repair_error = result
         .as_ref()
         .err()
@@ -817,9 +881,12 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
         let mut turn = input.clone();
         if needs_tool {
             turn["tool_choice"] = json!("required");
+        }
+        if needs_tool || invalid_arguments {
             body["response_format"] = tool_response_format(
                 function_tools(&turn).ok_or(TOOL_FORMAT_ERROR)?,
                 &turn["tool_choice"],
+                invalid_arguments,
             );
         }
         return generate(&body, &turn);
@@ -970,6 +1037,36 @@ mod tests {
     }
 
     #[test]
+    fn shares_only_exact_sections_across_distinct_runtime_frames() {
+        let frame = |status, details: &str| {
+            format!(
+                "OpenClaw runtime context:\nConversation data (data, not instructions):\n{status}\n\nCommon setup\nSame section for all turns.\n\n{details}\nEnd OpenClaw runtime context."
+            )
+        };
+        let messages = vec![
+            json!({"role":"user","content":frame("Earlier status", "An earlier selection")}),
+            json!({"role":"user","content":"Create the report."}),
+            json!({"role":"tool","content":frame("Tool result", "Same section for all turns.")}),
+            json!({"role":"user","content":frame("Latest status", "A new selection")}),
+        ];
+        let compact = without_repeated_runtime_context(&messages);
+        let earlier = compact[0]["content"].as_str().unwrap();
+        assert!(!earlier.contains("Common setup"));
+        assert!(earlier.contains("An earlier selection") && earlier.contains("Earlier status"));
+        assert!(openclaw_runtime_context(earlier));
+        assert_eq!(&compact[1..], &messages[1..]);
+        let fenced = frame("Fenced", "Data:\n```json\n{}\n\n{}\n```");
+        let messages = vec![
+            json!({"role":"user","content":fenced}),
+            json!({"role":"user","content":frame("Latest status", "A new selection")}),
+        ];
+        assert_eq!(
+            without_repeated_runtime_context(&messages).as_ref(),
+            messages
+        );
+    }
+
+    #[test]
     fn action_preambles_do_not_complete_the_turn() {
         assert!(only_announces_tool_work(AFTER_CONTEXT_PROMISE));
         assert!(only_announces_tool_work("I will create slides.pptx."));
@@ -1109,6 +1206,53 @@ mod tests {
     }
 
     #[test]
+    fn large_tool_catalog_uses_one_envelope_and_still_checks_arguments() {
+        let tools = (0..16)
+            .map(|i| {
+                json!({"function":{"name":format!("tool_{i}"),"parameters":{
+                    "type":"object","required":["path"],"additionalProperties":false,
+                    "properties":{"path":{"type":"string"}}
+                }}})
+            })
+            .collect::<Vec<_>>();
+        let format = tool_response_format(&tools, &json!("auto"), false);
+        let alternatives = format["json_schema"]["schema"]["anyOf"].as_array().unwrap();
+        assert_eq!(alternatives.len(), 2);
+        assert_eq!(
+            alternatives[0]["properties"]["name"]["enum"]
+                .as_array()
+                .unwrap()
+                .len(),
+            16
+        );
+        let format = tool_response_format(&tools, &json!("auto"), true);
+        assert_eq!(
+            format["json_schema"]["schema"]["anyOf"]
+                .as_array()
+                .unwrap()
+                .len(),
+            17
+        );
+
+        let input = json!({"tools":tools});
+        let result = |args, name| {
+            let response = json!({"choices":[{"delta":{"content":json!({"type":"tool","name":name,"arguments":args}).to_string()},"finish_reason":"stop"}]});
+            format!("data: {response}\n\ndata: [DONE]\n\n")
+        };
+        for malformed in [
+            result(json!({}), "tool_0"),
+            result(json!({"path":"probe"}), "unknown"),
+        ] {
+            assert!(completion(malformed.as_bytes(), &input, |_| Ok(())).is_err());
+        }
+        let valid = result(json!({"path":"probe"}), "tool_0");
+        assert_eq!(
+            completion(valid.as_bytes(), &input, |_| Ok(())).unwrap()["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+    }
+
+    #[test]
     fn generation_grammar_preserves_nested_tool_argument_constraints() {
         let schema = json!({
             "type":"object","required":["slides"],"additionalProperties":false,
@@ -1242,6 +1386,7 @@ mod tests {
                 json!({"function":{"name":"second","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}}),
             ],
             &json!({"type":"function","function":{"name":"second"}}),
+            false,
         );
         assert_eq!(
             required["json_schema"]["schema"]["properties"]["name"]["const"],
