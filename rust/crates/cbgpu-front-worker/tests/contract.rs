@@ -49,6 +49,7 @@ if(a[0]==='inspect'){console.log(JSON.stringify([{NetworkSettings:{Ports:{'3000/
 if(a[0]!=='run')process.exit(30);
 for(const required of ['--cap-drop','ALL','--read-only','--pids-limit','--memory','--memory-swap','no-new-privileges'])if(!a.includes(required))process.exit(31);
 if(a.some(v=>v.includes('super-private-value')))process.exit(32);
+if(a[a.indexOf('--pids-limit')+1] !== (a.includes('-d') ? '-1' : '256'))process.exit(35);
 if(a.includes('-d'))process.exit(0);
 const source=a[a.indexOf('--mount')+1].split(',').find(s=>s.startsWith('src=')).slice(4);
 const pkg=JSON.parse(fs.readFileSync(path.join(source,'package.json')));

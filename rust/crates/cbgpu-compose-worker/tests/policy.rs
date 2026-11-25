@@ -69,7 +69,7 @@ fn normalizes_resource_budgets_and_stable_data_volumes() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("volumes/db/data")).unwrap();
     let socket = dir.path().join("proxy.sock");
-    let mut raw = json!({"services":{"web":{"image":"nginx:alpine"},"db":{"image":"postgres:17-alpine","volumes":[{"type":"bind","source":dir.path().join("volumes/db/data"),"target":"/var/lib/postgresql/data"}]}},"volumes":{},"networks":{"default":{}}});
+    let mut raw = json!({"services":{"web":{"image":"nginx:alpine","deploy":{"resources":{"limits":{"pids":512}}}},"db":{"image":"postgres:17-alpine","volumes":[{"type":"bind","source":dir.path().join("volumes/db/data"),"target":"/var/lib/postgresql/data"}]}},"volumes":{},"networks":{"default":{}}});
     let volumes = policy::normalize(
         &mut raw,
         "cbgpu-compose-fixture",
@@ -89,7 +89,9 @@ fn normalizes_resource_budgets_and_stable_data_volumes() {
     assert_eq!(raw["services"]["db"]["volumes"][0]["type"], "volume");
     assert_eq!(raw["services"]["web"]["ports"][0]["host_ip"], "127.0.0.1");
     assert_eq!(raw["services"]["db"]["ports"], json!([]));
-    assert_eq!(raw["services"]["db"]["pids_limit"], 256);
+    assert_eq!(raw["services"]["db"]["pids_limit"], -1);
+    assert_eq!(raw["services"]["web"]["pids_limit"], 512);
+    assert!(raw["services"]["web"]["deploy"].is_null());
     assert_eq!(
         raw["services"]["web"]["security_opt"],
         json!(["no-new-privileges:true"])

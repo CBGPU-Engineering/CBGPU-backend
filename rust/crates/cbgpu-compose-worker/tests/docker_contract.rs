@@ -112,7 +112,7 @@ fn enabled() {
 async fn deploy_redeploy_preserves_volumes_literals_and_resource_limits() {
     enabled();
     let mut f = Fixture::new(
-        json!({"services":{"web":{"image":"nginx:alpine","build":{"context":"./web"},"environment":{"CHECK_VALUE":"${CHECK_VALUE}"}},"db":{"image":"nginx:alpine","entrypoint":["/bin/sh","-c"],"command":["n=$$(cat /data/counter 2>/dev/null || echo 0); n=$$((n+1)); echo $$n > /data/counter; exec tail -f /dev/null"],"environment":{"REVISION":"${REVISION}"},"volumes":["./volumes/db/data:/data"]}}}),
+        json!({"services":{"web":{"image":"nginx:alpine","pids_limit":512,"build":{"context":"./web"},"environment":{"CHECK_VALUE":"${CHECK_VALUE}"}},"db":{"image":"nginx:alpine","entrypoint":["/bin/sh","-c"],"command":["n=$$(cat /data/counter 2>/dev/null || echo 0); n=$$((n+1)); echo $$n > /data/counter; exec tail -f /dev/null"],"environment":{"REVISION":"${REVISION}"},"volumes":["./volumes/db/data:/data"]}}}),
     );
     std::fs::create_dir_all(f.source.join("volumes/db/data")).unwrap();
     std::fs::create_dir_all(f.source.join("web")).unwrap();
@@ -147,7 +147,25 @@ async fn deploy_redeploy_preserves_volumes_literals_and_resource_limits() {
             managed["services"]["web"]["ports"][0]["host_ip"],
             "127.0.0.1"
         );
-        assert_eq!(managed["services"]["db"]["pids_limit"], 256);
+        assert_eq!(managed["services"]["db"]["pids_limit"], -1);
+        assert_eq!(managed["services"]["web"]["pids_limit"], 512);
+        let db: Value =
+            serde_json::from_str(&docker(&["inspect", &format!("{}-db", f.namespace)])).unwrap();
+        assert_eq!(
+            db[0]["HostConfig"]["PidsLimit"]
+                .as_i64()
+                .unwrap_or_default(),
+            0
+        );
+        assert_eq!(
+            docker(&[
+                "exec",
+                &format!("{}-web", f.namespace),
+                "cat",
+                "/sys/fs/cgroup/pids.max"
+            ]),
+            "512"
+        );
         assert_eq!(
             result.platform_generation.as_deref(),
             Some(generation.as_str())
