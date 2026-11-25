@@ -100,6 +100,13 @@ async fn postgres_store_preserves_import_ownership_queue_history_files_and_keys(
     );
     assert!(store.job(OTHER, oldjob, false).await.is_err());
     let key = store.create_key(OWNER, "Native").await.unwrap();
+    for index in 0..5 {
+        store
+            .create_key(OWNER, &format!("Extra {index}"))
+            .await
+            .unwrap();
+    }
+    assert_eq!(store.keys(OWNER).await.unwrap().len(), 7);
     assert_eq!(
         store.key_owner(key["key"].as_str().unwrap()).await.unwrap(),
         OWNER
