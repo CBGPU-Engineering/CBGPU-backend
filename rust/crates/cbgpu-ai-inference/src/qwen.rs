@@ -729,6 +729,44 @@ fn prefers_short_file_step(input: &Value) -> bool {
         .is_some_and(asks_to_create_file)
 }
 
+fn checked_draft_listing(input: &Value) -> bool {
+    let Some(messages) = input["messages"].as_array() else {
+        return false;
+    };
+    let Some(result) = messages.last().filter(|message| message["role"] == "tool") else {
+        return false;
+    };
+    if !result["content"].as_str().is_some_and(|text| {
+        text.lines().next().is_some_and(|line| {
+            line.starts_with("-rw")
+                && line.split_whitespace().last().is_some_and(|path| {
+                    path.ends_with(".py") || path.ends_with(".js") || path.ends_with(".ts")
+                })
+        })
+    }) {
+        return false;
+    }
+    let Some(id) = result["tool_call_id"].as_str() else {
+        return false;
+    };
+    messages
+        .iter()
+        .rev()
+        .take(3)
+        .flat_map(|message| message["tool_calls"].as_array().into_iter().flatten())
+        .find(|call| call["id"] == id && call["function"]["name"] == "exec")
+        .and_then(|call| call["function"]["arguments"].as_str())
+        .and_then(|args| serde_json::from_str::<Value>(args).ok())
+        .is_some_and(|args| {
+            args["command"].as_str().is_some_and(|command| {
+                let mut commands = command
+                    .split([';', '\n', '&'])
+                    .filter_map(|line| line.split_whitespace().next());
+                commands.next() == Some("ls") && commands.all(|name| matches!(name, "ls" | "wc"))
+            })
+        })
+}
+
 fn apply_compact_generation(body: &mut Value, output: u64) {
     body["max_tokens"] = json!(output.min(COMPACT_OUTPUT_TOKENS));
     body["temperature"] = json!(0.2);
@@ -910,14 +948,28 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
             .cloned()
             .collect::<Vec<_>>();
         let mut short_input = input.clone();
+        let read_draft = checked_draft_listing(input)
+            && small_tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "read");
         short_input["tools"] = json!(small_tools);
+        if read_draft {
+            short_input["tool_choice"] = json!({"type":"function","function":{"name":"read"}});
+        }
         let mut short = payload(&short_input)?;
         apply_compact_generation(&mut short, input["max_tokens"].as_u64().unwrap_or(1024));
-        short["response_format"] =
-            tool_response_format(&small_tools, &input["tool_choice"], ToolGrammar::Compact);
+        short["response_format"] = tool_response_format(
+            &small_tools,
+            &short_input["tool_choice"],
+            ToolGrammar::Compact,
+        );
         short["messages"].as_array_mut().ok_or(TOOL_FORMAT_ERROR)?.push(json!({
             "role":"user",
-            "content":"Use the preceding request and tool result. If work remains, call one tool for the smallest unfinished step. For a document, write or append one short section before compiling. Never embed the whole artifact in one call. If the artifact is already verified, report that result briefly."
+            "content":if read_draft {
+                "The last tool only listed an existing draft script. Read that script using the path shown in its result. Inspect the unfinished section before extending it."
+            } else {
+                "Use the preceding request and tool result. If work remains, call one tool for the smallest unfinished step. For a document, write or append one short section before compiling. Never embed the whole artifact in one call. If the artifact is already verified, report that result briefly."
+            }
         }));
         match generate(&short, &short_input) {
             Ok(response) => Ok(response),
@@ -1382,6 +1434,23 @@ mod tests {
         assert_eq!(body["max_tokens"], 768);
         apply_compact_generation(&mut body, 90);
         assert_eq!(body["max_tokens"], 90);
+    }
+
+    #[test]
+    fn only_inspects_a_draft_after_a_matching_metadata_tool_result() {
+        let mut request = json!({"messages":[
+            {"role":"assistant","tool_calls":[
+                {"id":"call_example","function":{"name":"exec","arguments":r#"{"command":"ls -l .openclaw/tmp/draft.py && wc -l .openclaw/tmp/draft.py"}"#}}
+            ]},
+            {"role":"tool","tool_call_id":"call_example","content":"-rw------- 1 demo demo 1024 Nov 25 09:00 .openclaw/tmp/draft.py\n121 .openclaw/tmp/draft.py"}
+        ]});
+        assert!(checked_draft_listing(&request));
+        request["messages"][1]["tool_call_id"] = json!("different");
+        assert!(!checked_draft_listing(&request));
+        request["messages"][1]["tool_call_id"] = json!("call_example");
+        request["messages"][0]["tool_calls"][0]["function"]["arguments"] =
+            json!(r#"{"command":"ls -l draft.py; python3 draft.py"}"#);
+        assert!(!checked_draft_listing(&request));
     }
 
     #[test]
