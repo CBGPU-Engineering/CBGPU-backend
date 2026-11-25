@@ -611,16 +611,6 @@ impl Store {
         Ok(sqlx::query_scalar("SELECT jsonb_build_object('id',id,'name',name,'prefix',prefix,'created',created,'last_used',last_used) FROM ai_store.api_keys WHERE owner=$1 AND revoked=0 ORDER BY created DESC").bind(owner).fetch_all(&self.pool).await?)
     }
     pub async fn create_key(&self, owner: &str, name: &str) -> Result<Value> {
-        let mut tx = self.owner_lock(owner).await?;
-        let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM ai_store.api_keys WHERE owner=$1 AND revoked=0",
-        )
-        .bind(owner)
-        .fetch_one(&mut *tx)
-        .await?;
-        if count >= 5 {
-            return Err(fail("Maximum 5 API keys", 429));
-        }
         let mut bytes = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut bytes);
         let token = format!(
@@ -634,8 +624,7 @@ impl Store {
         } else {
             name.chars().take(80).collect::<String>()
         };
-        sqlx::query("INSERT INTO ai_store.api_keys(id,owner,name,prefix,hash,created)VALUES($1,$2,$3,$4,$5,$6)").bind(&key).bind(owner).bind(name).bind(&prefix).bind(hash_key(&token)).bind(now()).execute(&mut *tx).await?;
-        tx.commit().await?;
+        sqlx::query("INSERT INTO ai_store.api_keys(id,owner,name,prefix,hash,created)VALUES($1,$2,$3,$4,$5,$6)").bind(&key).bind(owner).bind(name).bind(&prefix).bind(hash_key(&token)).bind(now()).execute(&self.pool).await?;
         Ok(json!({"id":key,"key":token,"prefix":prefix}))
     }
     pub async fn key_owner(&self, token: &str) -> Result<String> {
