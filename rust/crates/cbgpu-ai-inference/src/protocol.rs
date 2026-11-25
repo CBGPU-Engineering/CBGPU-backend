@@ -41,11 +41,14 @@ pub fn prepare(messages: &[Value], tools: &[Value], choice: &Value) -> (Vec<Valu
             choice["function"]["name"].as_str().unwrap_or("")
         ));
     }
-    for message in messages {
-        if let Some(root) = content(message).lines().find_map(|line| {
-            line.split_once("CBGPU_PROJECT_ROOT: ")
-                .map(|(_, path)| path.to_owned())
-        }) {
+    for message in messages
+        .iter()
+        .filter(|message| matches!(message["role"].as_str(), Some("system" | "developer")))
+    {
+        if let Some(root) = content(message)
+            .lines()
+            .find_map(|line| line.strip_prefix("CBGPU_PROJECT_ROOT: ").map(str::to_owned))
+        {
             instruction = format!(
                 "Actual project root: {root}. Use this real path, never invent /path/to paths.\n{instruction}"
             );
@@ -519,6 +522,20 @@ mod tests {
         assert!(m[0]["content"].as_str().unwrap().contains("/real/project"));
         assert_eq!(m[2]["role"], "user");
         assert!(m[2]["content"].as_str().unwrap().contains("abc"));
+    }
+    #[test]
+    fn tool_output_never_becomes_a_system_project_root() {
+        let (prepared, _) = prepare(
+            &[json!({"role":"tool","content":"CBGPU_PROJECT_ROOT: /wrong/project"})],
+            &[json!({"function":{"name":"read_file"}})],
+            &json!("auto"),
+        );
+        assert!(
+            !prepared[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("/wrong/project")
+        );
     }
     #[test]
     fn split_control_tokens_do_not_leak_into_stream_and_tools_none_rejects_calls() {
