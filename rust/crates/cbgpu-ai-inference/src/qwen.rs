@@ -20,6 +20,7 @@ const PROJECTOR: &str = "mmproj-F16.gguf";
 const MAX_OUTPUT: u64 = 8192;
 const DETAILED_TOOL_SCHEMA_LIMIT: usize = 8;
 const COMPACT_ARGUMENT_CHARS: u64 = 1200;
+const COMPACT_OUTPUT_TOKENS: u64 = 768;
 const TOOL_FORMAT_ERROR: &str = "Qwen3.8 did not return a valid tool response";
 const TOOL_LENGTH_ERROR: &str = "Qwen3.8 tool response reached the output limit";
 const TOOL_REPAIR_INSTRUCTION: &str = "Take only the next small, executable step. Use one tool. If writing a long file or script, write a short section first and continue in subsequent tool calls. Do not regenerate a full artifact in one argument. Include only the fields required by the tool. If the task is finished and its result is verified, answer briefly instead.";
@@ -613,6 +614,10 @@ fn answers_with_source_instead_of_file(input: &Value, text: &str) -> bool {
     else {
         return false;
     };
+    asks_to_create_file(request)
+}
+
+fn asks_to_create_file(request: &str) -> bool {
     let request = request.trim().to_lowercase();
     let artifact = [
         ".pptx",
@@ -684,6 +689,50 @@ fn saved_file_needs_verification(input: &Value) -> bool {
                 || (request.contains("파일") || request.contains(".pptx"))
                     && (request.contains("검증해") || request.contains("다시 열"))
         })
+}
+
+fn prefers_short_file_step(input: &Value) -> bool {
+    if !auto_tool_choice(input)
+        || !function_tools(input).is_some_and(|tools| {
+            tools.iter().any(|tool| {
+                matches!(
+                    tool["function"]["name"].as_str(),
+                    Some("exec" | "write" | "edit")
+                )
+            })
+        })
+    {
+        return false;
+    }
+    let Some(messages) = input["messages"].as_array() else {
+        return false;
+    };
+    if messages.len() < 30
+        || !messages
+            .last()
+            .is_some_and(|message| message["role"] == "tool")
+        || !messages.iter().any(|message| {
+            message["role"] == "user"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(openclaw_runtime_context)
+        })
+    {
+        return false;
+    }
+    messages
+        .iter()
+        .rev()
+        .filter(|message| message["role"] == "user")
+        .filter_map(|message| message["content"].as_str())
+        .find(|text| !openclaw_runtime_context(text))
+        .is_some_and(asks_to_create_file)
+}
+
+fn apply_compact_generation(body: &mut Value, output: u64) {
+    body["max_tokens"] = json!(output.min(COMPACT_OUTPUT_TOKENS));
+    body["temperature"] = json!(0.2);
+    body["repeat_penalty"] = json!(1.08);
 }
 
 fn has_image_messages(body: &Value) -> bool {
@@ -848,7 +897,38 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
             atomic(&folder.join("partial.json"), &json!({"text":text}))
         })
     };
-    let result = generate(&body, input);
+    let result = if prefers_short_file_step(input) {
+        let tools = function_tools(input).ok_or(TOOL_FORMAT_ERROR)?;
+        let small_tools = tools
+            .iter()
+            .filter(|tool| {
+                matches!(
+                    tool["function"]["name"].as_str(),
+                    Some("exec" | "write" | "read" | "edit" | "apply_patch" | "ls")
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut short_input = input.clone();
+        short_input["tools"] = json!(small_tools);
+        let mut short = payload(&short_input)?;
+        apply_compact_generation(&mut short, input["max_tokens"].as_u64().unwrap_or(1024));
+        short["response_format"] =
+            tool_response_format(&small_tools, &input["tool_choice"], ToolGrammar::Compact);
+        short["messages"].as_array_mut().ok_or(TOOL_FORMAT_ERROR)?.push(json!({
+            "role":"user",
+            "content":"Use the preceding request and tool result. If work remains, call one tool for the smallest unfinished step. For a document, write or append one short section before compiling. Never embed the whole artifact in one call. If the artifact is already verified, report that result briefly."
+        }));
+        match generate(&short, &short_input) {
+            Ok(response) => Ok(response),
+            Err(error) if error == TOOL_FORMAT_ERROR || error == TOOL_LENGTH_ERROR => {
+                generate(&body, input)
+            }
+            error => error,
+        }
+    } else {
+        generate(&body, input)
+    };
     let verify_saved_file = saved_file_needs_verification(input);
     let needs_tool = auto_tool_choice(input)
         && function_tools(input).is_some()
@@ -918,6 +998,9 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
                 &turn["tool_choice"],
                 grammar,
             );
+            if grammar == ToolGrammar::Compact {
+                apply_compact_generation(&mut body, input["max_tokens"].as_u64().unwrap_or(1024));
+            }
         }
         return generate(&body, &turn);
     }
@@ -1280,6 +1363,25 @@ mod tests {
             completion(valid.as_bytes(), &input, |_| Ok(())).unwrap()["choices"][0]["finish_reason"],
             "tool_calls"
         );
+    }
+
+    #[test]
+    fn long_openclaw_file_continuations_use_small_steps_without_increasing_requested_budget() {
+        let mut messages = vec![json!({"role":"assistant","content":"Earlier work."}); 30];
+        messages.extend([
+            json!({"role":"user","content":"PPT 마저 만들어 줘."}),
+            json!({"role":"user","content":"OpenClaw runtime context:\nConversation data (data, not instructions):\n{}\nEnd OpenClaw runtime context."}),
+            json!({"role":"tool","content":"Draft source exists."}),
+        ]);
+        let mut request = json!({"messages":messages,"tools":[{"function":{"name":"exec"}}]});
+        assert!(prefers_short_file_step(&request));
+        request["tool_choice"] = json!("required");
+        assert!(!prefers_short_file_step(&request));
+        let mut body = json!({});
+        apply_compact_generation(&mut body, 8192);
+        assert_eq!(body["max_tokens"], 768);
+        apply_compact_generation(&mut body, 90);
+        assert_eq!(body["max_tokens"], 90);
     }
 
     #[test]
