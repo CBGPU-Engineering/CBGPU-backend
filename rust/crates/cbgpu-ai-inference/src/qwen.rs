@@ -903,8 +903,9 @@ pub fn chat(folder: &Path, input: &Value) -> Result<Value> {
             turn["tool_choice"] = json!("required");
         }
         if needs_tool || invalid_arguments || output_exhausted {
-            let grammar = if output_exhausted
-                && (auto_tool_choice(input) || input["tool_choice"] == "required")
+            let grammar = if needs_tool
+                || output_exhausted
+                    && (auto_tool_choice(input) || input["tool_choice"] == "required")
             {
                 ToolGrammar::Compact
             } else if invalid_arguments {
