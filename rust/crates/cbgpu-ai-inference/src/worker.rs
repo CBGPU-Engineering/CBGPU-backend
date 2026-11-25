@@ -95,6 +95,9 @@ pub fn model_path(state: &Path, id: &str) -> Result<PathBuf> {
 }
 pub fn chat(state: &Path, folder: &Path, input: &Value) -> Result<Value> {
     let id = input["model"].as_str().unwrap_or("cbgpu-chat");
+    if id == crate::qwen::MODEL_ID {
+        return crate::qwen::chat(folder, input);
+    }
     let maximum = if id == "cbgpu-oss" { 4096 } else { 2048 };
     let limit = input["max_tokens"].as_u64().unwrap_or(512) as usize;
     if limit == 0 || limit > maximum {
