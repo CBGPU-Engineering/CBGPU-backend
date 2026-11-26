@@ -6,7 +6,7 @@ import fs from 'node:fs';
  * 20261126150000_avatar_surfaces.sql renames these builders to <name>_core and puts a wrapper with the old name in
  * front of them (the wrapper adds avatarUrl/profileImageUrl). A later migration that does `create or replace` on the
  * old name would silently replace the wrapper and every user in these responses would lose its avatar. Change
- * <name>_core instead.
+ * <name>_core instead, or extend the wrapper while it still calls <name>_core.
  */
 const WRAPPED = ['message_json', 'dm_message_json', 'member_json', 'operator_nomination', 'gpu_admin_booking_item'];
 const WRAPPER_MIGRATION = '20261126150000';
@@ -17,8 +17,11 @@ test('no migration after the avatar wrappers redefines a wrapped builder directl
   for (const file of fs.readdirSync(dir).filter(name => name.endsWith('.sql')).sort()) {
     if (file.slice(0, 14) <= WRAPPER_MIGRATION) continue;
     const sql = fs.readFileSync(new URL(file, dir), 'utf8').replace(/--[^\n]*/g, '');
-    for (const name of WRAPPED)
-      if (new RegExp(`create\\s+(or\\s+replace\\s+)?function\\s+cbgpu_schools\\.${name}\\s*\\(`, 'i').test(sql)) offenders.push(`${file}: ${name}`);
+    for (const name of WRAPPED) {
+      if (!new RegExp(`create\\s+(or\\s+replace\\s+)?function\\s+cbgpu_schools\\.${name}\\s*\\(`, 'i').test(sql)) continue;
+      // Extending the wrapper is fine as long as it still delegates to the renamed original.
+      if (!new RegExp(`cbgpu_schools\\.${name}_core\\s*\\(`, 'i').test(sql)) offenders.push(`${file}: ${name}`);
+    }
   }
   assert.deepEqual(offenders, [], `redefine cbgpu_schools.<name>_core instead of the wrapper:\n${offenders.join('\n')}`);
 });

@@ -6,6 +6,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import { corsHeaders, handleOptions } from '../_shared/cors.ts';
 import { getFcmAccessToken, sendFcmPush } from '../_shared/fcm.ts';
+import { recordNotifications } from '../_shared/notifications.ts';
 import { requireServiceRole } from '../_shared/internalAuth.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -72,6 +73,10 @@ Deno.serve(async (req) => {
   const { data: admins } = await admin.from('profiles').select('id').eq('is_admin', true);
   const adminIds = (admins ?? []).map((a: { id: string }) => a.id);
   if (adminIds.length === 0) return Response.json({ ok: true, notified: 0, reason: 'no admins' }, { headers: corsHeaders });
+  const kind = `admin_${String(type).toLowerCase().replace(/[^a-z0-9_.-]/g, '_')}`.slice(0, 40);
+  // Events carry no id here, so identical text within five minutes counts as one event.
+  const dedupe_key = `${kind}:${Math.floor(Date.now() / 300000)}:${title}:${body}`;
+  await recordNotifications(adminIds.map((id: string) => ({ user_id: id, kind, title, body, route: url, data: { type: String(type) }, dedupe_key })));
 
   const { data: tokenRows } = await admin.from('device_tokens').select('token,user_id,platform,native_kind').in('user_id', adminIds).eq('platform', 'android');
   const deviceTokens = tokenRows ?? [];
