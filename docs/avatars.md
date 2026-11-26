@@ -48,10 +48,16 @@ update public.avatar_settings set base_url = 'https://cbgpu.com/api/avatars';   
 | Any PostgREST query on `profiles` | computed columns `display_avatar_url` and `profile_image_url` (`select=id,full_name,display_avatar_url`) |
 | Canonical user card | view `public.user_cards` → `{id,name,avatarUrl,profileImageUrl}`; runs as the caller, so profile RLS (including school boundaries) is unchanged |
 | School-scoped screens | `public.cbgpu_study_member_cards(uuid[])` wraps the existing `cbgpu_study_member_profiles` and only adds the avatar fields |
+| Community / DM / members / nominations / GPU admin JSON | `avatarUrl` and `profileImageUrl` are added by wrappers around the original builders (see `avatars-surfaces.md`) |
+| Another school's person (name hidden) | `public.cbgpu_avatar_urls(uuid[])` returns only `{id, avatarUrl}`; names, student numbers and schools stay behind their RLS |
 | Server-rendered output (e-mail, OG image, push) | call `public.cbgpu_default_avatar_url(seed)` / read `user_cards` with the service role; do not rebuild the URL |
 
 ## Privacy and availability
 
 Rendering the default avatar from `api.dicebear.com` sends the viewer's IP address and user agent to a third party
 and makes avatars depend on its uptime. The seed itself carries no personal data. The recommended hardening is a
-same-origin proxy/cache: point `avatar_settings.base_url` at it (no client change needed).
+same-origin proxy/cache. The web app ships one at `/api/avatars/<version>/<style>/<format>`: point `avatar_settings.base_url` at `https://cbgpu.com/api/avatars` (no client change needed). See `avatars-rollout.md`.
+
+## Photo URL rule
+
+`profiles.avatar_url` may only be `NULL` or `https://cbgpu.com/backend/storage/v1/object/public/avatars/<own id>/avatar.(jpg|jpeg|png|webp)[?v=<digits>]` (check constraint `profiles_avatar_url_storage_chk`). Change the host in that constraint if the storage URL ever moves.
