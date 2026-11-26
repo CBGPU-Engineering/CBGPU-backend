@@ -3,6 +3,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.112.4';
 import crypto from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { getFcmAccessToken,sendFcmPush } from '../_shared/fcm.ts';
+import { recordNotifications } from '../_shared/notifications.ts';
 
 const API = 'https://api.cbsh.edu-set.com';
 type Device = { token: string; platform: string; user_id:string; native_kind?:string|null };
@@ -146,6 +147,7 @@ Deno.serve(async request => {
       const { error: claimError } = await admin.from('selfstudy_reminder_attempts').insert({ user_id: profile.id, study_date: now.date, attempt });
       if (claimError) { failed++; continue; }
       const body = `${missing.map(period => `${period}교시`).join(', ')} 자습신청이 확인되지 않았어요.`;
+      await recordNotifications([{ user_id: profile.id, kind: 'selfstudy_reminder', title: '자습신청 알림', body, route: '/study?reminder=1', data: { date: now.date }, dedupe_key: `selfstudy:${now.date}:${attempt}` }]);
       const outcomes = await Promise.allSettled((profile.device_tokens ?? []).filter(device => ['android', 'ios'].includes(device.platform))
         .map(device => sendPush(firebase.project_id, accessToken, device, body)));
       if (outcomes.some(result => result.status === 'fulfilled')) notified++;

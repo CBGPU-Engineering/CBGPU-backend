@@ -3,6 +3,7 @@ import {createClient} from 'npm:@supabase/supabase-js@2.112.4';
 import {corsHeaders,handleOptions} from '../_shared/cors.ts';
 import {getFcmAccessToken,sendFcmPush} from '../_shared/fcm.ts';
 import {requireServiceRole} from '../_shared/internalAuth.ts';
+import {recordNotifications} from '../_shared/notifications.ts';
 Deno.serve(async(req)=>{
  const preflight=handleOptions(req);if(preflight)return preflight;
  if(!requireServiceRole(req))return Response.json({message:'forbidden'},{status:401,headers:corsHeaders});
@@ -36,15 +37,17 @@ Deno.serve(async(req)=>{
  const tokens=[...new Map((rows??[]).filter(row=>row.token).map(row=>[row.token,row])).values()];
  // Private diagnostics resolve recipient counts without sending messages.
  if(dry_run===true)return Response.json({ok:true,dry_run:true,eligible_managers:targets.length,registered_devices:tokens.length,notification_type:type},{headers:corsHeaders});
- if(!tokens.length)return Response.json({ok:true,notified:0,reason:'no device tokens'},{headers:corsHeaders});
- const raw=Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON');if(!raw)return Response.json({message:'Push credentials are not configured'},{status:503,headers:corsHeaders});
- try{
-  const serviceAccount=JSON.parse(raw),accessToken=await getFcmAccessToken(serviceAccount);
   const {data:requester}=await admin.from('profiles').select('full_name,student_id').eq('id',job.user_id).maybeSingle();
   const label=requester?.full_name?`${requester.full_name}(${requester.student_id??'-'})`:'누군가';
   const title=type==='print'?'새 3D프린팅 신청':'새 레이저 커팅 신청';
   const body=type==='print'?`${label}님이 "${job.file_name??'파일'}" 인쇄를 신청했습니다.`:`${label}님이 ${job.material==='mdf'?'MDF':'아크릴'} ${job.thickness_mm??''}mm 커팅을 신청했습니다.`;
-  let notified=0,failed=0;for(const token of tokens){try{await sendFcmPush(serviceAccount.project_id,accessToken,token,title,body,'cbgpu_requests',token.native_kind==='android-native-v1'?{route:`https://${type==='print'?'print':'laser'}.cbgpu.com/manage/manufacturing/${type}/${job.id}`,type:'manufacturing_request'}:undefined);notified++}catch{failed++}}
+  const route=`https://${type==='print'?'print':'laser'}.cbgpu.com/manage/manufacturing/${type}/${job.id}`;
+  await recordNotifications(targets.map(id=>({user_id:id,kind:'manufacturing_request',title,body,route,data:{type,job_id:job.id},dedupe_key:`job:${type}:${job.id}`})));
+ if(!tokens.length)return Response.json({ok:true,notified:0,reason:'no device tokens'},{headers:corsHeaders});
+ const raw=Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON');if(!raw)return Response.json({message:'Push credentials are not configured'},{status:503,headers:corsHeaders});
+ try{
+  const serviceAccount=JSON.parse(raw),accessToken=await getFcmAccessToken(serviceAccount);
+  let notified=0,failed=0;for(const token of tokens){try{await sendFcmPush(serviceAccount.project_id,accessToken,token,title,body,'cbgpu_requests',token.native_kind==='android-native-v1'?{route,type:'manufacturing_request'}:undefined);notified++}catch{failed++}}
   return Response.json({ok:failed===0,notified,failed},{status:failed&&notified===0?502:200,headers:corsHeaders});
  }catch{return Response.json({message:'Push service authentication failed'},{status:502,headers:corsHeaders})}
 });
